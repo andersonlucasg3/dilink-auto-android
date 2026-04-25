@@ -2,14 +2,15 @@
 
 ## Overview
 
-DiLink-Auto is a four-module project (v0.13.1):
+DiLink-Auto is a three-module Gradle project (v0.13.1) plus a standalone VD server:
 
 ```
 DiLink-Auto/
-├── protocol/        Android library -- shared by both apps
-├── app-client/      Android application -- runs on the phone
-├── app-server/      Android application -- runs on the car
-└── vd-server/       Standalone Java -- runs via app_process as shell UID on the phone
+├── protocol/        Android library -- shared by both apps (Gradle module)
+├── app-client/      Android application -- runs on the phone (Gradle module)
+├── app-server/      Android application -- runs on the car (Gradle module)
+└── vd-server/       Standalone Java -- compiled directly by app-client's buildVdServer task,
+                     NOT a Gradle module (not in settings.gradle.kts)
 ```
 
 ## Virtual Display Architecture
@@ -125,7 +126,7 @@ Parallel connection model with WiFi (3 connections) and USB tracks.
 
 ### vd-server (Shell-Privileged Process)
 
-Compiled to DEX, packaged as JAR, deployed by phone to `/sdcard/DiLinkAuto/`.
+Standalone Java source, compiled directly by `app-client/build.gradle.kts` `buildVdServer` task (javac → d8 → JAR), NOT a Gradle module. Deployed by phone to `/sdcard/DiLinkAuto/`.
 
 | Component | File | Purpose |
 |-----------|------|---------|

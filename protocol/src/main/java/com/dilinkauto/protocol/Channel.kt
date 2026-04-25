@@ -1,8 +1,8 @@
 package com.dilinkauto.protocol
 
 /**
- * Multiplexed channel IDs for the DiLink-Auto protocol.
- * All communication is multiplexed over a single TCP connection.
+ * Channel IDs for the DiLink-Auto protocol.
+ * Each channel runs on a dedicated TCP connection (v0.10.0+).
  */
 object Channel {
     /** Control messages: handshake, heartbeat, app switching, commands */

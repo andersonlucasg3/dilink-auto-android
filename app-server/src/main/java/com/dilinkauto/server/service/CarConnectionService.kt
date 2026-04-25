@@ -254,7 +254,6 @@ class CarConnectionService : Service() {
                 if (wifiReady && usbReady && !vdServerStarted) {
                     carLogSend("Both WiFi and USB ready — deploying VD server")
                     _state.value = State.CONNECTED
-                    carLogSend("Both WiFi and USB ready — deploying VD server")
                     _statusMessage.value = "Deploying virtual display..."
                     deployVdServer()
                 } else if (wifiReady && !usbReady) {

@@ -140,7 +140,7 @@ List of installed apps with packageName, appName, category (NAV/MUSIC/COMM/OTHER
 
 ### CAR_LOG (0x30) -- Car -> Phone
 
-UTF-8 text line. Car routes all logs (including VideoDecoder and UsbAdbConnection) through this channel. Phone writes to FileLog (`/sdcard/DiLinkAuto/client.log`).
+UTF-8 text line. Car routes all logs (including VideoDecoder and UsbAdbConnection) through this channel. Phone writes to FileLog (`/sdcard/DiLinkAuto/client.log`) with tag `CarLog`.
 
 ### MEDIA_METADATA (0x10) / MEDIA_PLAYBACK_STATE (0x11) -- Phone -> Car
 

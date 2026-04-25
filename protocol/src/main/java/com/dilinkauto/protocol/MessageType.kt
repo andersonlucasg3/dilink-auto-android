@@ -41,7 +41,7 @@ object DataMsg {
     const val MEDIA_PLAYBACK_STATE: Byte = 0x11
     const val MEDIA_ACTION: Byte = 0x12
     const val NAVIGATION_STATE: Byte = 0x20
-    /** Car → Phone: log line (UTF-8 text). Phone writes to /data/local/tmp/car-app.log */
+    /** Car → Phone: log line (UTF-8 text). Phone writes to FileLog */
     const val CAR_LOG: Byte = 0x30.toByte()
 }
 

@@ -115,7 +115,7 @@ tasks.register("buildVdServer") {
         jarFile.delete()
         exec {
             workingDir(vdBuildDir)
-            commandLine("python", "-c",
+            commandLine("python3", "-c",
                 "import zipfile; z=zipfile.ZipFile('vd-server.jar','w'); z.write('vd-server.dex','classes.dex'); z.close()")
         }
 

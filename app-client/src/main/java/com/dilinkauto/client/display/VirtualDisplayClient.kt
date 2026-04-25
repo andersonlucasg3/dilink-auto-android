@@ -1,7 +1,5 @@
 package com.dilinkauto.client.display
 
-import android.content.Context
-import android.util.Log
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.protocol.Connection
 import com.dilinkauto.protocol.VideoConfig
@@ -9,7 +7,6 @@ import com.dilinkauto.protocol.FrameCodec
 import com.dilinkauto.protocol.NioReader
 import com.dilinkauto.protocol.VideoMsg
 import kotlinx.coroutines.*
-import java.io.File
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.ServerSocketChannel
@@ -42,21 +39,6 @@ class VirtualDisplayClient(
     @Volatile
     var isConnected = false
         private set
-
-    /**
-     * Extracts the VD server DEX to the app's files directory.
-     * Returns the path to the DEX file.
-     */
-    fun deployServer(context: Context): String {
-        val dexFile = File(context.filesDir, "vd-server.dex")
-        context.assets.open("vd-server.dex").use { input ->
-            dexFile.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
-        FileLog.i(TAG, "VD server DEX deployed to ${dexFile.absolutePath}")
-        return dexFile.absolutePath
-    }
 
     private var serverChannel: ServerSocketChannel? = null
 
