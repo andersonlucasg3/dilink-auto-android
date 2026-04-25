@@ -70,8 +70,7 @@ class MainActivity : ComponentActivity() {
                             onOpenBatteryExemption = { openBatteryExemption() },
                             onOpenAccessibility = { openAccessibilitySettings() },
                             onOpenNotificationAccess = { openNotificationSettings() },
-                            onOpenDeveloperOptions = { openDeveloperOptions() },
-                            onInstallOnCar = { ip -> installOnCar(ip) }
+                            onOpenDeveloperOptions = { openDeveloperOptions() }
                         )
                     } else {
                         MainScreen(
@@ -547,66 +546,13 @@ fun MainScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // Updates
-        UpdateCard(
+        // Updates (self-update + car install unified)
+        UpdatesCard(
             onCheckForUpdate = onCheckForUpdate,
             onDownloadUpdate = onDownloadUpdate,
-            onInstallUpdate = onInstallUpdate
+            onInstallUpdate = onInstallUpdate,
+            onInstallOnCar = onInstallOnCar
         )
-
-        Spacer(Modifier.height(12.dp))
-
-        // Install on Car (quick — auto-detect IP)
-        var carIp by remember { mutableStateOf("") }
-        var showCarIpField by remember { mutableStateOf(false) }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Install on Car", fontWeight = FontWeight.Medium, color = Color.White, modifier = Modifier.weight(1f))
-                    if (!showCarIpField) {
-                        TextButton(onClick = { showCarIpField = true }) {
-                            Text("Manual IP", fontSize = 12.sp, color = Color.Gray)
-                        }
-                    }
-                }
-                if (showCarIpField) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = carIp,
-                            onValueChange = { carIp = it },
-                            label = { Text("Car IP") },
-                            placeholder = { Text("e.g. 192.168.43.100") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                                focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = Color.Gray
-                            )
-                        )
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        val ip = carIp.trim().ifEmpty { null }
-                        onInstallOnCar(ip)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(if (showCarIpField && carIp.isBlank()) "Auto-detect & Install" else "Install")
-                }
-            }
-        }
 
         Spacer(Modifier.height(32.dp))
     }
@@ -621,8 +567,7 @@ fun SettingsScreen(
     onOpenBatteryExemption: () -> Unit,
     onOpenAccessibility: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
-    onOpenDeveloperOptions: () -> Unit,
-    onInstallOnCar: (String?) -> Unit
+    onOpenDeveloperOptions: () -> Unit
 ) {
     val context = LocalContext.current
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -714,46 +659,6 @@ fun SettingsScreen(
             description = "Required on both phone and car",
             onClick = onOpenDeveloperOptions
         )
-
-        Spacer(Modifier.height(32.dp))
-
-        // Car Install
-        Text("Install on Car", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
-            modifier = Modifier.padding(bottom = 12.dp))
-
-        var carIp by remember { mutableStateOf("") }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Car ADB must be enabled (port 5555)", fontSize = 12.sp, color = Color.Gray)
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = carIp,
-                    onValueChange = { carIp = it },
-                    label = { Text("Car IP address") },
-                    placeholder = { Text("Leave empty to auto-detect") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = Color.Gray
-                    )
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = { onInstallOnCar(carIp.trim().ifEmpty { null }) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.DirectionsCar, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Install on Car")
-                }
-            }
-        }
 
         Spacer(Modifier.height(32.dp))
 
@@ -864,10 +769,11 @@ fun SetupItem(
 
 
 @Composable
-fun UpdateCard(
+fun UpdatesCard(
     onCheckForUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit
+    onInstallUpdate: () -> Unit,
+    onInstallOnCar: (String?) -> Unit
 ) {
     val updateState by UpdateManager.updateState.collectAsState()
     val downloadProgress by UpdateManager.downloadProgress.collectAsState()
@@ -878,110 +784,70 @@ fun UpdateCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("App Update", fontWeight = FontWeight.Medium, color = Color.White)
+            Text("Updates", fontWeight = FontWeight.Medium, color = Color.White)
 
+            // ── Self-update status ──
+            Spacer(Modifier.height(8.dp))
             when (val state = updateState) {
                 is UpdateState.Idle -> {
-                    Spacer(Modifier.height(8.dp))
                     TextButton(onClick = onCheckForUpdate) {
-                        Text("Check for Updates", color = MaterialTheme.colorScheme.primary)
+                        Text("Check for phone update", color = MaterialTheme.colorScheme.primary)
                     }
                 }
                 is UpdateState.Checking -> {
-                    Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(12.dp))
                         Text("Checking for updates…", fontSize = 13.sp, color = Color.Gray)
                     }
                 }
                 is UpdateState.UpToDate -> {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Up to date (v${state.version})",
-                        fontSize = 13.sp,
-                        color = Color(0xFF4CAF50)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    TextButton(onClick = onCheckForUpdate) {
-                        Text("Check Again", fontSize = 12.sp, color = Color.Gray)
-                    }
+                    Text("Phone: up to date (v${state.version})", fontSize = 13.sp, color = Color(0xFF4CAF50))
                 }
                 is UpdateState.Available -> {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "v${state.version} available",
-                        fontSize = 13.sp,
-                        color = Color(0xFFFFA726)
-                    )
+                    Text("Phone: v${state.version} available", fontSize = 13.sp, color = Color(0xFFFFA726))
                     val sizeMb = state.sizeBytes / (1024.0 * 1024.0)
-                    Text(
-                        "${"%.1f".format(sizeMb)} MB",
-                        fontSize = 12.sp,
-                        color = Color.Gray
-                    )
+                    Text("${"%.1f".format(sizeMb)} MB", fontSize = 12.sp, color = Color.Gray)
                     Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = onDownloadUpdate,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
+                    Button(onClick = onDownloadUpdate, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Download")
+                        Text("Download Update")
                     }
                 }
                 is UpdateState.Downloading -> {
+                    LinearProgressIndicator(progress = downloadProgress / 100f, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = Color(0xFF30363D))
                     Spacer(Modifier.height(8.dp))
-                    LinearProgressIndicator(
-                        progress = downloadProgress / 100f,
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = Color(0xFF30363D)
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Downloading… ${downloadProgress}%",
-                        fontSize = 13.sp,
-                        color = Color.Gray
-                    )
+                    Text("Downloading… ${downloadProgress}%", fontSize = 13.sp, color = Color.Gray)
                 }
                 is UpdateState.ReadyToInstall -> {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "v${state.version} ready to install",
-                        fontSize = 13.sp,
-                        color = Color(0xFF4CAF50)
-                    )
+                    Text("Phone: v${state.version} ready", fontSize = 13.sp, color = Color(0xFF4CAF50))
                     Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = onInstallUpdate,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF4CAF50)
-                        )
-                    ) {
+                    Button(onClick = onInstallUpdate, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))) {
                         Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Install")
+                        Text("Install Update")
                     }
                 }
                 is UpdateState.Error -> {
+                    Text(state.message, fontSize = 12.sp, color = Color(0xFFEF5350))
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        state.message,
-                        fontSize = 12.sp,
-                        color = Color(0xFFEF5350)
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onCheckForUpdate) {
-                        Text("Retry", color = MaterialTheme.colorScheme.primary)
-                    }
+                    TextButton(onClick = onCheckForUpdate) { Text("Retry", color = MaterialTheme.colorScheme.primary) }
+                }
+            }
+
+            // ── Car install ──
+            Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFF30363D))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Car App", fontSize = 14.sp, color = Color.White)
+                    Text("Install or update the car app over WiFi ADB", fontSize = 12.sp, color = Color.Gray)
+                }
+                Button(onClick = { onInstallOnCar(null) }, shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
+                    Text("Install", fontSize = 13.sp)
                 }
             }
         }
