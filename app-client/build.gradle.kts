@@ -63,43 +63,34 @@ dependencies {
     implementation("dev.mobile:dadb:1.2.10")
 }
 
-// Build the VD server JAR and copy to assets before the client APK is assembled
+// Build the VD server JAR and copy to assets before the client APK is assembled.
+// vd-server is a proper Gradle module — compilation handled by AGP/Kotlin.
+// This task just runs d8 + jar packaging.
 tasks.register("buildVdServer") {
-    dependsOn(":protocol:bundleLibRuntimeToJarDebug")
+    dependsOn(":vd-server:bundleLibRuntimeToJarDebug")
 
-    val vdSrcDir = file("${rootDir}/vd-server/src/main/java")
-    val vdBuildDir = file("${rootDir}/vd-server/build")
-    val androidJar = "${android.sdkDirectory}/platforms/android-${android.compileSdk}/android.jar"
-    val d8Jar = file("${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/lib/d8.jar")
+    val vdBuildDir = file("${rootDir}/vd-server/build/tmp/vds-d8")
+    val vdClassesJar = file("${rootDir}/vd-server/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
     val protocolJar = file("${rootDir}/protocol/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
+    val d8Jar = file("${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/lib/d8.jar")
     val assetsDir = file("src/main/assets")
 
-    // Always rebuild — fast enough and avoids stale cache issues
     outputs.upToDateWhen { false }
 
     doLast {
-        val classesDir = file("${vdBuildDir}/classes")
-        classesDir.deleteRecursively()
-        classesDir.mkdirs()
+        vdBuildDir.deleteRecursively()
+        vdBuildDir.mkdirs()
 
         // Clean stale artifacts from assets
         file("${assetsDir}/vd-server.dex").delete()
 
-        // Compile Java sources
-        val javaSources = fileTree(vdSrcDir).matching { include("**/*.java") }.files
+        // DEX vd-server classes + protocol classes together
         exec {
-            commandLine(listOf("javac", "-source", "17", "-target", "17",
-                "-cp", "${androidJar}${File.pathSeparator}${protocolJar}",
-                "-d", classesDir.absolutePath) + javaSources.map { it.absolutePath })
-        }
-
-        // DEX all class files + protocol library (vd-server uses NioReader, FrameCodec)
-        val classFiles = fileTree(classesDir).matching { include("**/*.class") }.files
-        exec {
-            val inputs = classFiles.map { it.absolutePath } + protocolJar.absolutePath
             commandLine(listOf("java", "-cp", d8Jar.absolutePath,
                 "com.android.tools.r8.D8",
-                "--output", vdBuildDir.absolutePath) + inputs)
+                "--output", vdBuildDir.absolutePath,
+                vdClassesJar.absolutePath,
+                protocolJar.absolutePath))
         }
 
         // Rename to vd-server.dex (delete old first — renameTo fails silently on Windows if dest exists)
@@ -107,23 +98,23 @@ tasks.register("buildVdServer") {
         val serverDex = file("${vdBuildDir}/vd-server.dex")
         serverDex.delete()
         if (!classesDex.renameTo(serverDex)) {
-            // Fallback: copy and delete
             classesDex.copyTo(serverDex, overwrite = true)
             classesDex.delete()
         }
 
         // Create JAR (ZIP containing vd-server.dex as classes.dex)
         val jarFile = file("${vdBuildDir}/vd-server.jar")
+        val jarClassesDex = file("${vdBuildDir}/classes.dex")
         jarFile.delete()
-        classesDex.delete()
+        jarClassesDex.delete()
         try {
-            serverDex.copyTo(classesDex, overwrite = true)
+            serverDex.copyTo(jarClassesDex, overwrite = true)
             exec {
                 workingDir(vdBuildDir)
                 commandLine("jar", "cf", "vd-server.jar", "classes.dex")
             }
         } finally {
-            classesDex.delete()
+            jarClassesDex.delete()
         }
 
         // Copy to phone app assets only (car deploys it over USB-ADB)

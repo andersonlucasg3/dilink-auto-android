@@ -20,3 +20,4 @@ rootProject.name = "DiLink-Auto"
 include(":protocol")
 include(":app-client")
 include(":app-server")
+include(":vd-server")
