@@ -9,10 +9,14 @@
 
 ## Phone Setup (One-Time)
 
-1. **Enable Developer Options**: Settings -> About Phone -> tap Build Number 7 times
-2. **Enable USB Debugging**: Developer Options -> USB Debugging -> ON
-3. **Grant All Files Access**: Settings -> Apps -> DiLink Auto -> Permissions -> All Files Access -> ON (MANAGE_EXTERNAL_STORAGE, needed for VD JAR deployment to sdcard)
-4. **Install DiLink Auto Client**: `adb install app-client-debug.apk`
+1. **Install DiLink Auto Client**: `adb install app-client-debug.apk`
+2. **Open the app** — the onboarding screen will guide you through each permission:
+   - **All Files Access** — deploys the virtual display server to storage
+   - **Battery Optimization** — keeps streaming alive when screen is off
+   - **Accessibility Service** — enables car touchscreen control
+   - **Notification Access** — forwards phone notifications to car display
+3. Each step opens the relevant system settings. Grant the permission, then press Back to continue.
+4. You can skip any step and configure it later from the main screen.
 
 That's it. No Wireless Debugging, no pairing codes, no special WiFi configuration.
 

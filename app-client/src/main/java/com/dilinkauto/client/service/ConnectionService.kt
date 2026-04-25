@@ -56,6 +56,7 @@ class ConnectionService : Service() {
         acquireWakeLock()
         registerNetworkCallback()
         deployAssets()
+        UpdateManager.checkForUpdate(force = false)
     }
 
     private fun deployAssets() {

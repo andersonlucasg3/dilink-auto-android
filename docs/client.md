@@ -17,6 +17,13 @@ The phone client manages VD server deployment, car auto-update, and 3-connection
 
 ## Components
 
+### MainActivity
+
+Entry point with two screens:
+
+- **OnboardingScreen** (first launch): guides the user through each required permission one at a time — All Files Access, Battery Optimization, Accessibility Service, Notification Access. Each step explains what breaks without the permission. User can grant or skip. On completion, the main screen appears.
+- **ClientScreen** (subsequent launches): status card, start/stop button, Install on Car, self-update card, and remaining permission status for anything skipped during onboarding.
+
 ### ConnectionService
 
 Foreground service that manages the phone-car connection lifecycle with 3 dedicated connections.
