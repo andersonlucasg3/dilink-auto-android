@@ -27,14 +27,15 @@ DiLink-Auto mirrors your phone apps onto your car's display with full touch inte
 - BYD DiLink 3.0 or newer
 - One free USB-A port
 
-**No hot spot setup, no pairing codes, no Google account needed.**
+**Phone hotspot must be enabled** — the car connects to your phone's WiFi hotspot. No pairing codes, no Google account needed.
 
 ## How It Works
 
-1. **Plug in** — Connect your phone to the car's USB port
-2. **Auto-install** — The phone installs the car app via USB ADB (first time only, one tap)
-3. **Auto-connect** — WiFi TCP streams video (port 9638), touch input (port 9639), and control commands (port 9637) between phone and car
-4. **Use your apps** — Launch any app from the car's launcher screen. It runs on the phone, appears on the car, and responds to touch
+1. **Enable hotspot** — Turn on your phone's WiFi hotspot. The car connects to it.
+2. **Plug in** — Connect your phone to the car's USB port
+3. **Auto-install** — The phone installs the car app via WiFi ADB (first time only, one tap)
+4. **Auto-connect** — 3 dedicated WiFi TCP streams: video (port 9638), touch input (port 9639), and control (port 9637)
+5. **Use your apps** — Launch any app from the car's launcher screen. It runs on the phone, appears on the car, and responds to touch
 
 The phone runs your apps on a virtual display, encodes the screen as H.264 video, and streams it to the car. Touches on the car screen are sent back to the phone and injected as real touch events. The phone's physical screen stays off (battery saving) and can be used independently.
 
@@ -48,7 +49,7 @@ The phone runs your apps on a virtual display, encodes the screen as H.264 video
 2. **Install** the APK at `app-client/build/outputs/apk/debug/app-client-debug.apk` on your phone only
 3. **Enable USB Debugging** on your phone (Settings → Developer Options)
 4. **Open DiLink-Auto** on the phone and grant All Files Access when prompted
-5. **Plug into car USB** — the car app auto-installs on first run
+5. **Enable hotspot, then plug into car USB** — the car app auto-installs on first run over WiFi ADB
 
 The car APK and VD server JAR are bundled inside the phone APK — you never install anything on the car yourself.
 

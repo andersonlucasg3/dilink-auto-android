@@ -62,17 +62,28 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 } else {
-                    ClientScreen(
-                        onStartService = { startConnectionService() },
-                        onStopService = { stopConnectionService() },
-                        onInstallOnCar = { ip -> installOnCar(ip) },
-                        onOpenAccessibility = { openAccessibilitySettings() },
-                        onOpenNotificationAccess = { openNotificationSettings() },
-                        onOpenDeveloperOptions = { openDeveloperOptions() },
-                        onCheckForUpdate = { UpdateManager.checkForUpdate(force = true) },
-                        onDownloadUpdate = { UpdateManager.downloadUpdate() },
-                        onInstallUpdate = { UpdateManager.installUpdate(this) }
-                    )
+                    var showSettings by remember { mutableStateOf(false) }
+                    if (showSettings) {
+                        SettingsScreen(
+                            onBack = { showSettings = false },
+                            onOpenAllFilesAccess = { openAllFilesAccess() },
+                            onOpenBatteryExemption = { openBatteryExemption() },
+                            onOpenAccessibility = { openAccessibilitySettings() },
+                            onOpenNotificationAccess = { openNotificationSettings() },
+                            onOpenDeveloperOptions = { openDeveloperOptions() },
+                            onInstallOnCar = { ip -> installOnCar(ip) }
+                        )
+                    } else {
+                        MainScreen(
+                            onStartService = { startConnectionService() },
+                            onStopService = { stopConnectionService() },
+                            onInstallOnCar = { ip -> installOnCar(ip) },
+                            onOpenSettings = { showSettings = true },
+                            onCheckForUpdate = { UpdateManager.checkForUpdate(force = true) },
+                            onDownloadUpdate = { UpdateManager.downloadUpdate() },
+                            onInstallUpdate = { UpdateManager.installUpdate(this) }
+                        )
+                    }
                 }
             }
         }
@@ -438,23 +449,22 @@ fun DiLinkAutoTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = darkColors, content = content)
 }
 
-// ─── UI ───
+// ─── Main Screen ───
 
 @Composable
-fun ClientScreen(
+fun MainScreen(
     onStartService: () -> Unit,
     onStopService: () -> Unit,
     onInstallOnCar: (String?) -> Unit,
-    onOpenAccessibility: () -> Unit,
-    onOpenNotificationAccess: () -> Unit,
-    onOpenDeveloperOptions: () -> Unit = {},
-    onCheckForUpdate: () -> Unit = {},
-    onDownloadUpdate: () -> Unit = {},
-    onInstallUpdate: () -> Unit = {}
+    onOpenSettings: () -> Unit,
+    onCheckForUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit
 ) {
     val serviceState by ConnectionService.serviceState.collectAsState()
     val installStatus by ConnectionService.installStatusFlow.collectAsState()
     val isRunning = serviceState != ConnectionService.State.IDLE
+    var howToExpanded by rememberSaveable { mutableStateOf(true) }
 
     Column(
         modifier = Modifier
@@ -464,52 +474,253 @@ fun ClientScreen(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(32.dp))
-
-        Text(
-            "DiLink Auto",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Text(
-            "Phone Client",
-            fontSize = 16.sp,
-            color = Color.Gray
-        )
-
-        Spacer(Modifier.height(40.dp))
-
-        StatusCard(serviceState)
+        // Top bar: title + settings gear
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("DiLink Auto", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Phone Client", fontSize = 14.sp, color = Color.Gray)
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.Gray)
+            }
+        }
 
         Spacer(Modifier.height(24.dp))
 
+        // How to Connect (expandable)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332)),
+            onClick = { howToExpanded = !howToExpanded }
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("How to Connect", fontWeight = FontWeight.Medium, color = Color.White, modifier = Modifier.weight(1f))
+                    Icon(
+                        if (howToExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null, tint = Color.Gray
+                    )
+                }
+                if (howToExpanded) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("1.  Enable your phone's WiFi hotspot", fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    Text("2.  Connect the car to your phone's hotspot WiFi", fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    Text("3.  Plug the phone into the car's USB port", fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    Text("4.  Tap Start Service below", fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    Spacer(Modifier.height(8.dp))
+                    Text("The car will auto-install on first use and connect automatically over WiFi.", fontSize = 12.sp, color = Color.Gray)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Service status
+        StatusCard(serviceState)
+
+        Spacer(Modifier.height(12.dp))
+
+        // Start/Stop
         Button(
             onClick = { if (isRunning) onStopService() else onStartService() },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (isRunning) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
             )
         ) {
-            Icon(
-                if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp)
-            )
+            Icon(if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(8.dp))
-            Text(
-                if (isRunning) "Stop Service" else "Start Service",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Text(if (isRunning) "Stop Service" else "Start Service", fontSize = 18.sp, fontWeight = FontWeight.Medium)
         }
 
-        Spacer(Modifier.height(16.dp))
+        if (installStatus.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(installStatus, fontSize = 13.sp, color = Color.Gray)
+        }
 
-        // Install on Car
+        Spacer(Modifier.height(24.dp))
+
+        // Updates
+        UpdateCard(
+            onCheckForUpdate = onCheckForUpdate,
+            onDownloadUpdate = onDownloadUpdate,
+            onInstallUpdate = onInstallUpdate
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // Install on Car (quick — auto-detect IP)
+        var carIp by remember { mutableStateOf("") }
+        var showCarIpField by remember { mutableStateOf(false) }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Install on Car", fontWeight = FontWeight.Medium, color = Color.White, modifier = Modifier.weight(1f))
+                    if (!showCarIpField) {
+                        TextButton(onClick = { showCarIpField = true }) {
+                            Text("Manual IP", fontSize = 12.sp, color = Color.Gray)
+                        }
+                    }
+                }
+                if (showCarIpField) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = carIp,
+                            onValueChange = { carIp = it },
+                            label = { Text("Car IP") },
+                            placeholder = { Text("e.g. 192.168.43.100") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = Color.Gray
+                            )
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        val ip = carIp.trim().ifEmpty { null }
+                        onInstallOnCar(ip)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(if (showCarIpField && carIp.isBlank()) "Auto-detect & Install" else "Install")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
+// ─── Settings Screen ───
+
+@Composable
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenAllFilesAccess: () -> Unit,
+    onOpenBatteryExemption: () -> Unit,
+    onOpenAccessibility: () -> Unit,
+    onOpenNotificationAccess: () -> Unit,
+    onOpenDeveloperOptions: () -> Unit,
+    onInstallOnCar: (String?) -> Unit
+) {
+    val context = LocalContext.current
+    val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    val pkg = context.packageName
+    var permissionsKey by remember { mutableIntStateOf(0) }
+
+    // Periodic re-check
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(2000)
+            permissionsKey++
+        }
+    }
+
+    // Permission checks
+    val hasAllFiles = remember(permissionsKey) {
+        if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
+    }
+    val hasBattery = remember(permissionsKey) {
+        pm.isIgnoringBatteryOptimizations(pkg)
+    }
+    val hasAccessibility = remember(permissionsKey) {
+        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            .any { it.resolveInfo.serviceInfo.packageName == pkg }
+    }
+    val hasNotifications = remember(permissionsKey) {
+        val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: ""
+        flat.contains(pkg)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // Top bar
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // Permissions
+        Text("Permissions", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+            modifier = Modifier.padding(bottom = 12.dp))
+
+        SetupItem(
+            icon = if (hasAllFiles) Icons.Default.CheckCircle else Icons.Default.Folder,
+            title = if (hasAllFiles) "All Files Access ✓" else "All Files Access",
+            description = if (hasAllFiles) "Granted" else "Needed to deploy the virtual display server",
+            onClick = onOpenAllFilesAccess
+        )
+        Spacer(Modifier.height(8.dp))
+
+        SetupItem(
+            icon = if (hasBattery) Icons.Default.CheckCircle else Icons.Default.BatterySaver,
+            title = if (hasBattery) "Battery Optimization ✓" else "Battery Optimization",
+            description = if (hasBattery) "Granted" else "Keeps streaming alive when screen is off",
+            onClick = onOpenBatteryExemption
+        )
+        Spacer(Modifier.height(8.dp))
+
+        SetupItem(
+            icon = if (hasAccessibility) Icons.Default.CheckCircle else Icons.Default.TouchApp,
+            title = if (hasAccessibility) "Accessibility Service ✓" else "Accessibility Service",
+            description = if (hasAccessibility) "Granted" else "Enables car touchscreen control",
+            onClick = onOpenAccessibility
+        )
+        Spacer(Modifier.height(8.dp))
+
+        SetupItem(
+            icon = if (hasNotifications) Icons.Default.CheckCircle else Icons.Default.Notifications,
+            title = if (hasNotifications) "Notification Access ✓" else "Notification Access",
+            description = if (hasNotifications) "Granted" else "Forwards notifications to car display",
+            onClick = onOpenNotificationAccess
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        SetupItem(
+            icon = Icons.Default.Usb,
+            title = "USB Debugging",
+            description = "Required on both phone and car",
+            onClick = onOpenDeveloperOptions
+        )
+
+        Spacer(Modifier.height(32.dp))
+
+        // Car Install
+        Text("Install on Car", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+            modifier = Modifier.padding(bottom = 12.dp))
+
         var carIp by remember { mutableStateOf("") }
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -517,110 +728,59 @@ fun ClientScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Install on Car", fontWeight = FontWeight.Medium, color = Color.White)
-                Spacer(Modifier.height(4.dp))
-                Text("Car must have ADB enabled (port 5555)", fontSize = 12.sp, color = Color.Gray)
+                Text("Car ADB must be enabled (port 5555)", fontSize = 12.sp, color = Color.Gray)
                 Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = carIp,
-                        onValueChange = { carIp = it },
-                        label = { Text("Car IP address") },
-                        placeholder = { Text("e.g. 192.168.43.100") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = Color.Gray
-                        )
+                OutlinedTextField(
+                    value = carIp,
+                    onValueChange = { carIp = it },
+                    label = { Text("Car IP address") },
+                    placeholder = { Text("Leave empty to auto-detect") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = Color.Gray
                     )
-                    Spacer(Modifier.width(12.dp))
-                    Button(
-                        onClick = { onInstallOnCar(carIp.trim().ifEmpty { null }) },
-                        modifier = Modifier.height(56.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.DirectionsCar, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Install")
-                    }
-                }
-                if (installStatus.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(installStatus, fontSize = 13.sp, color = Color.Gray)
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = { onInstallOnCar(carIp.trim().ifEmpty { null }) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.DirectionsCar, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Install on Car")
                 }
             }
         }
-
-        Spacer(Modifier.height(16.dp))
-
-        // App Update
-        UpdateCard(
-            onCheckForUpdate = onCheckForUpdate,
-            onDownloadUpdate = onDownloadUpdate,
-            onInstallUpdate = onInstallUpdate
-        )
 
         Spacer(Modifier.height(32.dp))
 
-        Text(
-            "Required Permissions",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.Gray,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp)
-        )
+        // About
+        Text("About", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+            modifier = Modifier.padding(bottom = 12.dp))
 
-        // Re-check permissions periodically (picks up changes when returning from settings)
-        val context = androidx.compose.ui.platform.LocalContext.current
-        var permissionsKey by remember { mutableIntStateOf(0) }
-        LaunchedEffect(Unit) {
-            while (true) {
-                kotlinx.coroutines.delay(2000)
-                permissionsKey++
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                val versionName = try {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                } catch (_: Exception) { "unknown" }
+                Text("DiLink-Auto v$versionName", fontWeight = FontWeight.Medium, color = Color.White)
+                Spacer(Modifier.height(4.dp))
+                Text("Open-source alternative to Android Auto", fontSize = 12.sp, color = Color.Gray)
+                Spacer(Modifier.height(12.dp))
+                Text("Open Source Libraries:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB0BEC5))
+                Text("dadb — Apache 2.0", fontSize = 12.sp, color = Color.Gray)
+                Text("Jetpack Compose — Apache 2.0", fontSize = 12.sp, color = Color.Gray)
+                Text("kotlinx-coroutines — Apache 2.0", fontSize = 12.sp, color = Color.Gray)
+                Text("scrcpy (FakeContext/SurfaceScaler concepts) — Apache 2.0", fontSize = 12.sp, color = Color.Gray)
             }
         }
-
-        // Accessibility Service check
-        val accessibilityEnabled = remember(permissionsKey) {
-            val am = context.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-            am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-                .any { it.resolveInfo.serviceInfo.packageName == context.packageName }
-        }
-        SetupItem(
-            icon = if (accessibilityEnabled) Icons.Default.CheckCircle else Icons.Default.TouchApp,
-            title = if (accessibilityEnabled) "Accessibility Service ✓" else "Accessibility Service",
-            description = if (accessibilityEnabled) "Enabled" else "Allows car touchscreen to control your phone",
-            onClick = onOpenAccessibility
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        // Notification Access check
-        val notificationEnabled = remember(permissionsKey) {
-            val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: ""
-            flat.contains(context.packageName)
-        }
-        SetupItem(
-            icon = if (notificationEnabled) Icons.Default.CheckCircle else Icons.Default.Notifications,
-            title = if (notificationEnabled) "Notification Access ✓" else "Notification Access",
-            description = if (notificationEnabled) "Enabled" else "Forwards notifications to car display",
-            onClick = onOpenNotificationAccess
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        // USB Debugging reminder
-        SetupItem(
-            icon = Icons.Default.Usb,
-            title = "USB Debugging",
-            description = "Enable in Developer Options. Plug phone into car USB to connect.",
-            onClick = onOpenDeveloperOptions
-        )
 
         Spacer(Modifier.height(32.dp))
     }
