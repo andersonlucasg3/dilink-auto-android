@@ -260,9 +260,9 @@ fun OnboardingScreen(onComplete: () -> Unit) {
 
     val step = steps[currentStep]
 
-    // Auto-advance if current permission is already granted (after returning from settings)
+    // Auto-advance if current permission is already granted (skip welcome step)
     LaunchedEffect(checkKey, currentStep) {
-        if (currentStep < steps.lastIndex && step.isGranted()) {
+        if (currentStep > 0 && currentStep < steps.lastIndex && step.isGranted()) {
             kotlinx.coroutines.delay(300)
             currentStep++
         }
