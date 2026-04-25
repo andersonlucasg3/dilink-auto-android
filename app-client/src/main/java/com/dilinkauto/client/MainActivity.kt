@@ -1,8 +1,11 @@
 package com.dilinkauto.client
 
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -679,6 +682,55 @@ fun SettingsScreen(
             description = "Required on both phone and car",
             onClick = onOpenDeveloperOptions
         )
+
+        Spacer(Modifier.height(32.dp))
+
+        // Support
+        Text("Support", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+            modifier = Modifier.padding(bottom = 12.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Help keep DiLink-Auto going", fontWeight = FontWeight.Medium, color = Color.White)
+                Spacer(Modifier.height(8.dp))
+
+                // GitHub Sponsors
+                Button(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/sponsors/andersonlucasg3"))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6E40C9))
+                ) {
+                    Text("Sponsor on GitHub", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Pix
+                val pixKey = "SEU_PIX_AQUI" // TODO: replace with your Pix key
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Pix (Brazil)", fontWeight = FontWeight.Medium, color = Color.White)
+                        Text(pixKey, fontSize = 12.sp, color = Color.Gray)
+                    }
+                    TextButton(onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Pix", pixKey))
+                    }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Copy", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
 
         Spacer(Modifier.height(32.dp))
 

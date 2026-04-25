@@ -93,6 +93,15 @@ DiLink-Auto/
 └── gradle/         Build system
 ```
 
+## Support
+
+This project is developed independently and relies on community support.
+
+- [**GitHub Sponsors**](https://github.com/sponsors/andersonlucasg3) — monthly or one-time, international
+- **Pix** (Brazil): `SEU_PIX_AQUI` <!-- TODO: replace with your Pix key -->
+
+Every contribution helps cover development time, testing devices, and keeping the project alive.
+
 ## Contributing
 
 PRs welcome. See [Architecture](./architecture.md) and [Protocol](./protocol.md) for technical context. Build with `./gradlew :app-client:assembleDebug` (JDK 17+, Android SDK 34).
