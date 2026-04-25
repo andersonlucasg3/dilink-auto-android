@@ -24,3 +24,8 @@ app-server/src/main/assets/vd-server.jar
 
 # IDE
 .vscode/
+
+# Release signing (keystore file + passwords in properties)
+*.keystore
+signing.properties
+keystore.properties

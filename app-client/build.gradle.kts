@@ -15,6 +15,15 @@ android {
         versionName = "0.13.1"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("RELEASE_KEYSTORE_FILE") ?: "dilink-auto-release.keystore")
+            storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: "dilinkauto123"
+            keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "dilinkauto"
+            keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: "dilinkauto123"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -22,6 +31,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
