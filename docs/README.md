@@ -99,7 +99,7 @@ This project is developed independently and relies on community support.
 
 <iframe src="https://github.com/sponsors/andersonlucasg3/card" title="Sponsor andersonlucasg3" height="225" width="600" style="border: 0;"></iframe>
 
-- **Pix** (Brazil): `SEU_PIX_AQUI` <!-- TODO: replace with your Pix key -->
+- **Pix** (Brazil): [Pay with Pix](https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d)
 
 Every contribution helps cover development time, testing devices, and keeping the project alive.
 

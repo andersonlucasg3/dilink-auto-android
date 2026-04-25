@@ -714,20 +714,16 @@ fun SettingsScreen(
                 Spacer(Modifier.height(12.dp))
 
                 // Pix
-                val pixKey = "SEU_PIX_AQUI" // TODO: replace with your Pix key
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Pix (Brazil)", fontWeight = FontWeight.Medium, color = Color.White)
-                        Text(pixKey, fontSize = 12.sp, color = Color.Gray)
-                    }
-                    TextButton(onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("Pix", pixKey))
-                    }) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Copy", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                    }
+                Button(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d"))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C2A0))
+                ) {
+                    Text("Pay with Pix (Brazil)", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
