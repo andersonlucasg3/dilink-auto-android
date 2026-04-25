@@ -110,13 +110,18 @@ tasks.register("buildVdServer") {
             classesDex.delete()
         }
 
-        // Create JAR (ZIP containing classes.dex)
+        // Create JAR (ZIP containing vd-server.dex as classes.dex)
         val jarFile = file("${vdBuildDir}/vd-server.jar")
         jarFile.delete()
-        exec {
-            workingDir(vdBuildDir)
-            commandLine("python3", "-c",
-                "import zipfile; z=zipfile.ZipFile('vd-server.jar','w'); z.write('vd-server.dex','classes.dex'); z.close()")
+        classesDex.delete()
+        try {
+            serverDex.copyTo(classesDex, overwrite = true)
+            exec {
+                workingDir(vdBuildDir)
+                commandLine("jar", "cf", "vd-server.jar", "classes.dex")
+            }
+        } finally {
+            classesDex.delete()
         }
 
         // Copy to assets
