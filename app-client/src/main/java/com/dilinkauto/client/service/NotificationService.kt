@@ -1,0 +1,68 @@
+package com.dilinkauto.client.service
+
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import com.dilinkauto.protocol.DataMsg
+import com.dilinkauto.protocol.NotificationData
+
+/**
+ * Listens for phone notifications and forwards them to the car display.
+ * Requires the user to grant notification access in system settings.
+ *
+ * On HyperOS: This service needs Autostart enabled to survive background killing.
+ */
+class NotificationService : NotificationListenerService() {
+
+    override fun onNotificationPosted(sbn: StatusBarNotification) {
+        val connection = ConnectionService.activeConnection ?: return
+
+        val extras = sbn.notification.extras
+        val title = extras.getCharSequence("android.title")?.toString() ?: ""
+        val text = extras.getCharSequence("android.text")?.toString() ?: ""
+        val appName = packageManager.getApplicationLabel(
+            packageManager.getApplicationInfo(sbn.packageName, 0)
+        ).toString()
+
+        // Skip our own notifications
+        if (sbn.packageName == packageName) return
+
+        val progress = extras.getInt("android.progress", 0)
+        val progressMax = extras.getInt("android.progressMax", 0)
+        val progressIndeterminate = extras.getBoolean("android.progressIndeterminate", false)
+
+        val notification = NotificationData(
+            id = sbn.id,
+            packageName = sbn.packageName,
+            appName = appName,
+            title = title,
+            text = text,
+            timestamp = sbn.postTime,
+            progress = progress,
+            progressMax = progressMax,
+            progressIndeterminate = progressIndeterminate
+        )
+
+        try {
+            connection.sendData(DataMsg.NOTIFICATION_POST, notification.encode())
+        } catch (_: Exception) {
+            // Connection may have dropped
+        }
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        val connection = ConnectionService.activeConnection ?: return
+
+        val notification = NotificationData(
+            id = sbn.id,
+            packageName = sbn.packageName,
+            appName = "",
+            title = "",
+            text = "",
+            timestamp = System.currentTimeMillis()
+        )
+
+        try {
+            connection.sendData(DataMsg.NOTIFICATION_REMOVE, notification.encode())
+        } catch (_: Exception) {}
+    }
+}

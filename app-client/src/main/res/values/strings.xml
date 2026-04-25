@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+    <string name="notification_channel_name">DiLink Auto Service</string>
+    <string name="notification_channel_description">Keeps DiLink Auto running for car connection</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_connected">Connected to car</string>
+    <string name="notification_waiting">Waiting for car connection…</string>
+    <string name="notification_streaming">Streaming to car display</string>
+    <string name="accessibility_description">DiLink Auto uses accessibility to forward touch events from the car display to your phone.</string>
+</resources>

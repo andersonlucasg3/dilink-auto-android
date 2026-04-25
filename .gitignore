@@ -1,0 +1,15 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/app-client/build
+/app-server/build
+/protocol/build
+session-log*.txt
+/vd-server/build
