@@ -70,7 +70,6 @@ tasks.register("buildVdServer") {
     val androidJar = "${android.sdkDirectory}/platforms/android-${android.compileSdk}/android.jar"
     val d8Jar = file("${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/lib/d8.jar")
     val assetsDir = file("src/main/assets")
-    val serverAssetsDir = file("${rootDir}/app-server/src/main/assets")
 
     // Always rebuild — fast enough and avoids stale cache issues
     outputs.upToDateWhen { false }
@@ -82,7 +81,6 @@ tasks.register("buildVdServer") {
 
         // Clean stale artifacts from assets
         file("${assetsDir}/vd-server.dex").delete()
-        file("${serverAssetsDir}/vd-server.dex").delete()
 
         // Compile Java sources
         val javaSources = fileTree(vdSrcDir).matching { include("**/*.java") }.files
@@ -124,11 +122,9 @@ tasks.register("buildVdServer") {
             classesDex.delete()
         }
 
-        // Copy to assets
+        // Copy to phone app assets only (car deploys it over USB-ADB)
         assetsDir.mkdirs()
-        serverAssetsDir.mkdirs()
         jarFile.copyTo(file("${assetsDir}/vd-server.jar"), overwrite = true)
-        jarFile.copyTo(file("${serverAssetsDir}/vd-server.jar"), overwrite = true)
 
         println("VD server JAR built: ${jarFile.length()} bytes -> assets")
     }

@@ -1,114 +1,100 @@
 # DiLink-Auto
 
-**v0.13.1** — 3-connection architecture, 60fps, NIO everywhere, full touch input, notification progress. Plug phone into car USB → car app auto-installs and updates → streaming begins.
+**v0.13.1** — Use your phone apps on your car's built-in screen. Open-source, no Google Services required.
 
-An open-source alternative to Android Auto, purpose-built for **Xiaomi HyperOS** phones and **BYD DiLink** infotainment systems.
+An open-source alternative to Android Auto for **any Android 10+ phone** paired with **BYD DiLink 3.0+** infotainment systems. Originally motivated by the Xiaomi HyperOS / Chinese ROM gap, but works universally.
 
-DiLink-Auto bridges the gap for devices unsupported by Google's Android Auto — specifically Chinese-ROM phones (HyperOS, no Google Services) paired with BYD vehicles sold in markets where only Android Auto (not CarWith/CarPlay) is available on the head unit.
+## What It Does
 
-## The Problem
+DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at 60fps, 12Mbps, with the phone's screen turned off to save battery.
+
+**Original motivation:** bridging the gap when your phone can't run Android Auto (Chinese ROM, no Google Play Services) but your car only supports Android Auto (no CarWith, CarPlay, or Carlife). But DiLink-Auto works with any Android phone — Google Services or not.
 
 | Device | Issue |
 |--------|-------|
-| Xiaomi 17 Pro Max (HyperOS 3, Chinese ROM) | No Android Auto support — no Google Play Services |
-| BYD Destroyer 05 / King (Brazil market) | Ships with Android Auto only — no CarWith support |
+| Xiaomi 17 Pro Max (HyperOS 3, Chinese ROM) | No Android Auto — no Google Play Services |
+| BYD Destroyer 05 / King (Brazil market) | Only Android Auto on head unit |
+| Any Android 10+ phone | Works regardless of ROM or Play Services |
 
-Neither Google's nor Xiaomi's ecosystem bridges this gap. DiLink-Auto does.
+## Requirements
+
+**Phone:**
+- Any Android 10+ phone
+- USB Debugging enabled (Developer Options)
+- All Files Access permission (prompted on first launch)
+
+**Car:**
+- BYD DiLink 3.0 or newer
+- One free USB-A port
+
+**No hot spot setup, no pairing codes, no Google account needed.**
 
 ## How It Works
 
-```
-┌──────────────────┐     USB (ADB)      ┌──────────────────┐
-│   PHONE CLIENT   │ ◄────────────────► │   CAR SERVER     │
-│   (Xiaomi)       │                    │   (BYD DiLink)   │
-│                  │   WiFi (3x TCP)    │                  │
-│  VD JAR deploy   │  9637: control ──► │  USB ADB launch  │
-│  Video relay     │  9638: video ────► │  Video decoder   │
-│  Touch routing   │  9639: input ◄──── │  Launcher UI     │
-│  Car app update  │                    │  76dp nav bar    │
-└──────────────────┘                    └──────────────────┘
-```
+1. **Plug in** — Connect your phone to the car's USB port
+2. **Auto-install** — The phone installs the car app via USB ADB (first time only, one tap)
+3. **Auto-connect** — WiFi TCP streams video (port 9638), touch input (port 9639), and control commands (port 9637) between phone and car
+4. **Use your apps** — Launch any app from the car's launcher screen. It runs on the phone, appears on the car, and responds to touch
 
-**USB ADB** handles: launching the phone app, starting the VD server process.
-**WiFi TCP** handles: 3 dedicated connections — control (port 9637: handshake, commands, data), video (port 9638: H.264 streaming), input (port 9639: touch events).
+The phone runs your apps on a virtual display, encodes the screen as H.264 video, and streams it to the car. Touches on the car screen are sent back to the phone and injected as real touch events. The phone's physical screen stays off (battery saving) and can be used independently.
 
-The phone deploys the VD server JAR to shared storage on launch. The car starts it via USB ADB. The VD server creates a VirtualDisplay at the phone's native DPI (480dpi), GPU-downscales to the car's viewport, and encodes H.264. The car decodes and renders the stream.
+## Install
 
-**Auto-update**: The phone app embeds the car APK. On handshake, if the car's version is outdated, the phone sends `UPDATING_CAR` to the car (which shows "Updating..." status), then pushes and installs the update via WiFi ADB (dadb).
+<a href="https://github.com/andersonlucasg3/dilink-auto-android/releases/latest"><img src="https://img.shields.io/github/v/release/andersonlucasg3/dilink-auto-android?label=Download%20Latest%20Release" alt="Download Latest Release"></a>
 
-## Quick Start
+*First release coming soon. For now, build from source:*
 
-1. **Build:** `./gradlew :app-client:assembleDebug` (builds both — car APK is embedded in phone)
-2. **Install** client on phone only
-3. **Enable USB Debugging** on phone (Developer Options)
-4. **Grant All Files Access** on phone (prompted on first launch)
-5. **Plug phone into car USB** — phone auto-installs car app if needed
-6. Both apps connect, VD server starts, streaming begins
+1. **Build:** `./gradlew :app-client:assembleDebug`
+2. **Install** the APK at `app-client/build/outputs/apk/debug/app-client-debug.apk` on your phone only
+3. **Enable USB Debugging** on your phone (Settings → Developer Options)
+4. **Open DiLink-Auto** on the phone and grant All Files Access when prompted
+5. **Plug into car USB** — the car app auto-installs on first run
 
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Architecture](./architecture.md) | 3-connection model, module responsibilities, connection flow |
-| [Protocol Specification](./protocol.md) | Wire format, 3 TCP connections, message types, VD server protocol |
-| [Client (Phone) App](./client.md) | ConnectionService, VD JAR deploy, auto-update, NIO sockets, FileLog |
-| [Server (Car) App](./server.md) | State machine, USB ADB, VideoDecoder, car UI, touch forwarding |
-| [Setup Guide](./setup.md) | Build, install, USB debugging setup |
-| [Progress Tracker](./progress.md) | Feature status, milestones, roadmap |
+The car APK and VD server JAR are bundled inside the phone APK — you never install anything on the car yourself.
 
 ## Current Status
 
-**Working (v0.13.1):**
-- 3-connection architecture: control (9637), video (9638), input (9639) — full I/O isolation
-- Full NIO non-blocking I/O everywhere (including VD server localhost socket)
-- Configurable FPS via handshake (car requests 60fps, phone/VD server honor it)
-- H.264 video streaming (12Mbps CBR, High profile, 60fps target)
-- SurfaceScaler periodic re-draw ensures encoder produces frames on static content
-- VideoDecoder: 30-frame queue, early start on offscreen surface before MirrorScreen
-- Parallel connection: WiFi + USB ADB tracks run simultaneously, VD deploys when both ready
-- Auto-update: phone detects outdated car app, sends UPDATING_CAR message, car shows status
-- Phone deploys VD server JAR to shared storage (no car-side push needed)
-- GPU-scaled VirtualDisplay at native phone DPI (480dpi)
-- Multi-touch input: batched MOVE events, direct MotionEvent injection (IInputManager, pooled arrays)
-- Screen power-off during streaming (background thread, proximity/lift wake disabled)
-- Battery optimization exemption (HyperOS greeze prevention)
-- Car WiFi track retries gateway IP every 3s + ConnectivityManager callback
-- Smart network callback: ignores unrelated network drops (mobile data), only reacts to connection's network
-- Car log routing via protocol (all car logs — including VideoDecoder and UsbAdb — visible in phone's FileLog)
-- FileLog: file-based logging on phone (`/sdcard/DiLinkAuto/client.log`) with rotation, bypasses HyperOS logcat filtering
-- Display power: SurfaceControl via DisplayControl (services.jar, Android 14+), shell fallback
-- Screen restore on disconnect: phone powers display back on when VD server dies
-- Decoder catchup: skips every other frame at 2x speed when queue exceeds 100ms to stay realtime
-- App grid with search (keyboard doesn't push activity), sorted alphabetically, 64dp icons
-- Notifications: dedup by ID, progress bar support (determinate + indeterminate), tap-to-launch owner app
-- 76dp nav bar with 40dp icons, 14sp text
-- App launch dedup: existing apps resume instead of restarting
-- Recent apps: prune unavailable apps when app list updates
-- Eject state persisted across app restarts
-- Tested on real BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16)
+**Working:**
+- 60fps H.264 video streaming (12Mbps CBR, High profile)
+- Full touch input (multi-touch, pinch-to-zoom)
+- App launcher with search, alphabetical sort, 64dp icons
+- Notifications on car screen with progress bars, tap to open
+- Auto-update: phone detects outdated car app and updates it over ADB
+- Phone screen off during streaming (battery saving)
+- Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16)
 
-**Not yet implemented:** audio streaming, media session control, navigation widgets, encryption.
+**Coming:** audio streaming, media controls, navigation widgets
 
-**Known limitations:**
-- VD server dies on USB disconnect (reconnects on re-plug; process detachment broke localhost)
-- USB ADB auth: fixed in v0.13.1 — prehashed SHA-1 signing with NONEwithRSA. "Always allow" now persists correctly.
-- Hotspot must be enabled manually (Android 16 limitation)
+**Known limitations:** VD server process restarts on USB disconnect (reconnects automatically). Hotspot must be enabled manually (Android 16 limitation).
+
+## Documentation
+
+| Document | Audience | Description |
+|----------|----------|-------------|
+| [Setup Guide](./setup.md) | Users | Detailed install and troubleshooting |
+| [Architecture](./architecture.md) | Developers | Module design, connection flow, design decisions |
+| [Protocol Specification](./protocol.md) | Developers | Wire format, message types, port assignment |
+| [Client (Phone) App](./client.md) | Developers | ConnectionService, VD JAR deploy, auto-update |
+| [Server (Car) App](./server.md) | Developers | State machine, USB ADB, VideoDecoder, car UI |
+| [Progress Tracker](./progress.md) | Contributors | Feature status, milestones, roadmap |
 
 ## Project Structure
 
+The phone APK (`app-client`) embeds both the car APK (`app-server`) and the VD server JAR. When you install the phone app, everything needed is bundled inside.
+
 ```
 DiLink-Auto/
-├── protocol/       Shared library (framing, messages, discovery, USB ADB, VideoConfig)
-├── app-client/     Phone APK — relay + VD JAR deploy + car auto-update + FileLog
-├── app-server/     Car APK — UI + connection state machine (embedded in phone APK)
-├── vd-server/      VirtualDisplay server (compiled to JAR, deployed by phone app)
+├── protocol/       Shared library (framing, messages, discovery, USB ADB)
+├── app-client/     Phone APK — relay, VD deploy, car auto-update, FileLog
+├── app-server/     Car APK — UI, connection state machine, video decoder
+├── vd-server/      VirtualDisplay server (compiled to JAR, deployed by phone)
 ├── docs/           Documentation
 └── gradle/         Build system
 ```
 
-## App Version
+## Contributing
 
-APP_VERSION_CODE read at runtime via `PackageManager.getPackageInfo()` — no hardcoded constant. Both gradle files must be bumped for each build (car auto-update compares version codes).
+PRs welcome. See [Architecture](./architecture.md) and [Protocol](./protocol.md) for technical context. Build with `./gradlew :app-client:assembleDebug` (JDK 17+, Android SDK 34).
 
 ## License
 
