@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Car body -->
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M24,58 L24,52 C24,50 25,48 27,48 L33,48 L33,44 L39,40 L69,40 L75,44 L75,48 L81,48 C83,48 84,50 84,52 L84,58 Z" />
+
+    <!-- Windshield -->
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M64,44 L60,42 L48,42 L44,44 L48,42.5 L60,42.5 Z" />
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M38,42 L46,40.5 L62,40.5 L70,42 L62,44 L46,44 Z" />
+
+    <!-- Cabin window -->
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M44,44 L48,42 L60,42 L64,44 Z" />
+
+    <!-- Front wheel -->
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M54,58 m-4,2 a4.5,4.5 0 1,1 9,0 a4.5,4.5 0 1,1 -9,0" />
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M54,60 m-1.5,0 a1.5,1.5 0 1,1 3,0 a1.5,1.5 0 1,1 -3,0" />
+
+    <!-- Rear wheel -->
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M30,58 m-4,2 a4.5,4.5 0 1,1 9,0 a4.5,4.5 0 1,1 -9,0" />
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M30,60 m-1.5,0 a1.5,1.5 0 1,1 3,0 a1.5,1.5 0 1,1 -3,0" />
+
+    <!-- Headlight -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M80,52 L84,52 L84,56 L80,56 Z" />
+
+    <!-- Taillight -->
+    <path
+        android:fillColor="#FF5252"
+        android:pathData="M24,52 L28,52 L28,54 L24,54 Z" />
+
+    <!-- Wireless signal arcs -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4FC3F7"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M44,36 Q54,30 64,36" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4FC3F7"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M47,32 Q54,27 61,32" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4FC3F7"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M50,28 Q54,25 58,28" />
+
+    <!-- Phone dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M51,23 m-3,0 a3,3 0 1,1 6,0 a3,3 0 1,1 -6,0" />
+</vector>
