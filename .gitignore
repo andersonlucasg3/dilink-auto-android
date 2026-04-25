@@ -21,3 +21,6 @@ app-server/src/main/assets/vd-server.jar
 
 # Claude settings
 .claude/
+
+# IDE
+.vscode/
