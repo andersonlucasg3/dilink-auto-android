@@ -27,6 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -43,12 +46,6 @@ class MainActivity : ComponentActivity() {
         set(value) { prefs.edit().putBoolean(KEY_ONBOARDING_DONE, value).apply() }
 
     private var showOnboarding = mutableStateOf(true)
-    private var resumeKey = mutableIntStateOf(0)
-
-    override fun onResume() {
-        super.onResume()
-        resumeKey.intValue++
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,9 +55,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             DiLinkAutoTheme {
                 if (showOnboarding.value) {
-                    OnboardingScreen(
-                        resumeKey = resumeKey.intValue,
-                        onComplete = {
+                    OnboardingScreen(onComplete = {
                             onboardingCompleted = true
                             showOnboarding.value = false
                         }
@@ -156,26 +151,38 @@ private data class OnboardingStep(
 )
 
 @Composable
-fun OnboardingScreen(resumeKey: Int, onComplete: () -> Unit) {
+fun OnboardingScreen(onComplete: () -> Unit) {
     val context = LocalContext.current
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     val pkg = context.packageName
 
     var currentStep by rememberSaveable { mutableIntStateOf(0) }
+    var checkKey by remember { mutableIntStateOf(0) }
 
-    // Re-evaluate permission checks each time we return from system settings (resumeKey changes)
-    val hasAllFiles = remember(resumeKey) {
+    // Re-evaluate permission checks each time we return from system settings
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                checkKey++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val hasAllFiles = remember(checkKey) {
         if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
     }
-    val hasBattery = remember(resumeKey) {
+    val hasBattery = remember(checkKey) {
         pm.isIgnoringBatteryOptimizations(pkg)
     }
-    val hasAccessibility = remember(resumeKey) {
+    val hasAccessibility = remember(checkKey) {
         val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
         am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
             .any { it.resolveInfo.serviceInfo.packageName == pkg }
     }
-    val hasNotifications = remember(resumeKey) {
+    val hasNotifications = remember(checkKey) {
         val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: ""
         flat.contains(pkg)
     }
@@ -254,7 +261,7 @@ fun OnboardingScreen(resumeKey: Int, onComplete: () -> Unit) {
     val step = steps[currentStep]
 
     // Auto-advance if current permission is already granted (after returning from settings)
-    LaunchedEffect(resumeKey, currentStep) {
+    LaunchedEffect(checkKey, currentStep) {
         if (currentStep < steps.lastIndex && step.isGranted()) {
             kotlinx.coroutines.delay(300)
             currentStep++
