@@ -463,19 +463,19 @@ fun MainScreen(
     val serviceState by ConnectionService.serviceState.collectAsState()
     val installStatus by ConnectionService.installStatusFlow.collectAsState()
     val isRunning = serviceState != ConnectionService.State.IDLE
-    var howToExpanded by rememberSaveable { mutableStateOf(true) }
+    var howToExpanded by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(24.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Top bar: title + settings gear
+        // Fixed header
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -487,7 +487,15 @@ fun MainScreen(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        // Scrollable content
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(8.dp))
 
         // How to Connect (expandable)
         Card(
@@ -554,7 +562,8 @@ fun MainScreen(
             onInstallOnCar = onInstallOnCar
         )
 
-        Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(32.dp))
+        }
     }
 }
 
@@ -603,18 +612,29 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(24.dp)
-            .verticalScroll(rememberScrollState())
     ) {
-        // Top bar
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Fixed header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
             Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
         }
 
-        Spacer(Modifier.height(24.dp))
+        // Scrollable content
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+        ) {
+            Spacer(Modifier.height(16.dp))
 
         // Permissions
         Text("Permissions", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
@@ -687,7 +707,8 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(32.dp))
+        }
     }
 }
 
