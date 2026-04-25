@@ -46,14 +46,8 @@ jobs:
       - name: Build
         run: ./gradlew :app-client:assembleDebug
 
-      - name: Upload Client APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-client-debug
+          name: dilink-auto-client
           path: app-client/build/outputs/apk/debug/app-client-debug.apk
-
-      - name: Upload Server APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-server-debug
-          path: app-server/build/outputs/apk/debug/app-server-debug.apk
