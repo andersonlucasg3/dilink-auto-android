@@ -27,14 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.client.service.ConnectionService
+import kotlinx.coroutines.launch
 import com.dilinkauto.client.service.UpdateManager
 import com.dilinkauto.client.service.UpdateState
 
@@ -155,36 +153,50 @@ fun OnboardingScreen(onComplete: () -> Unit) {
     val context = LocalContext.current
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     val pkg = context.packageName
+    val scope = rememberCoroutineScope()
 
     var currentStep by rememberSaveable { mutableIntStateOf(0) }
-    var checkKey by remember { mutableIntStateOf(0) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    refreshKey // read to track recomposition via polling
 
-    // Re-evaluate permission checks each time we return from system settings
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                checkKey++
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    val hasAllFiles = remember(checkKey) {
-        if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
-    }
-    val hasBattery = remember(checkKey) {
-        pm.isIgnoringBatteryOptimizations(pkg)
-    }
-    val hasAccessibility = remember(checkKey) {
+    // Direct reads — no remember(), so they re-evaluate on every recomposition
+    val hasAllFiles = if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
+    val hasBattery = pm.isIgnoringBatteryOptimizations(pkg)
+    val hasAccessibility = run {
         val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
         am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
             .any { it.resolveInfo.serviceInfo.packageName == pkg }
     }
-    val hasNotifications = remember(checkKey) {
+    val hasNotifications = run {
         val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: ""
         flat.contains(pkg)
+    }
+
+    // Poll a specific permission directly from the system API (bypasses any caching)
+    fun pollPermission(stepIndex: Int) {
+        scope.launch {
+            for (i in 0..30) {
+                kotlinx.coroutines.delay(300)
+                val granted = when (stepIndex) {
+                    1 -> if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
+                    2 -> pm.isIgnoringBatteryOptimizations(pkg)
+                    3 -> {
+                        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+                        am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                            .any { it.resolveInfo.serviceInfo.packageName == pkg }
+                    }
+                    4 -> {
+                        val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: ""
+                        flat.contains(pkg)
+                    }
+                    else -> true
+                }
+                if (granted) {
+                    refreshKey++
+                    break
+                }
+            }
+        }
     }
 
     val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications) {
@@ -261,7 +273,7 @@ fun OnboardingScreen(onComplete: () -> Unit) {
     val step = steps[currentStep]
 
     // Auto-advance if current permission is already granted (skip welcome step)
-    LaunchedEffect(checkKey, currentStep) {
+    LaunchedEffect(refreshKey, currentStep) {
         if (currentStep > 0 && currentStep < steps.lastIndex && step.isGranted()) {
             kotlinx.coroutines.delay(300)
             currentStep++
@@ -347,6 +359,7 @@ fun OnboardingScreen(onComplete: () -> Unit) {
                         currentStep++
                     } else {
                         step.onAction()
+                        pollPermission(currentStep)
                     }
                 },
                 modifier = Modifier
