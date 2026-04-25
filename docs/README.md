@@ -112,4 +112,4 @@ APP_VERSION_CODE read at runtime via `PackageManager.getPackageInfo()` — no ha
 
 ## License
 
-TBD
+MIT — see [LICENSE](../LICENSE)
