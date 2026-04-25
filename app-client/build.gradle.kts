@@ -65,10 +65,13 @@ dependencies {
 
 // Build the VD server JAR and copy to assets before the client APK is assembled
 tasks.register("buildVdServer") {
+    dependsOn(":protocol:bundleLibRuntimeToJarDebug")
+
     val vdSrcDir = file("${rootDir}/vd-server/src/main/java")
     val vdBuildDir = file("${rootDir}/vd-server/build")
     val androidJar = "${android.sdkDirectory}/platforms/android-${android.compileSdk}/android.jar"
     val d8Jar = file("${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/lib/d8.jar")
+    val protocolJar = file("${rootDir}/protocol/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
     val assetsDir = file("src/main/assets")
 
     // Always rebuild — fast enough and avoids stale cache issues
@@ -86,16 +89,17 @@ tasks.register("buildVdServer") {
         val javaSources = fileTree(vdSrcDir).matching { include("**/*.java") }.files
         exec {
             commandLine(listOf("javac", "-source", "17", "-target", "17",
-                "-cp", androidJar,
+                "-cp", "${androidJar}${File.pathSeparator}${protocolJar}",
                 "-d", classesDir.absolutePath) + javaSources.map { it.absolutePath })
         }
 
-        // DEX all class files (includes inner/anonymous classes)
+        // DEX all class files + protocol library (vd-server uses NioReader, FrameCodec)
         val classFiles = fileTree(classesDir).matching { include("**/*.class") }.files
         exec {
+            val inputs = classFiles.map { it.absolutePath } + protocolJar.absolutePath
             commandLine(listOf("java", "-cp", d8Jar.absolutePath,
                 "com.android.tools.r8.D8",
-                "--output", vdBuildDir.absolutePath) + classFiles.map { it.absolutePath })
+                "--output", vdBuildDir.absolutePath) + inputs)
         }
 
         // Rename to vd-server.dex (delete old first — renameTo fails silently on Windows if dest exists)

@@ -314,7 +314,7 @@ public class VirtualDisplayServer {
         if (wt != null) java.util.concurrent.locks.LockSupport.unpark(wt);
     }
 
-    /** NIO writer thread — drains writeQueue to channel, never blocks the encoder */
+    /** NIO writer thread — drains writeQueue to channel using shared FrameCodec.writeAll */
     private void runWriter(SocketChannel ch) throws IOException {
         long writeCount = 0;
         while (running) {
@@ -323,13 +323,7 @@ public class VirtualDisplayServer {
                 java.util.concurrent.locks.LockSupport.parkNanos(frameIntervalMs * 1_000_000L);
                 continue;
             }
-            while (buf.hasRemaining()) {
-                int n = ch.write(buf);
-                if (n == 0) {
-                    if (!running) throw new IOException("Connection closed during write");
-                    Thread.yield();
-                }
-            }
+            com.dilinkauto.protocol.FrameCodec.writeAll(ch, buf);
             writeCount++;
             if (writeCount % 60 == 0) {
                 log("Writer: wrote " + writeCount + " messages, queue=" + writeQueue.size());
@@ -655,99 +649,69 @@ public class VirtualDisplayServer {
         }
     }
 
+    /** Read commands from phone using shared NioReader (non-blocking, Selector-based) */
     private void readCommands(SocketChannel ch) {
-        // NIO Selector-based command reader — non-blocking
-        ByteBuffer readBuf = ByteBuffer.allocate(4096);
-        readBuf.flip(); // start empty, ready for reading
+        try {
+            com.dilinkauto.protocol.NioReader reader = new com.dilinkauto.protocol.NioReader(ch, 65536, frameIntervalMs);
+            log("Command reader started (NioReader)");
 
-        try (Selector selector = Selector.open()) {
-            ch.register(selector, SelectionKey.OP_READ);
-            log("Command reader started (NIO Selector)");
-
+            long cmdCount = 0;
             while (running) {
-                // Wait for data, up to frameIntervalMs
-                selector.select(frameIntervalMs);
-                selector.selectedKeys().clear();
-
-                // Read available data into buffer
-                readBuf.compact();
-                int n = ch.read(readBuf);
-                readBuf.flip();
-                if (n == -1) {
-                    log("Command reader: EOF");
-                    running = false;
-                    break;
-                }
-
-                // Process complete commands from buffer
-                long cmdCount = 0;
-                parseLoop:
-                while (readBuf.remaining() > 0) {
-                    readBuf.mark();
-                    try {
-                        int cmd = readBuf.get() & 0xFF;
-                        switch (cmd) {
-                            case CMD_LAUNCH_APP: {
-                                if (readBuf.remaining() < 4) { readBuf.reset(); break parseLoop; }
-                                int len = readBuf.getInt();
-                                if (readBuf.remaining() < len) { readBuf.reset(); break parseLoop; }
-                                byte[] buf = new byte[len];
-                                readBuf.get(buf);
-                                launchApp(new String(buf));
-                                break;
-                            }
-                            case CMD_GO_BACK:
-                                execFast("input -d " + displayId + " keyevent 4");
-                                checkStackEmpty();
-                                break;
-                            case CMD_GO_HOME:
-                                log("Home: no-op (car handles launcher navigation)");
-                                break;
-                            case CMD_INPUT_TAP: {
-                                if (readBuf.remaining() < 8) { readBuf.reset(); break parseLoop; }
-                                int x = readBuf.getInt();
-                                int y = readBuf.getInt();
-                                execFast("input -d " + displayId + " tap " + x + " " + y);
-                                break;
-                            }
-                            case CMD_INPUT_SWIPE: {
-                                if (readBuf.remaining() < 20) { readBuf.reset(); break parseLoop; }
-                                int x1 = readBuf.getInt();
-                                int y1 = readBuf.getInt();
-                                int x2 = readBuf.getInt();
-                                int y2 = readBuf.getInt();
-                                int dur = readBuf.getInt();
-                                execFast("input -d " + displayId + " swipe " + x1 + " " + y1 + " " + x2 + " " + y2 + " " + dur);
-                                break;
-                            }
-                            case CMD_INPUT_TOUCH: {
-                                if (readBuf.remaining() < 17) { readBuf.reset(); break parseLoop; }
-                                int action = readBuf.get() & 0xFF;
-                                int pointerId = readBuf.getInt();
-                                int tx = readBuf.getInt();
-                                int ty = readBuf.getInt();
-                                float pressure = readBuf.getFloat();
-                                injectTouch(action, pointerId, tx, ty, pressure);
-                                cmdCount++;
-                                if (cmdCount <= 3 || cmdCount % 100 == 0) {
-                                    log("Touch cmd #" + cmdCount + " action=" + action + " ptr=" + pointerId + " x=" + tx + " y=" + ty);
-                                }
-                                break;
-                            }
-                            case CMD_STOP:
-                                running = false;
-                                break;
-                            default:
-                                err("Unknown command: 0x" + Integer.toHexString(cmd));
-                        }
-                    } catch (java.nio.BufferUnderflowException e) {
-                        readBuf.reset(); // incomplete command, wait for more data
+                int cmd = reader.readByteBlocking() & 0xFF;
+                switch (cmd) {
+                    case CMD_LAUNCH_APP: {
+                        int len = reader.readIntBlocking();
+                        byte[] buf = new byte[len];
+                        reader.readFullyBlocking(buf, 0, len);
+                        launchApp(new String(buf));
                         break;
                     }
+                    case CMD_GO_BACK:
+                        execFast("input -d " + displayId + " keyevent 4");
+                        checkStackEmpty();
+                        break;
+                    case CMD_GO_HOME:
+                        log("Home: no-op (car handles launcher navigation)");
+                        break;
+                    case CMD_INPUT_TAP: {
+                        int x = reader.readIntBlocking();
+                        int y = reader.readIntBlocking();
+                        execFast("input -d " + displayId + " tap " + x + " " + y);
+                        break;
+                    }
+                    case CMD_INPUT_SWIPE: {
+                        int x1 = reader.readIntBlocking();
+                        int y1 = reader.readIntBlocking();
+                        int x2 = reader.readIntBlocking();
+                        int y2 = reader.readIntBlocking();
+                        int dur = reader.readIntBlocking();
+                        execFast("input -d " + displayId + " swipe " + x1 + " " + y1 + " " + x2 + " " + y2 + " " + dur);
+                        break;
+                    }
+                    case CMD_INPUT_TOUCH: {
+                        int action = reader.readByteBlocking() & 0xFF;
+                        int pointerId = reader.readIntBlocking();
+                        int tx = reader.readIntBlocking();
+                        int ty = reader.readIntBlocking();
+                        float pressure = reader.readFloatBlocking();
+                        injectTouch(action, pointerId, tx, ty, pressure);
+                        cmdCount++;
+                        if (cmdCount <= 3 || cmdCount % 100 == 0) {
+                            log("Touch cmd #" + cmdCount + " action=" + action + " ptr=" + pointerId + " x=" + tx + " y=" + ty);
+                        }
+                        break;
+                    }
+                    case CMD_STOP:
+                        running = false;
+                        break;
+                    default:
+                        err("Unknown command: 0x" + Integer.toHexString(cmd));
                 }
             }
-        } catch (Exception e) {
-            err("Command error: " + e.getMessage());
+            reader.close();
+        } catch (IOException e) {
+            if (running) err("Command error: " + e.getMessage());
+        } finally {
             running = false;
         }
     }

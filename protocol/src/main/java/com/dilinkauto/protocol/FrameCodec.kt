@@ -192,6 +192,7 @@ object FrameCodec {
      * Writes all remaining bytes from buf to channel.
      * Throws IOException if no progress is made for 5 seconds (send buffer full / peer not reading).
      */
+    @JvmStatic
     fun writeAll(channel: SocketChannel, buf: ByteBuffer) {
         var deadline = System.nanoTime() + WRITE_TIMEOUT_NS
         while (buf.hasRemaining()) {

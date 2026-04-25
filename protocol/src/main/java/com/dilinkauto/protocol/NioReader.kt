@@ -9,6 +9,7 @@ import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
 import java.nio.channels.SocketChannel
 import kotlin.coroutines.coroutineContext
+import kotlin.Throws
 
 /**
  * Non-blocking buffered reader for a NIO SocketChannel.
@@ -99,6 +100,61 @@ class NioReader(
                 yield() // cooperate with coroutine cancellation
                 if (!coroutineContext.isActive || !selector.isOpen) return false
                 selector.select(selectTimeoutMs) // blocks thread until data or timeout
+                if (selector.isOpen) selector.selectedKeys().clear()
+            }
+        }
+        return true
+    }
+
+    // ── Blocking read API (for non-coroutine callers like vd-server) ──
+
+    @Throws(IOException::class)
+    fun readByteBlocking(): Byte { ensureAvailableBlocking(1); return buf.get() }
+
+    @Throws(IOException::class)
+    fun readIntBlocking(): Int { ensureAvailableBlocking(4); return buf.getInt() }
+
+    @Throws(IOException::class)
+    fun readFloatBlocking(): Float { ensureAvailableBlocking(4); return buf.getFloat() }
+
+    @Throws(IOException::class)
+    fun readFullyBlocking(dst: ByteArray, offset: Int = 0, length: Int = dst.size) {
+        ensureAvailableBlocking(length)
+        buf.get(dst, offset, length)
+    }
+
+    /**
+     * Blocking read — returns null on EOF, the byte value if available.
+     * Use at message boundaries to distinguish clean disconnect from mid-message EOF.
+     */
+    @Throws(IOException::class)
+    fun readByteOrNullBlocking(): Byte? {
+        if (!fillOrEofBlocking(1)) return null
+        return buf.get()
+    }
+
+    private fun ensureAvailableBlocking(count: Int) {
+        if (!fillOrEofBlocking(count)) {
+            throw IOException("Channel closed: expected $count bytes")
+        }
+    }
+
+    private fun fillOrEofBlocking(needed: Int): Boolean {
+        if (needed > buf.capacity()) {
+            val newBuf = ByteBuffer.allocate(needed + GROW_PADDING)
+            newBuf.order(ByteOrder.BIG_ENDIAN)
+            newBuf.put(buf)
+            newBuf.flip()
+            buf = newBuf
+        }
+        while (buf.remaining() < needed) {
+            buf.compact()
+            val n = channel.read(buf)
+            buf.flip()
+            if (n == -1) return false
+            if (n == 0) {
+                if (!selector.isOpen) return false
+                selector.select(selectTimeoutMs)
                 if (selector.isOpen) selector.selectedKeys().clear()
             }
         }
