@@ -97,7 +97,8 @@ DiLink-Auto/
 
 This project is developed independently and relies on community support.
 
-- [**GitHub Sponsors**](https://github.com/sponsors/andersonlucasg3) — monthly or one-time, international
+<iframe src="https://github.com/sponsors/andersonlucasg3/card" title="Sponsor andersonlucasg3" height="225" width="600" style="border: 0;"></iframe>
+
 - **Pix** (Brazil): `SEU_PIX_AQUI` <!-- TODO: replace with your Pix key -->
 
 Every contribution helps cover development time, testing devices, and keeping the project alive.
