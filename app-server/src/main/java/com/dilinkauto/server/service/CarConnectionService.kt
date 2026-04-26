@@ -651,19 +651,33 @@ class CarConnectionService : Service() {
     }
 
     private var touchDropCount = 0L
+    private var touchSendCount = 0L
 
     fun sendTouchEvent(event: TouchEvent) {
         val conn = inputConnection
         if (conn == null) {
             touchDropCount++
             if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch DROP #$touchDropCount: inputConnection is null (state=${_state.value})")
+                carLogSend("Touch DROP #$touchDropCount: inputConnection=null state=${_state.value}")
+            }
+            return
+        }
+        if (!conn.isConnected) {
+            touchDropCount++
+            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
+                carLogSend("Touch DROP #$touchDropCount: inputConnection not connected")
             }
             return
         }
         val payload = event.encode()
         touchExecutor.execute {
-            try { conn.sendInput(event.action, payload) }
+            try {
+                conn.sendInput(event.action, payload)
+                touchSendCount++
+                if (touchSendCount <= 5 || touchSendCount % 100 == 0L) {
+                    carLogSend("Touch #$touchSendCount action=${event.action} ptr=${event.pointerId} x=${"%.2f".format(event.x)} y=${"%.2f".format(event.y)}")
+                }
+            }
             catch (e: Exception) { carLogSend("Touch send failed: ${e.message}", "W") }
         }
     }
@@ -673,13 +687,26 @@ class CarConnectionService : Service() {
         if (conn == null) {
             touchDropCount++
             if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch batch DROP #$touchDropCount: inputConnection is null (state=${_state.value})")
+                carLogSend("Touch batch DROP #$touchDropCount: inputConnection=null state=${_state.value}")
+            }
+            return
+        }
+        if (!conn.isConnected) {
+            touchDropCount++
+            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
+                carLogSend("Touch batch DROP #$touchDropCount: inputConnection not connected")
             }
             return
         }
         val payload = TouchMoveBatch(pointers).encode()
         touchExecutor.execute {
-            try { conn.sendInput(InputMsg.TOUCH_MOVE_BATCH, payload) }
+            try {
+                conn.sendInput(InputMsg.TOUCH_MOVE_BATCH, payload)
+                touchSendCount++
+                if (touchSendCount <= 5) {
+                    carLogSend("Touch batch #$touchSendCount (${pointers.size} pointers)")
+                }
+            }
             catch (e: Exception) { carLogSend("Touch batch send failed: ${e.message}", "W") }
         }
     }
