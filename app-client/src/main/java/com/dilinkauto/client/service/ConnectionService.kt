@@ -649,14 +649,51 @@ class ConnectionService : Service() {
             }
         }
 
-        // 2. Scan the full /24 subnet in parallel (concurrent probes, fast).
-        //    When the phone is a hotspot, the car gets an IP from the phone's DHCP
-        //    pool which is unpredictable. Concurrent probing covers all possibilities.
+        // 2. Try reading DHCP leases (fastest — direct from hotspot's dnsmasq)
+        try {
+            for (path in listOf("/data/misc/dhcp/dnsmasq.leases", "/data/vendor/dhcp/dnsmasq.leases")) {
+                val file = java.io.File(path)
+                if (!file.canRead()) continue
+                for (line in file.readLines()) {
+                    val parts = line.trim().split("\\s+".toRegex())
+                    if (parts.size < 3) continue
+                    val ip = parts[2]
+                    if (ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+")) && probePort(ip, 5555)) {
+                        FileLog.i(TAG, "Found car ADB at $ip (DHCP leases)")
+                        return ip
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 3. Ping broadcast to populate ARP table, then probe all ARP entries.
         val subnetIps = getLocalSubnetIps()
         if (subnetIps.isNotEmpty()) {
             val prefix = subnetIps.first().substringBeforeLast(".")
             val ownIp = subnetIps.first()
-            // Probe entire /24 subnet in parallel batches of 32, 150ms timeout each
+            val broadcastIp = "$prefix.255"
+
+            // Populate ARP table via broadcast ping
+            try {
+                Runtime.getRuntime().exec(arrayOf("ping", "-c", "1", "-W", "1", broadcastIp)).waitFor()
+                kotlinx.coroutines.delay(200) // let ARP settle
+            } catch (_: Exception) {}
+
+            // Read ARP table — should now have all WiFi clients
+            try {
+                val arp = java.io.File("/proc/net/arp").readText()
+                for (line in arp.lines().drop(1)) {
+                    val ip = line.split("\\s+".toRegex()).firstOrNull() ?: continue
+                    if (ip == "0.0.0.0" || ip == ownIp) continue
+                    if (!ip.startsWith("$prefix.")) continue
+                    if (probePort(ip, 5555)) {
+                        FileLog.i(TAG, "Found car ADB at $ip (ARP after broadcast)")
+                        return ip
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // Fallback: parallel subnet scan if ARP missed it
             val result = probeSubnetConcurrent(prefix, ownIp, maxConcurrent = 32)
             if (result != null) {
                 FileLog.i(TAG, "Found car ADB at $result (parallel subnet scan)")
