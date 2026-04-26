@@ -97,7 +97,7 @@ DiLink-Auto/
 
 This project is developed independently and relies on community support.
 
-<iframe src="https://github.com/sponsors/andersonlucasg3/card" title="Sponsor andersonlucasg3" height="225" width="600" style="border: 0;"></iframe>
+[![Sponsor andersonlucasg3](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/andersonlucasg3)
 
 - **Pix** (Brazil): [Pay with Pix](https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d)
 

@@ -85,6 +85,12 @@ tasks.register("buildVdServer") {
     val d8Jar = file("${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/lib/d8.jar")
     val assetsDir = file("src/main/assets")
 
+    // Kotlin stdlib + coroutines (needed at runtime by vd-server via app_process)
+    val kotlinLibs = project.configurations.detachedConfiguration(
+        project.dependencies.create("org.jetbrains.kotlin:kotlin-stdlib:1.9.22"),
+        project.dependencies.create("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.3")
+    ).resolve()
+
     outputs.upToDateWhen { false }
 
     doLast {
@@ -94,13 +100,13 @@ tasks.register("buildVdServer") {
         // Clean stale artifacts from assets
         file("${assetsDir}/vd-server.dex").delete()
 
-        // DEX vd-server classes + protocol classes together
+        // DEX vd-server + protocol + kotlin stdlib (needed for app_process runtime)
         exec {
+            val inputs = listOf(vdClassesJar.absolutePath, protocolJar.absolutePath) +
+                kotlinLibs.map { it.absolutePath }
             commandLine(listOf("java", "-cp", d8Jar.absolutePath,
                 "com.android.tools.r8.D8",
-                "--output", vdBuildDir.absolutePath,
-                vdClassesJar.absolutePath,
-                protocolJar.absolutePath))
+                "--output", vdBuildDir.absolutePath) + inputs)
         }
 
         // Rename to vd-server.dex (delete old first — renameTo fails silently on Windows if dest exists)
