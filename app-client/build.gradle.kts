@@ -11,8 +11,8 @@ android {
         applicationId = "com.dilinkauto.client"
         minSdk = 29
         targetSdk = 34
-        versionCode = 50
-        versionName = "0.14.3-dev"
+        versionCode = project.property("app.versionCode").toString().toInt()
+        versionName = project.property("app.versionName").toString()
     }
 
     signingConfigs {
