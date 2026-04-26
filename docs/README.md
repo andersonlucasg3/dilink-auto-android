@@ -4,6 +4,9 @@
 
 An open-source alternative to Android Auto for **any Android 10+ phone** paired with **BYD DiLink 3.0+** infotainment systems. Originally motivated by the Xiaomi HyperOS / Chinese ROM gap, but works universally.
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/andersonlucasg3)
+[![Pix](https://img.shields.io/badge/Pix-Brazil-00C2A0)](https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d)
+
 ## What It Does
 
 DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at 60fps, 12Mbps, with the phone's screen turned off to save battery.
@@ -95,13 +98,7 @@ DiLink-Auto/
 
 ## Support
 
-This project is developed independently and relies on community support.
-
-[![Sponsor andersonlucasg3](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/andersonlucasg3)
-
-- [![Pix (Brazil)](https://img.shields.io/badge/Pix-Brazil-00C2A0)](https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d)
-
-Every contribution helps cover development time, testing devices, and keeping the project alive.
+This project is developed independently and relies on community support. Every contribution helps cover development time, testing devices, and keeping the project alive.
 
 ## Contributing
 
