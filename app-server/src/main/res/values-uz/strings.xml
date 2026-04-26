@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Bildirishnomalar -->
+    <string name="notification_channel_name">DiLink Auto avtomobil xizmati</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_searching">Telefon qidirilmoqda…</string>
+    <string name="notification_connected">Telefonga ulandi</string>
+
+    <!-- Launcher -->
+    <string name="search_hint">Ilovalarni qidirish…</string>
+    <string name="not_connected">Ulanmagan</string>
+    <string name="plug_phone_usb">Telefonni avtomobil USB portiga ulang</string>
+    <string name="phone_ip_label">Telefon IP manzili</string>
+    <string name="connect_button">Ulanish</string>
+
+    <!-- Navigatsiya paneli -->
+    <string name="nav_launcher">Launcher</string>
+    <string name="nav_recent">So\'nggi</string>
+    <string name="nav_notifications">Bildirishnomalar</string>
+    <string name="nav_back">Orqaga</string>
+    <string name="nav_home">Bosh sahifa</string>
+
+    <!-- Aks ettirish -->
+    <string name="status_updating">Avtomobil ilovasi yangilanmoqda…</string>
+    <string name="status_please_wait">Iltimos, kuting</string>
+</resources>
