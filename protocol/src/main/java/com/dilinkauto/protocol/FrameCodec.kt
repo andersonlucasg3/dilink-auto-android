@@ -23,7 +23,7 @@ import java.nio.channels.SocketChannel
 object FrameCodec {
 
     const val HEADER_SIZE = 6 // 4 (length) + 1 (channel) + 1 (type)
-    const val MAX_PAYLOAD_SIZE = 2 * 1024 * 1024 // 2 MB
+    const val MAX_PAYLOAD_SIZE = 128 * 1024 * 1024 // 128 MB
 
     data class Frame(
         val channel: Byte,
