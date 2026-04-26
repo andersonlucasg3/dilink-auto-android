@@ -27,7 +27,7 @@ A separate internal protocol runs between the phone app and VD server on `localh
 ```
 
 - **Frame Length**: `uint32` big-endian. Value = `2 + payload_size`.
-- **Max payload**: 2 MB.
+- **Max payload**: 128 MB.
 - **Header overhead**: 6 bytes per frame.
 
 ## Channels
@@ -196,7 +196,7 @@ TARGET_FPS            = 60 (configurable via handshake, default 30)
 FRAME_INTERVAL_MS     = 1000 / TARGET_FPS (16ms at 60fps, max wait for video-path loops)
 HEARTBEAT_INTERVAL    = 3000 ms (control connection only)
 HEARTBEAT_TIMEOUT     = 10000 ms (control connection only)
-MAX_PAYLOAD_SIZE      = 2,097,152 bytes (2 MB)
+MAX_PAYLOAD_SIZE      = 134,217,728 bytes (128 MB)
 SERVICE_TYPE (mDNS)   = "_dilinkauto._tcp."
 DISPLAY_MODE_MIRROR   = 0
 DISPLAY_MODE_VIRTUAL  = 1

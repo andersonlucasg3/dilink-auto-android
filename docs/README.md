@@ -63,17 +63,22 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 - Full touch input (multi-touch, pinch-to-zoom)
 - App launcher with search, alphabetical sort, 64dp icons
 - Notifications on car screen with progress bars, tap to open
-- Auto-update: phone detects outdated car app and updates it over ADB
+- Self-update via GitHub Releases (release) or prereleases (debug)
+- Auto-update: phone detects outdated car app and updates it over WiFi ADB
 - Phone screen off during streaming (battery saving)
-- Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16)
+- Guided onboarding for all required permissions
+- Internationalization: English, Portuguese, Russian, Belarusian, Kazakh, Ukrainian, Uzbek
+- Display restore after USB disconnect (v0.14.0+)
+- Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
 
 **Coming:** audio streaming, media controls, navigation widgets
 
 **Known limitations:**
 - VD server process restarts on USB disconnect (reconnects automatically).
 - Hotspot must be enabled manually (Android 16 limitation).
-- Occasional visual artifacts — likely due to decoder restart race between config and pending frames. Recovery at next keyframe (~1s).
-- Streaming latency ~100-200ms under load. Encoder runs at CBR 12Mbps; further latency reduction possible with VBR tuning.
+- Occasional visual artifacts — decoder restart race, recovers at next keyframe (~1s).
+- Streaming latency ~100-200ms under load. CBR 12Mbps.
+- Display may stay off after abrupt USB disconnect (fixed in v0.14.0).
 
 ## Documentation
 

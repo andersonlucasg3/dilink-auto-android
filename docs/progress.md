@@ -1,9 +1,18 @@
 # Progress Tracker
 
-Current version: **v0.13.1** (first release prep)
+Current version: **v0.14.3-dev** (development)
 Last updated: 2026-04-26
 
 ## Milestones
+
+### v0.14.0 (in development)
+
+- **Shared version source**: Version code/name now in gradle.properties — single edit for both apps.
+- **MAX_PAYLOAD_SIZE 2MB → 128MB**: App list with 136+ PNG icons exceeded 2MB causing ProtocolException and connection drops.
+- **Display restore fix**: `PowerManager.SCREEN_BRIGHT_WAKE_LOCK` with `ACQUIRE_CAUSES_WAKEUP` restores display after USB disconnect, even when VD server dies without cleanup.
+- **POCO F5 compatibility**: `FLAG_KEEP_SCREEN_ON` prevents screen lock during streaming. Touch input confirmed working on POCO F5 with Xiaomi 17 Pro Max.
+- **Car-side touch logging**: MirrorScreen touch events and sendTouchEvent success logged for debugging.
+- **Developer credit in About**: "Developed with ❤" with GitHub link in all 7 languages.
 
 ### v0.13.1 — First Release (2026-04-26)
 
