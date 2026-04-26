@@ -641,6 +641,32 @@ class ConnectionService : Service() {
     }
 
     private suspend fun findCarAdb(): String? {
+        // 1. Check the control connection's remote address (car is already connected)
+        controlConnection?.remoteAddress?.let { ip ->
+            if (probePort(ip, 5555)) {
+                FileLog.i(TAG, "Found car ADB at $ip (control connection)")
+                return ip
+            }
+        }
+
+        // 2. Scan the local subnet — probe nearby IPs for port 5555.
+        //    When the phone is a hotspot, the phone is the gateway (.1) and
+        //    clients get IPs like .2-.254. Try the most likely ones first.
+        val subnetIps = getLocalSubnetIps()
+        if (subnetIps.isNotEmpty()) {
+            // Try common DHCP client IPs first (hotspot case)
+            val prefix = subnetIps.first().substringBeforeLast(".")
+            for (host in listOf(100, 101, 102, 2, 3, 4, 5, 43, 50, 150)) {
+                val ip = "$prefix.$host"
+                if (ip == subnetIps.first()) continue // skip own IP
+                if (probePort(ip, 5555)) {
+                    FileLog.i(TAG, "Found car ADB at $ip (subnet scan)")
+                    return ip
+                }
+            }
+        }
+
+        // 3. ARP table
         try {
             val arp = java.io.File("/proc/net/arp").readText()
             for (line in arp.lines().drop(1)) {
@@ -652,6 +678,7 @@ class ConnectionService : Service() {
             }
         } catch (_: Exception) {}
 
+        // 4. Neighbor cache
         try {
             val proc = Runtime.getRuntime().exec(arrayOf("ip", "neigh"))
             val output = proc.inputStream.bufferedReader().readText()
@@ -664,6 +691,7 @@ class ConnectionService : Service() {
             }
         } catch (_: Exception) {}
 
+        // 5. Gateway (last resort — may be the phone itself on hotspot)
         try {
             val wm = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
             val gw = wm.dhcpInfo.gateway
@@ -671,7 +699,7 @@ class ConnectionService : Service() {
                 val ip = String.format("%d.%d.%d.%d",
                     gw and 0xFF, (gw shr 8) and 0xFF,
                     (gw shr 16) and 0xFF, (gw shr 24) and 0xFF)
-                if (probePort(ip, 5555)) {
+                if (ip != subnetIps.firstOrNull() && probePort(ip, 5555)) {
                     FileLog.i(TAG, "Found car ADB at $ip (gateway)")
                     return ip
                 }
@@ -679,6 +707,21 @@ class ConnectionService : Service() {
         } catch (_: Exception) {}
 
         return null
+    }
+
+    private fun getLocalSubnetIps(): List<String> {
+        return try {
+            java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .filter { !it.isLoopback && it.isUp }
+                .flatMap { iface ->
+                    iface.inetAddresses.toList()
+                        .filter { it is java.net.Inet4Address && !it.isLoopbackAddress }
+                        .map { it.hostAddress!! }
+                }
+                .filter { !it.startsWith("127.") }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     private suspend fun probePort(ip: String, port: Int): Boolean {
