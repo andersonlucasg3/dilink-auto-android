@@ -24,7 +24,8 @@ import java.nio.channels.SocketChannel
 class VirtualDisplayClient(
     private val videoConnection: Connection,
     private val controlConnection: Connection,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val appContext: android.content.Context
 ) {
     @Volatile private var channel: SocketChannel? = null
     @Volatile private var reader: NioReader? = null
@@ -280,13 +281,26 @@ class VirtualDisplayClient(
         try { serverChannel?.close() } catch (_: Exception) {}
         try { channel?.close() } catch (_: Exception) {}
 
-        // Restore physical display — VD server cleanup may not run if process was killed
+        // Restore physical display — VD server cleanup may not run if process was killed.
+        // SurfaceControl.setDisplayPowerMode operates below the Android framework level,
+        // so cmd/svc commands can't reliably override it. Use PowerManager wake locks
+        // with ACQUIRE_CAUSES_WAKEUP to force the display on at the framework level.
         scope.launch(Dispatchers.IO) {
             try {
                 FileLog.i(TAG, "Restoring physical display after VD disconnect")
-                Runtime.getRuntime().exec(arrayOf("sh", "-c", "cmd display power-on 0")).waitFor()
-                Runtime.getRuntime().exec(arrayOf("sh", "-c", "input keyevent 224")).waitFor() // WAKEUP
-            } catch (_: Exception) {}
+                val pm = appContext.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+                val wl = pm.newWakeLock(
+                    android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    "DiLink:display:restore"
+                )
+                wl.acquire(2000)
+                wl.release()
+                // Also try shell commands as fallback
+                Runtime.getRuntime().exec(arrayOf("sh", "-c", "input keyevent 224")).waitFor()
+            } catch (e: Exception) {
+                FileLog.w(TAG, "Display restore failed: ${e.message}")
+            }
         }
         serverChannel = null
         channel = null

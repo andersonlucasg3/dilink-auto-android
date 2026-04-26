@@ -428,7 +428,7 @@ class ConnectionService : Service() {
         // Open ServerSocket SYNCHRONOUSLY so it's ready before the car deploys the VD server.
         val vidConn = videoConnection ?: return
         val ctrlConn = controlConnection ?: return
-        val client = VirtualDisplayClient(vidConn, ctrlConn, serviceScope)
+        val client = VirtualDisplayClient(vidConn, ctrlConn, serviceScope, this)
         client.startListening(port)
 
         vdWaitJob = serviceScope.launch(Dispatchers.IO) {
