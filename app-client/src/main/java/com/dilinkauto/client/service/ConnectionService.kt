@@ -574,11 +574,6 @@ class ConnectionService : Service() {
                     return@launch
                 }
 
-                // 1. Try USB ADB first (direct connection, no IP needed)
-                if (explicitIp == null && tryInstallViaUsb(apkFile)) {
-                    return@launch
-                }
-
                 _installStatus.value = if (explicitIp != null) "Connecting to $explicitIp..." else "Searching for car..."
                 val carIp = if (!explicitIp.isNullOrBlank()) {
                     if (probePort(explicitIp, 5555)) explicitIp else {
@@ -645,88 +640,6 @@ class ConnectionService : Service() {
         }
     }
 
-    /**
-     * Attempts to install the car APK over USB ADB (phone as USB host → car as device).
-     * Returns true if successful, false if USB ADB is not available.
-     */
-    private suspend fun tryInstallViaUsb(apkFile: java.io.File): Boolean {
-        try {
-            val usbManager = getSystemService(USB_SERVICE) as android.hardware.usb.UsbManager
-            val deviceList = usbManager.deviceList
-            if (deviceList.isEmpty()) return false
-
-            var usbDevice: android.hardware.usb.UsbDevice? = null
-            for ((_, device) in deviceList) {
-                if (com.dilinkauto.protocol.adb.UsbAdbConnection.findAdbInterface(device) != null) {
-                    usbDevice = device
-                    break
-                }
-            }
-            if (usbDevice == null) return false
-
-            _installStatus.value = "Found car via USB ADB..."
-            FileLog.i(TAG, "USB ADB device found: ${usbDevice.deviceName}")
-
-            if (!usbManager.hasPermission(usbDevice)) {
-                FileLog.w(TAG, "No USB permission for ${usbDevice.deviceName}")
-                return false
-            }
-
-            val adb = com.dilinkauto.protocol.adb.UsbAdbConnection(this)
-            if (!adb.connect(usbDevice)) {
-                FileLog.w(TAG, "USB ADB connection failed")
-                return false
-            }
-
-            try {
-                @Suppress("DEPRECATION")
-                val myVersion = packageManager.getPackageInfo(packageName, 0).versionCode
-
-                _installStatus.value = "Checking car version..."
-                val versionOutput = adb.shell(
-                    "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionCode"
-                )
-                val installedVersion = Regex("""versionCode=(\d+)""")
-                    .find(versionOutput)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                FileLog.i(TAG, "Car app (USB): installed=v$installedVersion, embedded=v$myVersion")
-
-                if (installedVersion >= myVersion) {
-                    _installStatus.value = "Already up-to-date (v$installedVersion)"
-                    return true
-                }
-
-                _installStatus.value = "Pushing APK over USB (${apkFile.length() / 1024 / 1024}MB)..."
-                val remotePath = "/data/local/tmp/app-server.apk"
-                val pushed = adb.push(apkFile.inputStream(), remotePath)
-                if (!pushed) {
-                    _installStatus.value = "USB push failed"
-                    FileLog.w(TAG, "USB ADB push failed")
-                    return false
-                }
-                FileLog.i(TAG, "Car APK pushed via USB (${apkFile.length()} bytes)")
-
-                _installStatus.value = "Installing on car..."
-                val result = adb.shell("pm install -r $remotePath")
-                FileLog.i(TAG, "USB install result: ${result.trim()}")
-
-                if (result.contains("Success")) {
-                    _installStatus.value = "Launching car app..."
-                    adb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
-                    _installStatus.value = "Car app v$myVersion installed via USB!"
-                    return true
-                } else {
-                    _installStatus.value = "Failed: ${result.trim()}"
-                    return false
-                }
-            } finally {
-                adb.close()
-            }
-        } catch (e: Exception) {
-            FileLog.w(TAG, "USB ADB install failed: ${e.message}")
-            return false
-        }
-    }
-
     private suspend fun findCarAdb(): String? {
         // 1. Check the control connection's remote address (car is already connected)
         controlConnection?.remoteAddress?.let { ip ->
@@ -744,35 +657,51 @@ class ConnectionService : Service() {
         // 3. ARP table
         try {
             val arp = java.io.File("/proc/net/arp").readText()
+            FileLog.d(TAG, "ARP table:\n$arp")
             for (line in arp.lines().drop(1)) {
                 val ip = line.split("\\s+".toRegex()).firstOrNull() ?: continue
-                if (ip != "0.0.0.0" && probePort(ip, 5555)) {
+                if (ip == "0.0.0.0" || ip == ownIp) continue
+                FileLog.d(TAG, "ARP: probing $ip:5555...")
+                if (probePort(ip, 5555)) {
                     FileLog.i(TAG, "Found car ADB at $ip (ARP)")
                     return ip
                 }
+                FileLog.d(TAG, "ARP: $ip:5555 not responding")
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            FileLog.w(TAG, "ARP read failed: ${e.message}")
+        }
 
         // 4. Neighbor cache
         try {
             val proc = Runtime.getRuntime().exec(arrayOf("ip", "neigh"))
             val output = proc.inputStream.bufferedReader().readText()
+            FileLog.d(TAG, "ip neigh:\n$output")
             for (line in output.lines()) {
                 val ip = line.split("\\s+".toRegex()).firstOrNull() ?: continue
-                if (ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+")) && probePort(ip, 5555)) {
+                if (!ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) continue
+                if (ip == ownIp) continue
+                FileLog.d(TAG, "neigh: probing $ip:5555...")
+                if (probePort(ip, 5555)) {
                     FileLog.i(TAG, "Found car ADB at $ip (neighbor)")
                     return ip
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            FileLog.w(TAG, "ip neigh failed: ${e.message}")
+        }
 
         // 5. Parallel subnet scan — probes entire /24 in ~1s
         if (prefix.isNotEmpty()) {
+            FileLog.i(TAG, "Parallel scanning $prefix.0/24 for ADB...")
+            val startMs = System.currentTimeMillis()
             val result = probeSubnetConcurrent(prefix, ownIp, maxConcurrent = 32)
+            val elapsed = System.currentTimeMillis() - startMs
             if (result != null) {
-                FileLog.i(TAG, "Found car ADB at $result (parallel subnet scan)")
+                FileLog.i(TAG, "Found car ADB at $result (parallel scan, ${elapsed}ms)")
                 return result
             }
+            FileLog.d(TAG, "Parallel scan complete — no ADB found (${elapsed}ms)")
         }
 
         // 6. Gateway (last resort — may be the phone itself on hotspot)
