@@ -574,6 +574,11 @@ class ConnectionService : Service() {
                     return@launch
                 }
 
+                // 1. Try USB ADB first (direct connection, no IP needed)
+                if (explicitIp == null && tryInstallViaUsb(apkFile)) {
+                    return@launch
+                }
+
                 _installStatus.value = if (explicitIp != null) "Connecting to $explicitIp..." else "Searching for car..."
                 val carIp = if (!explicitIp.isNullOrBlank()) {
                     if (probePort(explicitIp, 5555)) explicitIp else {
@@ -582,8 +587,8 @@ class ConnectionService : Service() {
                     }
                 } else findCarAdb()
                 if (carIp == null) {
-                    _installStatus.value = "Car not found (is ADB enabled?)"
-                    FileLog.w(TAG, "Could not find car ADB on network")
+                    _installStatus.value = "Car not found. Plug into USB or check WiFi ADB."
+                    FileLog.w(TAG, "Could not find car ADB on USB or network")
                     return@launch
                 }
 
@@ -637,6 +642,88 @@ class ConnectionService : Service() {
                 _installStatus.value = "Error: ${e.message}"
                 FileLog.e(TAG, "Car app install failed", e)
             }
+        }
+    }
+
+    /**
+     * Attempts to install the car APK over USB ADB (phone as USB host → car as device).
+     * Returns true if successful, false if USB ADB is not available.
+     */
+    private suspend fun tryInstallViaUsb(apkFile: java.io.File): Boolean {
+        try {
+            val usbManager = getSystemService(USB_SERVICE) as android.hardware.usb.UsbManager
+            val deviceList = usbManager.deviceList
+            if (deviceList.isEmpty()) return false
+
+            var usbDevice: android.hardware.usb.UsbDevice? = null
+            for ((_, device) in deviceList) {
+                if (com.dilinkauto.protocol.adb.UsbAdbConnection.findAdbInterface(device) != null) {
+                    usbDevice = device
+                    break
+                }
+            }
+            if (usbDevice == null) return false
+
+            _installStatus.value = "Found car via USB ADB..."
+            FileLog.i(TAG, "USB ADB device found: ${usbDevice.deviceName}")
+
+            if (!usbManager.hasPermission(usbDevice)) {
+                FileLog.w(TAG, "No USB permission for ${usbDevice.deviceName}")
+                return false
+            }
+
+            val adb = com.dilinkauto.protocol.adb.UsbAdbConnection(this)
+            if (!adb.connect(usbDevice)) {
+                FileLog.w(TAG, "USB ADB connection failed")
+                return false
+            }
+
+            try {
+                @Suppress("DEPRECATION")
+                val myVersion = packageManager.getPackageInfo(packageName, 0).versionCode
+
+                _installStatus.value = "Checking car version..."
+                val versionOutput = adb.shell(
+                    "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionCode"
+                )
+                val installedVersion = Regex("""versionCode=(\d+)""")
+                    .find(versionOutput)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                FileLog.i(TAG, "Car app (USB): installed=v$installedVersion, embedded=v$myVersion")
+
+                if (installedVersion >= myVersion) {
+                    _installStatus.value = "Already up-to-date (v$installedVersion)"
+                    return true
+                }
+
+                _installStatus.value = "Pushing APK over USB (${apkFile.length() / 1024 / 1024}MB)..."
+                val remotePath = "/data/local/tmp/app-server.apk"
+                val pushed = adb.push(apkFile.inputStream(), remotePath)
+                if (!pushed) {
+                    _installStatus.value = "USB push failed"
+                    FileLog.w(TAG, "USB ADB push failed")
+                    return false
+                }
+                FileLog.i(TAG, "Car APK pushed via USB (${apkFile.length()} bytes)")
+
+                _installStatus.value = "Installing on car..."
+                val result = adb.shell("pm install -r $remotePath")
+                FileLog.i(TAG, "USB install result: ${result.trim()}")
+
+                if (result.contains("Success")) {
+                    _installStatus.value = "Launching car app..."
+                    adb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
+                    _installStatus.value = "Car app v$myVersion installed via USB!"
+                    return true
+                } else {
+                    _installStatus.value = "Failed: ${result.trim()}"
+                    return false
+                }
+            } finally {
+                adb.close()
+            }
+        } catch (e: Exception) {
+            FileLog.w(TAG, "USB ADB install failed: ${e.message}")
+            return false
         }
     }
 
