@@ -55,6 +55,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Prevent screen lock while streaming — HyperOS may override system timeout settings
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         showOnboarding.value = !onboardingCompleted
 
         setContent {
