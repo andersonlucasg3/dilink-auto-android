@@ -48,13 +48,8 @@ jobs:
       - name: Build
         run: |
           chmod +x gradlew
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > app-client/dilink-auto-release.keystore
-            export RELEASE_KEYSTORE_FILE=dilink-auto-release.keystore
-          fi
           ./gradlew :app-client:assembleRelease
         env:
-          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
