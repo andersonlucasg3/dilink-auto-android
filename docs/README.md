@@ -99,7 +99,7 @@ This project is developed independently and relies on community support.
 
 [![Sponsor andersonlucasg3](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/andersonlucasg3)
 
-- **Pix** (Brazil): [Pay with Pix](https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d)
+- [![Pix (Brazil)](https://img.shields.io/badge/Pix-Brazil-00C2A0)](https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d)
 
 Every contribution helps cover development time, testing devices, and keeping the project alive.
 
