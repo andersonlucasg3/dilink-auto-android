@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Хабарландырулар -->
+    <string name="notification_channel_name">DiLink Auto қызметі</string>
+    <string name="notification_channel_description">Автокөлікке қосылу үшін DiLink Auto жұмысын сақтайды</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_connected">Автокөлікке қосылды</string>
+    <string name="notification_waiting">Автокөлік қосылуы күтілуде…</string>
+    <string name="notification_streaming">Автокөлік дисплейіне трансляция жасалуда</string>
+    <string name="notification_channel_update">Қолданба жаңартулары</string>
+    <string name="accessibility_description">DiLink Auto автокөлік дисплейіндегі түртулерді телефонға жіберу үшін арнайы мүмкіндіктерді пайдаланады.</string>
+
+    <!-- Негізгі экран -->
+    <string name="main_title">DiLink Auto</string>
+    <string name="main_subtitle">Телефон клиенті</string>
+    <string name="how_to_connect_title">Қалай қосылуға болады</string>
+    <string name="how_to_step_1">1.  Телефондағы WiFi хотспотын қосыңыз</string>
+    <string name="how_to_step_2">2.  Автокөлікті телефонның WiFi хотспотына қосыңыз</string>
+    <string name="how_to_step_3">3.  Телефонды автокөліктің USB портына жалғаңыз</string>
+    <string name="how_to_step_4">4.  Төмендегі Қызметті бастау түймесін басыңыз</string>
+    <string name="how_to_footer">Автокөлік бірінші қолданғанда қолданбаны автоматты түрде орнатып, WiFi арқылы қосылады.</string>
+    <string name="start_service">Қызметті бастау</string>
+    <string name="stop_service">Қызметті тоқтату</string>
+    <string name="manual_ip">IP қолмен</string>
+    <string name="install_btn">Орнату</string>
+    <string name="auto_detect_install">Автоматты анықтау және орнату</string>
+    <string name="install_on_car">Автокөлікке орнату</string>
+    <string name="car_ip_hint">мысалы, 192.168.43.100</string>
+    <string name="car_ip_label">Автокөлік IP мекенжайы</string>
+
+    <!-- Күй -->
+    <string name="status_stopped">Қызмет тоқтатылды</string>
+    <string name="status_stopped_desc">Бастау үшін Start түймесін басыңыз</string>
+    <string name="status_waiting">Автокөлік күтілуде</string>
+    <string name="status_waiting_desc">Телефонды автокөліктің USB портына жалғап, кейін WiFi арқылы қосыңыз</string>
+    <string name="status_listening">Тыңдалуда: %1$s</string>
+    <string name="status_connected">Автокөлік қосылды</string>
+    <string name="status_connected_desc">Виртуалды дисплей күтілуде…</string>
+    <string name="status_streaming">Трансляция</string>
+    <string name="status_streaming_desc">Виртуалды дисплей белсенді</string>
+
+    <!-- Жаңартулар -->
+    <string name="updates_title">Жаңартулар</string>
+    <string name="updates_check_phone">Телефон жаңартуын тексеру</string>
+    <string name="updates_checking">Жаңартулар тексерілуде…</string>
+    <string name="updates_up_to_date">Телефон: соңғы нұсқа (v%1$s)</string>
+    <string name="updates_available">Телефон: v%1$s қолжетімді</string>
+    <string name="updates_size_mb">%1$.1f МБ</string>
+    <string name="updates_download_btn">Жаңартуды жүктеп алу</string>
+    <string name="updates_downloading">Жүктелуде… %1$d%%</string>
+    <string name="updates_ready">Телефон: v%1$s дайын</string>
+    <string name="updates_install_btn">Жаңартуды орнату</string>
+    <string name="updates_retry">Қайталау</string>
+    <string name="updates_car_title">Автокөлік қолданбасы</string>
+    <string name="updates_car_desc">Автокөлік қолданбасын WiFi ADB арқылы орнату немесе жаңарту</string>
+    <string name="updates_car_install">Орнату</string>
+
+    <!-- Баптаулар -->
+    <string name="settings_title">Баптаулар</string>
+    <string name="settings_permissions">Рұқсаттар</string>
+    <string name="perm_all_files">Барлық файлдарға қол жеткізу</string>
+    <string name="perm_all_files_granted">Виртуалды дисплей серверін орналастыру үшін қажет</string>
+    <string name="perm_battery">Батареяны оңтайландыру</string>
+    <string name="perm_battery_granted">Экран өшірулі кезде трансляцияны сақтайды</string>
+    <string name="perm_accessibility">Арнайы мүмкіндіктер қызметі</string>
+    <string name="perm_accessibility_granted">Автокөліктен сенсорлық басқаруды қосады</string>
+    <string name="perm_notifications">Хабарландыруларға қол жеткізу</string>
+    <string name="perm_notifications_granted">Хабарландыруларды автокөлік дисплейіне жібереді</string>
+    <string name="perm_granted">Берілді</string>
+    <string name="perm_usb_debugging">USB арқылы жөндеу</string>
+    <string name="perm_usb_desc">Телефонда да, автокөлікте де қажет</string>
+
+    <!-- Қолдау -->
+    <string name="support_title">Қолдау</string>
+    <string name="support_heading">DiLink-Auto жұмысын қолдаңыз</string>
+    <string name="support_sponsor_btn">GitHub арқылы демеуші болу</string>
+    <string name="support_pix_btn">Pix арқылы төлеу (Бразилия)</string>
+
+    <!-- Қолданба туралы -->
+    <string name="about_title">Қолданба туралы</string>
+    <string name="about_version">DiLink-Auto v%1$s</string>
+    <string name="about_tagline">Android Auto үшін ашық кодты балама</string>
+    <string name="about_libs_heading">Ашық кодты кітапханалар:</string>
+    <string name="about_lib_dadb">dadb — Apache 2.0</string>
+    <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
+    <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
+    <string name="about_lib_scrcpy">scrcpy (FakeContext/SurfaceScaler тұжырымдамалары) — Apache 2.0</string>
+
+    <!-- Алғашқы баптау -->
+    <string name="onboarding_welcome_title">DiLink-Auto қолданбасына қош келдіңіз</string>
+    <string name="onboarding_welcome_desc">Телефон қолданбаларын автокөліктің кірістірілген экранында пайдаланыңыз. Барлығы жұмыс істеуі үшін бірнеше рұқсатты баптайық.</string>
+    <string name="onboarding_files_title">Барлық файлдарға қол жеткізу</string>
+    <string name="onboarding_files_desc">Виртуалды дисплей серверін телефон жадына орналастырады. Онсыз автокөлік экранды шағылыстыруды бастай алмайды.</string>
+    <string name="onboarding_battery_title">Батареяны оңтайландыру</string>
+    <string name="onboarding_battery_desc">Экран өшірулі кезде қосылымды сақтайды. Онсыз телефон ұйқы режиміне өткенде трансляция тоқтайды.</string>
+    <string name="onboarding_accessibility_title">Арнайы мүмкіндіктер қызметі</string>
+    <string name="onboarding_accessibility_desc">Автокөліктің сенсорлық экраны телефонды басқаруына мүмкіндік береді. Онсыз экранды көресіз, бірақ түрте алмайсыз.</string>
+    <string name="onboarding_notification_title">Хабарландыруларға қол жеткізу</string>
+    <string name="onboarding_notification_desc">Телефон хабарландыруларын автокөлік дисплейінде көрсетеді. Онсыз жүргізу кезінде қоңыраулар мен хабарларды өткізіп аласыз.</string>
+    <string name="onboarding_done_title">Барлығы дайын</string>
+    <string name="onboarding_done_desc">Барлығы дайын. Бастау үшін телефонды автокөліктің USB портына жалғаңыз.</string>
+    <string name="onboarding_grant">Рұқсат беру</string>
+    <string name="onboarding_skip">Өткізіп жіберу</string>
+    <string name="onboarding_continue">Жалғастыру</string>
+    <string name="onboarding_start">DiLink-Auto пайдалануды бастау</string>
+    <string name="onboarding_skip_btn">Әзірге өткізіп жіберу</string>
+    <string name="onboarding_granted_label">Берілді</string>
+
+    <!-- Автокөлікке орнату (Баптаулар) -->
+    <string name="car_install_title">Автокөлікке орнату</string>
+    <string name="car_install_desc">Автокөлік ADB қосулы болуы керек (5555-порт)</string>
+    <string name="car_install_ip_label">Автокөлік IP мекенжайы</string>
+    <string name="car_install_ip_hint">Автоматты анықтау үшін бос қалдырыңыз</string>
+    <string name="car_install_button">Автокөлікке орнату</string>
+</resources>
