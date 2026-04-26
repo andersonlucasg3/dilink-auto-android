@@ -11,8 +11,8 @@ android {
         applicationId = "com.dilinkauto.client"
         minSdk = 29
         targetSdk = 34
-        versionCode = 46
-        versionName = "0.13.1"
+        versionCode = 47
+        versionName = "0.14.0-dev"
     }
 
     signingConfigs {
@@ -37,6 +37,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {

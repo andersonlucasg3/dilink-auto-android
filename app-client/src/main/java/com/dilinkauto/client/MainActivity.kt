@@ -751,9 +751,13 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 val versionName = try {
-                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
                 } catch (_: Exception) { "unknown" }
-                Text("DiLink-Auto v$versionName", fontWeight = FontWeight.Medium, color = Color.White)
+                @Suppress("DEPRECATION")
+                val versionCode = try {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionCode
+                } catch (_: Exception) { 0 }
+                Text("DiLink-Auto v$versionName (build $versionCode)", fontWeight = FontWeight.Medium, color = Color.White)
                 Spacer(Modifier.height(4.dp))
                 Text("Open-source alternative to Android Auto", fontSize = 12.sp, color = Color.Gray)
                 Spacer(Modifier.height(12.dp))

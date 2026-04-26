@@ -31,10 +31,16 @@ sealed class UpdateState {
 
 object UpdateManager {
     private const val TAG = "UpdateManager"
-    private const val GITHUB_API = "https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases/latest"
+    // Release builds: `releases/latest` excludes prereleases.
+    // Debug builds: `releases?per_page=1` includes prereleases (dev builds from develop branch).
+    private val GITHUB_API = if (com.dilinkauto.client.BuildConfig.DEBUG)
+        "https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases?per_page=1"
+    else
+        "https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases/latest"
     private const val COOLDOWN_MS = 6 * 3600 * 1000L
     private const val PREFS_NAME = "dilinkauto_update"
     private const val KEY_LAST_CHECK = "last_check_timestamp"
+    private const val KEY_DEV_TIMESTAMP = "last_dev_timestamp"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var prefs: SharedPreferences
@@ -251,7 +257,14 @@ object UpdateManager {
         val body = conn.inputStream.bufferedReader().use { it.readText() }
         conn.disconnect()
 
-        val json = JSONObject(body)
+        // releases/latest returns a single object; releases?per_page=1 returns an array
+        val json = if (body.trimStart().startsWith("[")) {
+            val arr = org.json.JSONArray(body)
+            if (arr.length() == 0) return null
+            arr.getJSONObject(0)
+        } else {
+            JSONObject(body)
+        }
         val tagName = json.getString("tag_name")
         val versionName = tagName.removePrefix("v")
 
