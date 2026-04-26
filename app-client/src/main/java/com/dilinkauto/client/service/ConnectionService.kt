@@ -649,57 +649,10 @@ class ConnectionService : Service() {
             }
         }
 
-        // 2. Try reading DHCP leases (fastest — direct from hotspot's dnsmasq)
-        try {
-            for (path in listOf("/data/misc/dhcp/dnsmasq.leases", "/data/vendor/dhcp/dnsmasq.leases")) {
-                val file = java.io.File(path)
-                if (!file.canRead()) continue
-                for (line in file.readLines()) {
-                    val parts = line.trim().split("\\s+".toRegex())
-                    if (parts.size < 3) continue
-                    val ip = parts[2]
-                    if (ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+")) && probePort(ip, 5555)) {
-                        FileLog.i(TAG, "Found car ADB at $ip (DHCP leases)")
-                        return ip
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-
-        // 3. Ping broadcast to populate ARP table, then probe all ARP entries.
+        // 2. ARP table + ip neigh + gateway on local subnet
         val subnetIps = getLocalSubnetIps()
-        if (subnetIps.isNotEmpty()) {
-            val prefix = subnetIps.first().substringBeforeLast(".")
-            val ownIp = subnetIps.first()
-            val broadcastIp = "$prefix.255"
-
-            // Populate ARP table via broadcast ping
-            try {
-                Runtime.getRuntime().exec(arrayOf("ping", "-c", "1", "-W", "1", broadcastIp)).waitFor()
-                kotlinx.coroutines.delay(200) // let ARP settle
-            } catch (_: Exception) {}
-
-            // Read ARP table — should now have all WiFi clients
-            try {
-                val arp = java.io.File("/proc/net/arp").readText()
-                for (line in arp.lines().drop(1)) {
-                    val ip = line.split("\\s+".toRegex()).firstOrNull() ?: continue
-                    if (ip == "0.0.0.0" || ip == ownIp) continue
-                    if (!ip.startsWith("$prefix.")) continue
-                    if (probePort(ip, 5555)) {
-                        FileLog.i(TAG, "Found car ADB at $ip (ARP after broadcast)")
-                        return ip
-                    }
-                }
-            } catch (_: Exception) {}
-
-            // Fallback: parallel subnet scan if ARP missed it
-            val result = probeSubnetConcurrent(prefix, ownIp, maxConcurrent = 32)
-            if (result != null) {
-                FileLog.i(TAG, "Found car ADB at $result (parallel subnet scan)")
-                return result
-            }
-        }
+        val ownIp = subnetIps.firstOrNull() ?: ""
+        val prefix = if (ownIp.isNotEmpty()) ownIp.substringBeforeLast(".") else ""
 
         // 3. ARP table
         try {
@@ -726,7 +679,16 @@ class ConnectionService : Service() {
             }
         } catch (_: Exception) {}
 
-        // 5. Gateway (last resort — may be the phone itself on hotspot)
+        // 5. Parallel subnet scan — probes entire /24 in ~1s
+        if (prefix.isNotEmpty()) {
+            val result = probeSubnetConcurrent(prefix, ownIp, maxConcurrent = 32)
+            if (result != null) {
+                FileLog.i(TAG, "Found car ADB at $result (parallel subnet scan)")
+                return result
+            }
+        }
+
+        // 6. Gateway (last resort — may be the phone itself on hotspot)
         try {
             val wm = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
             val gw = wm.dhcpInfo.gateway
@@ -734,7 +696,7 @@ class ConnectionService : Service() {
                 val ip = String.format("%d.%d.%d.%d",
                     gw and 0xFF, (gw shr 8) and 0xFF,
                     (gw shr 16) and 0xFF, (gw shr 24) and 0xFF)
-                if (ip != subnetIps.firstOrNull() && probePort(ip, 5555)) {
+                if (ip != ownIp && probePort(ip, 5555)) {
                     FileLog.i(TAG, "Found car ADB at $ip (gateway)")
                     return ip
                 }
