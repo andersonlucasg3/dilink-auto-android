@@ -11,8 +11,8 @@ android {
         applicationId = "com.dilinkauto.server"
         minSdk = 29
         targetSdk = 34
-        versionCode = 49
-        versionName = "0.14.2-dev"
+        versionCode = 50
+        versionName = "0.14.3-dev"
     }
 
     buildTypes {
