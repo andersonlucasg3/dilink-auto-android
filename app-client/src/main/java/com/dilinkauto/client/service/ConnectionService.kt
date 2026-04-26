@@ -649,20 +649,18 @@ class ConnectionService : Service() {
             }
         }
 
-        // 2. Scan the local subnet — probe nearby IPs for port 5555.
-        //    When the phone is a hotspot, the phone is the gateway (.1) and
-        //    clients get IPs like .2-.254. Try the most likely ones first.
+        // 2. Scan the full /24 subnet in parallel (concurrent probes, fast).
+        //    When the phone is a hotspot, the car gets an IP from the phone's DHCP
+        //    pool which is unpredictable. Concurrent probing covers all possibilities.
         val subnetIps = getLocalSubnetIps()
         if (subnetIps.isNotEmpty()) {
-            // Try common DHCP client IPs first (hotspot case)
             val prefix = subnetIps.first().substringBeforeLast(".")
-            for (host in listOf(100, 101, 102, 2, 3, 4, 5, 43, 50, 150)) {
-                val ip = "$prefix.$host"
-                if (ip == subnetIps.first()) continue // skip own IP
-                if (probePort(ip, 5555)) {
-                    FileLog.i(TAG, "Found car ADB at $ip (subnet scan)")
-                    return ip
-                }
+            val ownIp = subnetIps.first()
+            // Probe entire /24 subnet in parallel batches of 32, 150ms timeout each
+            val result = probeSubnetConcurrent(prefix, ownIp, maxConcurrent = 32)
+            if (result != null) {
+                FileLog.i(TAG, "Found car ADB at $result (parallel subnet scan)")
+                return result
             }
         }
 
@@ -722,6 +720,50 @@ class ConnectionService : Service() {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * Scans a /24 subnet for port 5555 using parallel concurrent probes.
+     * Probes the full 1-254 range in batches of [maxConcurrent], 150ms timeout each.
+     * This finds the car reliably regardless of its DHCP-assigned IP.
+     */
+    private suspend fun probeSubnetConcurrent(
+        prefix: String, ownIp: String, maxConcurrent: Int = 32
+    ): String? = coroutineScope {
+        // Skip .0 (network) and .255 (broadcast)
+        val ips = (1..254).map { "$prefix.$it" }.filter { it != ownIp }
+        ips.chunked(maxConcurrent).forEach { batch ->
+            val results = batch.map { ip ->
+                async(Dispatchers.IO) { if (probePortRaw(ip, 5555)) ip else null }
+            }
+            results.forEach { deferred ->
+                val found = deferred.await()
+                if (found != null) {
+                    coroutineContext.cancelChildren() // cancel remaining probes
+                    return@coroutineScope found
+                }
+            }
+        }
+        null
+    }
+
+    /** Non-suspend port probe (150ms timeout) for use in parallel scans */
+    private fun probePortRaw(ip: String, port: Int): Boolean {
+        return try {
+            val ch = java.nio.channels.SocketChannel.open()
+            ch.configureBlocking(false)
+            ch.connect(java.net.InetSocketAddress(ip, port))
+            val deadline = System.currentTimeMillis() + 150
+            try {
+                while (!ch.finishConnect()) {
+                    if (System.currentTimeMillis() > deadline) return false
+                    Thread.sleep(5)
+                }
+                true
+            } finally {
+                ch.close()
+            }
+        } catch (_: Exception) { false }
     }
 
     private suspend fun probePort(ip: String, port: Int): Boolean {
