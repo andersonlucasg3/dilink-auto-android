@@ -290,7 +290,7 @@ class VirtualDisplayServer(
         format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
         format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
         format.setInteger(MediaFormat.KEY_LATENCY, 1)
-        format.setInteger(MediaFormat.KEY_PRIORITY, 1)
+        format.setInteger(MediaFormat.KEY_PRIORITY, 0) // real-time — ensures P-frames between keyframes
         format.setLong("repeat-previous-frame-after", 1_000_000L)
 
         try {
