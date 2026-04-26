@@ -108,6 +108,20 @@ This project is developed independently and relies on community support. Every c
 
 PRs welcome. See [Architecture](./architecture.md) and [Protocol](./protocol.md) for technical context. Build with `./gradlew :app-client:assembleDebug` (JDK 17+, Android SDK 34).
 
+### Branching Model (Git-Flow)
+
+| Branch | Purpose | CI |
+|--------|---------|----|
+| `main` | Stable releases | Builds signed release APK, auto-creates release on version tag |
+| `develop` | Active development | Builds debug APK, updates prerelease for in-app dev updates |
+| `feature/*` | New features | Merge to `develop` via PR |
+| `fix/*` | Bug fixes | Merge to `develop` via PR |
+| `release/*` | Release preparation | Merge to `main` → triggers release |
+
+**Release process:** Create a `release/vX.Y.Z` branch from `develop`, bump version, merge into `main`. The CI automatically creates a signed GitHub Release when a `v*` tag is pushed.
+
+**Debug build updates:** Debug builds check for the latest prerelease from `develop`. To push a dev update, merge your changes to `develop` — CI creates a prerelease that debug builds detect as an update.
+
 ## License
 
 MIT — see [LICENSE](../LICENSE)
