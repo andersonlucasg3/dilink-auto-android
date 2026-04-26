@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Сповіщення -->
+    <string name="notification_channel_name">Автомобільна служба DiLink Auto</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_searching">Пошук телефона…</string>
+    <string name="notification_connected">Підключено до телефона</string>
+
+    <!-- Лаунчер -->
+    <string name="search_hint">Пошук застосунків…</string>
+    <string name="not_connected">Не підключено</string>
+    <string name="plug_phone_usb">Підключіть телефон до USB авто</string>
+    <string name="phone_ip_label">IP-адреса телефона</string>
+    <string name="connect_button">Підключити</string>
+
+    <!-- Панель навігації -->
+    <string name="nav_launcher">Лаунчер</string>
+    <string name="nav_recent">Нещодавні</string>
+    <string name="nav_notifications">Сповіщення</string>
+    <string name="nav_back">Назад</string>
+    <string name="nav_home">Додому</string>
+
+    <!-- Дзеркалювання -->
+    <string name="status_updating">Оновлення застосунку авто…</string>
+    <string name="status_please_wait">Будь ласка, зачекайте</string>
+</resources>
