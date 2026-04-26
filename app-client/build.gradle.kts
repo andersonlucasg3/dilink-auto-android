@@ -18,9 +18,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file(System.getenv("RELEASE_KEYSTORE_FILE") ?: "dilink-auto-release.keystore")
-            storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: "dilinkauto123"
+            storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: "D1L1nk@R3l3as3#2026!"
             keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "dilinkauto"
-            keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: "dilinkauto123"
+            keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: "D1L1nk@R3l3as3#2026!"
         }
     }
 
