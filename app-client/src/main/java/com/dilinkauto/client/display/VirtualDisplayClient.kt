@@ -88,7 +88,7 @@ class VirtualDisplayClient(
                 accepted.configureBlocking(false)
                 accepted.socket().tcpNoDelay = true
                 channel = accepted
-                val rdr = NioReader(accepted, 65536) // smaller buffer for localhost
+                val rdr = NioReader(accepted, NioReader.DEFAULT_CAPACITY) // 256KB to avoid realloc on keyframes
                 reader = rdr
 
                 val msgType = rdr.readByte()

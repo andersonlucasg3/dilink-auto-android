@@ -252,18 +252,6 @@ class VirtualDisplayServer(
         ch.configureBlocking(false)
     }
 
-    /** Enqueue data for non-blocking write. Thread-safe, lock-free. */
-    private fun enqueueWrite(msgType: Byte, data: ByteArray) {
-        val buf = ByteBuffer.allocate(1 + 4 + data.size)
-        buf.put(msgType)
-        buf.putInt(data.size)
-        buf.put(data)
-        buf.flip()
-        writeQueue.add(buf)
-        val wt = writerThread
-        if (wt != null) LockSupport.unpark(wt)
-    }
-
     /** Enqueue a single-byte message (e.g., MSG_STACK_EMPTY) */
     private fun enqueueWriteByte(msgType: Byte) {
         val buf = ByteBuffer.allocate(1)
@@ -355,9 +343,16 @@ class VirtualDisplayServer(
                         lastKeyFrameAt = now
                     }
 
-                    val frameData = ByteArray(size)
-                    buffer.get(frameData, 0, size)
-                    enqueueWrite(msgType, frameData)
+                    // Single allocation: encode header + payload directly into ByteBuffer
+                    val buf = ByteBuffer.allocate(1 + 4 + size)
+                    buf.put(msgType)
+                    buf.putInt(size)
+                    buffer.get(buf.array(), buf.arrayOffset() + buf.position(), size)
+                    buf.position(buf.limit())  // advance position past payload
+                    buf.flip()
+                    writeQueue.add(buf)
+                    val wt = writerThread
+                    if (wt != null) LockSupport.unpark(wt)
 
                     frameCount++
                     noOutputCount = 0

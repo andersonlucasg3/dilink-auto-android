@@ -57,7 +57,6 @@ class VideoDecoder {
 
     /** Check if H.264 NAL data contains an IDR frame (NAL type 5) */
     private fun isKeyFrame(data: ByteArray): Boolean {
-        // Scan for NAL start codes (0x00 0x00 0x00 0x01 or 0x00 0x00 0x01)
         var i = 0
         while (i < data.size - 4) {
             if (data[i] == 0.toByte() && data[i + 1] == 0.toByte()) {
@@ -65,8 +64,7 @@ class VideoDecoder {
                     else if (data[i + 2] == 0.toByte() && i + 3 < data.size && data[i + 3] == 1.toByte()) i + 4
                     else { i++; continue }
                 if (nalStart < data.size) {
-                    val nalType = data[nalStart].toInt() and 0x1F
-                    if (nalType == 5) return true // IDR
+                    if ((data[nalStart].toInt() and 0x1F) == 5) return true
                 }
             }
             i++
@@ -74,7 +72,7 @@ class VideoDecoder {
         return false
     }
 
-    data class FrameData(val isConfig: Boolean, val data: ByteArray)
+    data class FrameData(val isConfig: Boolean, val isKeyFrame: Boolean, val data: ByteArray)
 
     /**
      * Starts the decoder, rendering to the provided Surface.
@@ -135,7 +133,7 @@ class VideoDecoder {
                     feedBuffer(decoder, frame.data, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
                 } else {
                     val queueSize = frameQueue.size
-                    val isKey = isKeyFrame(frame.data)
+                    val isKey = frame.isKeyFrame
 
                     // Catchup mode: skip every other non-keyframe to speed up playback
                     if (queueSize > catchupThreshold && !isKey && frameCount % 2 == 1L) {
@@ -249,13 +247,13 @@ class VideoDecoder {
         }
         // Queue frames even before start() — the feed thread will drain them
         // once the decoder is ready.
-        if (!frameQueue.offer(FrameData(isConfig, data))) {
+        if (!frameQueue.offer(FrameData(isConfig, isKey, data))) {
             // Queue full — drop oldest to keep latency low
             val dropped = frameQueue.poll()
-            frameQueue.offer(FrameData(isConfig, data))
+            frameQueue.offer(FrameData(isConfig, isKey, data))
             dropCount++
             // Check if we dropped a keyframe — this causes distortion
-            if (dropped != null && !dropped.isConfig && isKeyFrame(dropped.data)) {
+            if (dropped != null && !dropped.isConfig && dropped.isKeyFrame) {
                 keyFramesDropped++
                 logW("DROPPED KEYFRAME #$keyFramesDropped (receive=$receiveCount queue=${frameQueue.size})")
             }
