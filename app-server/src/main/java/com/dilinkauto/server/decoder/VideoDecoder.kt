@@ -100,6 +100,7 @@ class VideoDecoder {
         renderCount = 0
         dropCount = 0
         inputFailCount = 0
+        var configFed = false
 
         feedThread = Thread({
             val decoder = codec ?: run {
@@ -108,10 +109,12 @@ class VideoDecoder {
             }
             log("Feed thread started")
 
-            // If we have cached config, feed it first before any frames
+            // If we have cached config, feed it first before any frames.
+            // Without SPS/PPS, the decoder silently fails on non-config frames.
             configData?.let { config ->
                 log("Feeding cached CONFIG (${config.size} bytes)")
                 feedBuffer(decoder, config, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+                configFed = true
             }
 
             // Catchup: when queue exceeds 100ms worth of frames, feed every other
@@ -131,6 +134,11 @@ class VideoDecoder {
                     configData = frame.data
                     log("Feeding CONFIG (${frame.data.size} bytes)")
                     feedBuffer(decoder, frame.data, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+                    configFed = true
+                } else if (!configFed) {
+                    // Skip non-config frames until we have SPS/PPS
+                    if (frameCount == 0L) log("Waiting for CONFIG before feeding video frames")
+                    continue
                 } else {
                     val queueSize = frameQueue.size
                     val isKey = frame.isKeyFrame
