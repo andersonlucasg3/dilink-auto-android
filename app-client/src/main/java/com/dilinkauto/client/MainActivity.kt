@@ -763,6 +763,14 @@ fun SettingsScreen(
                 Text("DiLink-Auto v$versionName (build $versionCode)", fontWeight = FontWeight.Medium, color = Color.White)
                 Spacer(Modifier.height(4.dp))
                 Text("Open-source alternative to Android Auto", fontSize = 12.sp, color = Color.Gray)
+                Spacer(Modifier.height(8.dp))
+                Text(stringResource(R.string.about_dev_credit), fontSize = 12.sp, color = Color(0xFFB0BEC5))
+                TextButton(onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/andersonlucasg3"))
+                    context.startActivity(intent)
+                }) {
+                    Text(stringResource(R.string.about_dev_github), color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                }
                 Spacer(Modifier.height(12.dp))
                 Text("Open Source Libraries:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB0BEC5))
                 Text("dadb — Apache 2.0", fontSize = 12.sp, color = Color.Gray)

@@ -114,4 +114,6 @@
     <string name="car_install_ip_label">Автокөлік IP мекенжайы</string>
     <string name="car_install_ip_hint">Автоматты анықтау үшін бос қалдырыңыз</string>
     <string name="car_install_button">Автокөлікке орнату</string>
+    <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
+    <string name="about_dev_github">github.com/andersonlucasg3</string>
 </resources>

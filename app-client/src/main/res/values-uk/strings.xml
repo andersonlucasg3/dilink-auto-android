@@ -114,4 +114,6 @@
     <string name="car_install_ip_label">IP-адреса автомобіля</string>
     <string name="car_install_ip_hint">Залиште порожнім для автовиявлення</string>
     <string name="car_install_button">Встановити в автомобіль</string>
+    <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
+    <string name="about_dev_github">github.com/andersonlucasg3</string>
 </resources>

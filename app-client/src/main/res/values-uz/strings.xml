@@ -114,4 +114,6 @@
     <string name="car_install_ip_label">Avtomobil IP manzili</string>
     <string name="car_install_ip_hint">Avtoaniqlash uchun bo\'sh qoldiring</string>
     <string name="car_install_button">Avtomobilga o\'rnatish</string>
+    <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
+    <string name="about_dev_github">github.com/andersonlucasg3</string>
 </resources>

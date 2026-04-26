@@ -89,6 +89,8 @@
     <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
     <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
     <string name="about_lib_scrcpy">scrcpy (FakeContext/SurfaceScaler concepts) — Apache 2.0</string>
+    <string name="about_dev_credit">Developed with ❤ by Anderson Lucas de Castro Ramos 🇧🇷</string>
+    <string name="about_dev_github">github.com/andersonlucasg3</string>
 
     <!-- Onboarding -->
     <string name="onboarding_welcome_title">Welcome to DiLink-Auto</string>

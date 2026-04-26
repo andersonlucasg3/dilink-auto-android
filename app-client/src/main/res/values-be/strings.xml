@@ -114,4 +114,6 @@
     <string name="car_install_ip_label">IP-адрас аўтамабіля</string>
     <string name="car_install_ip_hint">Пакіньце пустым для аўтавызначэння</string>
     <string name="car_install_button">Усталяваць у аўтамабіль</string>
+    <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
+    <string name="about_dev_github">github.com/andersonlucasg3</string>
 </resources>
