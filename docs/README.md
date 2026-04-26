@@ -46,7 +46,7 @@ The phone runs your apps on a virtual display, encodes the screen as H.264 video
 
 <a href="https://github.com/andersonlucasg3/dilink-auto-android/releases/latest"><img src="https://img.shields.io/github/v/release/andersonlucasg3/dilink-auto-android?label=Download%20Latest%20Release" alt="Download Latest Release"></a>
 
-*First release coming soon. For now, build from source:*
+Download the latest release or build from source:
 
 1. **Build:** `./gradlew :app-client:assembleDebug`
 2. **Install** the APK at `app-client/build/outputs/apk/debug/app-client-debug.apk` on your phone only
@@ -69,7 +69,11 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 
 **Coming:** audio streaming, media controls, navigation widgets
 
-**Known limitations:** VD server process restarts on USB disconnect (reconnects automatically). Hotspot must be enabled manually (Android 16 limitation).
+**Known limitations:**
+- VD server process restarts on USB disconnect (reconnects automatically).
+- Hotspot must be enabled manually (Android 16 limitation).
+- Occasional visual artifacts — likely due to decoder restart race between config and pending frames. Recovery at next keyframe (~1s).
+- Streaming latency ~100-200ms under load. Encoder runs at CBR 12Mbps; further latency reduction possible with VBR tuning.
 
 ## Documentation
 

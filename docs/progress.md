@@ -1,11 +1,25 @@
 # Progress Tracker
 
-Current version: **v0.13.1** (USB ADB auth fixed, display power fixed, decoder catchup)
-Last updated: 2026-04-25
+Current version: **v0.13.1** (first release prep)
+Last updated: 2026-04-26
 
 ## Milestones
 
-### v0.13.1 — USB ADB Auth Fix (2026-04-25)
+### v0.13.1 — First Release (2026-04-26)
+
+- **Onboarding flow**: Guided first-launch permission setup (All Files, Battery, Accessibility, Notifications). Auto-detects grants, polling fallback for dialog-style settings.
+- **Self-update (UpdateManager)**: Checks GitHub Releases API, downloads APK with progress, installs via system package installer. 6-hour cooldown.
+- **Main view reorganization**: Main screen focused on daily use (connection guide, status, start/stop, updates). Settings screen with permissions, car install, about, and donation links.
+- **USB + WiFi install on car**: Parallel subnet scanner probes all 254 IPs for car ADB. Combined with ARP/neighbor/gateway discovery. USB host attempted but car USB-A is host-only.
+- **VD server now Kotlin Gradle module**: Depends on :protocol and kotlinx-coroutines. Shares NioReader, FrameCodec.writeAll.
+- **Performance**: Eliminated intermediate ByteArray allocation per frame in encoder. NioReader initial capacity 256KB. isKeyFrame cached in FrameData.
+- **Encoder**: CBR 12Mbps, High profile, 60fps, PRIORITY 0 (real-time). I_FRAME_INTERVAL=1s.
+- **Donations**: GitHub Sponsors and Pix (Brazil) badges in README and app settings.
+- **Adaptive vector icon**: Car silhouette with wireless signals, applied to both phone and car apps.
+- **Internationalization**: String resources in English, Portuguese (pt-BR), and Russian (ru). Onboarding and main UI localized.
+- **Release signing**: Fixed keystore with strong password. CI builds signed release APKs via GitHub Secrets.
+
+### v0.13.0 — USB ADB Auth Fix (2026-04-25)
 
 Root cause found and fixed: `Signature.getInstance("SHA1withRSA")` double-hashes the ADB AUTH_TOKEN. ADB's 20-byte token is a pre-hashed value — AOSP's `RSA_sign(NID_sha1)` treats it as already hashed. Now uses `NONEwithRSA` with manually prepended SHA-1 DigestInfo ASN.1 prefix (prehashed signing). "Always allow" now persists correctly — AUTH_SIGNATURE accepted on reconnect without dialog.
 

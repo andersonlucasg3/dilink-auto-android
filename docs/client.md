@@ -17,6 +17,14 @@ The phone client manages VD server deployment, car auto-update, and 3-connection
 
 ## Components
 
+### UpdateManager
+
+Self-update mechanism that checks GitHub Releases for new versions.
+- `checkForUpdate(force)`: Queries `https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases/latest`, compares semver from tag name against installed versionName. Respects 6-hour cooldown unless forced.
+- `downloadUpdate()`: Downloads APK via `HttpsURLConnection` with progress reporting. Verifies via `PackageManager.getPackageArchiveInfo()`.
+- `installUpdate(context)`: Opens system package installer via `FileProvider` URI.
+- States: Idle, Checking, Available, Downloading, ReadyToInstall, UpToDate, Error. Exposed via `StateFlow`.
+
 ### MainActivity
 
 Entry point with two screens:
