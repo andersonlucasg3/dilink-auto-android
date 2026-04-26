@@ -1,23 +1,96 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">DiLink Auto</string>
+
+    <!-- Notifications -->
     <string name="notification_channel_name">DiLink Auto Service</string>
     <string name="notification_channel_description">Keeps DiLink Auto running for car connection</string>
     <string name="notification_title">DiLink Auto</string>
     <string name="notification_connected">Connected to car</string>
     <string name="notification_waiting">Waiting for car connection…</string>
     <string name="notification_streaming">Streaming to car display</string>
+    <string name="notification_channel_update">App Updates</string>
     <string name="accessibility_description">DiLink Auto uses accessibility to forward touch events from the car display to your phone.</string>
-    <string name="update_checking">Checking for updates…</string>
-    <string name="update_up_to_date">Up to date (v%1$s)</string>
-    <string name="update_available">Update available: v%1$s (%2$.1f MB)</string>
-    <string name="update_downloading">Downloading… %1$d%%</string>
-    <string name="update_ready">Ready to install v%1$s</string>
-    <string name="update_error">%1$s</string>
-    <string name="update_download">Download</string>
-    <string name="update_install">Install</string>
-    <string name="update_retry">Retry</string>
-    <string name="update_check">Check for Updates</string>
+
+    <!-- Main Screen -->
+    <string name="main_title">DiLink Auto</string>
+    <string name="main_subtitle">Phone Client</string>
+    <string name="how_to_connect_title">How to Connect</string>
+    <string name="how_to_step_1">1.  Enable your phone\'s WiFi hotspot</string>
+    <string name="how_to_step_2">2.  Connect the car to your phone\'s hotspot WiFi</string>
+    <string name="how_to_step_3">3.  Plug the phone into the car\'s USB port</string>
+    <string name="how_to_step_4">4.  Tap Start Service below</string>
+    <string name="how_to_footer">The car will auto-install on first use and connect automatically over WiFi.</string>
+    <string name="start_service">Start Service</string>
+    <string name="stop_service">Stop Service</string>
+    <string name="manual_ip">Manual IP</string>
+    <string name="install_btn">Install</string>
+    <string name="auto_detect_install">Auto-detect &amp; Install</string>
+    <string name="install_on_car">Install on Car</string>
+    <string name="car_ip_hint">e.g. 192.168.43.100</string>
+    <string name="car_ip_label">Car IP</string>
+
+    <!-- Status -->
+    <string name="status_stopped">Service Stopped</string>
+    <string name="status_stopped_desc">Tap Start to begin</string>
+    <string name="status_waiting">Waiting for Car</string>
+    <string name="status_waiting_desc">Plug phone into car USB, then connect via WiFi</string>
+    <string name="status_listening">Listening on: %1$s</string>
+    <string name="status_connected">Car Connected</string>
+    <string name="status_connected_desc">Waiting for virtual display…</string>
+    <string name="status_streaming">Streaming</string>
+    <string name="status_streaming_desc">Virtual display active</string>
+
+    <!-- Updates -->
+    <string name="updates_title">Updates</string>
+    <string name="updates_check_phone">Check for phone update</string>
+    <string name="updates_checking">Checking for updates…</string>
+    <string name="updates_up_to_date">Phone: up to date (v%1$s)</string>
+    <string name="updates_available">Phone: v%1$s available</string>
+    <string name="updates_size_mb">%1$.1f MB</string>
+    <string name="updates_download_btn">Download Update</string>
+    <string name="updates_downloading">Downloading… %1$d%%</string>
+    <string name="updates_ready">Phone: v%1$s ready</string>
+    <string name="updates_install_btn">Install Update</string>
+    <string name="updates_retry">Retry</string>
+    <string name="updates_car_title">Car App</string>
+    <string name="updates_car_desc">Install or update the car app over WiFi ADB</string>
+    <string name="updates_car_install">Install</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_permissions">Permissions</string>
+    <string name="perm_all_files">All Files Access</string>
+    <string name="perm_all_files_granted">Needed to deploy the virtual display server</string>
+    <string name="perm_battery">Battery Optimization</string>
+    <string name="perm_battery_granted">Keeps streaming alive when screen is off</string>
+    <string name="perm_accessibility">Accessibility Service</string>
+    <string name="perm_accessibility_granted">Enables car touchscreen control</string>
+    <string name="perm_notifications">Notification Access</string>
+    <string name="perm_notifications_granted">Forwards notifications to car display</string>
+    <string name="perm_granted">Granted</string>
+    <string name="perm_usb_debugging">USB Debugging</string>
+    <string name="perm_usb_desc">Required on both phone and car</string>
+
+    <!-- Support -->
+    <string name="support_title">Support</string>
+    <string name="support_heading">Help keep DiLink-Auto going</string>
+    <string name="support_sponsor_btn">Sponsor on GitHub</string>
+    <string name="support_pix_btn">Pay with Pix (Brazil)</string>
+    <string name="support_pix_key">https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d</string>
+    <string name="support_sponsor_url">https://github.com/sponsors/andersonlucasg3</string>
+
+    <!-- About -->
+    <string name="about_title">About</string>
+    <string name="about_version">DiLink-Auto v%1$s</string>
+    <string name="about_tagline">Open-source alternative to Android Auto</string>
+    <string name="about_libs_heading">Open Source Libraries:</string>
+    <string name="about_lib_dadb">dadb — Apache 2.0</string>
+    <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
+    <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
+    <string name="about_lib_scrcpy">scrcpy (FakeContext/SurfaceScaler concepts) — Apache 2.0</string>
+
+    <!-- Onboarding -->
     <string name="onboarding_welcome_title">Welcome to DiLink-Auto</string>
     <string name="onboarding_welcome_desc">Use your phone apps on your car\'s built-in screen. Let\'s set up a few permissions to make everything work.</string>
     <string name="onboarding_files_title">All Files Access</string>
@@ -34,4 +107,13 @@
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_continue">Continue</string>
     <string name="onboarding_start">Start Using DiLink-Auto</string>
+    <string name="onboarding_skip_btn">Skip for now</string>
+    <string name="onboarding_granted_label">Granted</string>
+
+    <!-- Install on Car (Settings) -->
+    <string name="car_install_title">Install on Car</string>
+    <string name="car_install_desc">Car ADB must be enabled (port 5555)</string>
+    <string name="car_install_ip_label">Car IP address</string>
+    <string name="car_install_ip_hint">Leave empty to auto-detect</string>
+    <string name="car_install_button">Install on Car</string>
 </resources>

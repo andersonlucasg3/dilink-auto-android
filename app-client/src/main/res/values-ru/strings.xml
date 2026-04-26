@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Уведомления -->
+    <string name="notification_channel_name">Служба DiLink Auto</string>
+    <string name="notification_channel_description">Поддерживает работу DiLink Auto для соединения с автомобилем</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_connected">Подключено к автомобилю</string>
+    <string name="notification_waiting">Ожидание подключения автомобиля…</string>
+    <string name="notification_streaming">Трансляция на дисплей автомобиля</string>
+    <string name="notification_channel_update">Обновления приложения</string>
+    <string name="accessibility_description">DiLink Auto использует специальные возможности для передачи касаний с дисплея автомобиля на телефон.</string>
+
+    <!-- Главный экран -->
+    <string name="main_title">DiLink Auto</string>
+    <string name="main_subtitle">Клиент телефона</string>
+    <string name="how_to_connect_title">Как подключить</string>
+    <string name="how_to_step_1">1.  Включите точку доступа WiFi на телефоне</string>
+    <string name="how_to_step_2">2.  Подключите автомобиль к WiFi точке доступа телефона</string>
+    <string name="how_to_step_3">3.  Подключите телефон к USB-порту автомобиля</string>
+    <string name="how_to_step_4">4.  Нажмите «Запустить службу» ниже</string>
+    <string name="how_to_footer">Автомобиль автоматически установит приложение при первом использовании и подключится по WiFi.</string>
+    <string name="start_service">Запустить службу</string>
+    <string name="stop_service">Остановить службу</string>
+    <string name="manual_ip">IP вручную</string>
+    <string name="install_btn">Установить</string>
+    <string name="auto_detect_install">Автоопределение и установка</string>
+    <string name="install_on_car">Установить в авто</string>
+    <string name="car_ip_hint">н-р 192.168.43.100</string>
+    <string name="car_ip_label">IP автомобиля</string>
+
+    <!-- Статус -->
+    <string name="status_stopped">Служба остановлена</string>
+    <string name="status_stopped_desc">Нажмите «Запустить» для начала</string>
+    <string name="status_waiting">Ожидание автомобиля</string>
+    <string name="status_waiting_desc">Подключите телефон к USB авто и авто к WiFi</string>
+    <string name="status_listening">Прослушивание: %1$s</string>
+    <string name="status_connected">Автомобиль подключен</string>
+    <string name="status_connected_desc">Ожидание виртуального дисплея…</string>
+    <string name="status_streaming">Трансляция</string>
+    <string name="status_streaming_desc">Виртуальный дисплей активен</string>
+
+    <!-- Обновления -->
+    <string name="updates_title">Обновления</string>
+    <string name="updates_check_phone">Проверить обновление телефона</string>
+    <string name="updates_checking">Проверка обновлений…</string>
+    <string name="updates_up_to_date">Телефон: актуально (v%1$s)</string>
+    <string name="updates_available">Телефон: доступна v%1$s</string>
+    <string name="updates_size_mb">%1$.1f МБ</string>
+    <string name="updates_download_btn">Скачать обновление</string>
+    <string name="updates_downloading">Загрузка… %1$d%%</string>
+    <string name="updates_ready">Телефон: v%1$s готово</string>
+    <string name="updates_install_btn">Установить обновление</string>
+    <string name="updates_retry">Повторить</string>
+    <string name="updates_car_title">Приложение авто</string>
+    <string name="updates_car_desc">Установить или обновить приложение авто по WiFi ADB</string>
+    <string name="updates_car_install">Установить</string>
+
+    <!-- Настройки -->
+    <string name="settings_title">Настройки</string>
+    <string name="settings_permissions">Разрешения</string>
+    <string name="perm_all_files">Доступ ко всем файлам</string>
+    <string name="perm_all_files_granted">Необходимо для развертывания сервера виртуального дисплея</string>
+    <string name="perm_battery">Оптимизация батареи</string>
+    <string name="perm_battery_granted">Поддерживает трансляцию при выключенном экране</string>
+    <string name="perm_accessibility">Специальные возможности</string>
+    <string name="perm_accessibility_granted">Включает сенсорное управление с автомобиля</string>
+    <string name="perm_notifications">Доступ к уведомлениям</string>
+    <string name="perm_notifications_granted">Пересылает уведомления на дисплей автомобиля</string>
+    <string name="perm_granted">Предоставлено</string>
+    <string name="perm_usb_debugging">Отладка по USB</string>
+    <string name="perm_usb_desc">Требуется на телефоне и автомобиле</string>
+
+    <!-- Поддержка -->
+    <string name="support_title">Поддержка</string>
+    <string name="support_heading">Помогите поддерживать DiLink-Auto</string>
+    <string name="support_sponsor_btn">Спонсировать на GitHub</string>
+    <string name="support_pix_btn">Оплатить через Pix (Бразилия)</string>
+
+    <!-- О приложении -->
+    <string name="about_title">О приложении</string>
+    <string name="about_version">DiLink-Auto v%1$s</string>
+    <string name="about_tagline">Открытая альтернатива Android Auto</string>
+    <string name="about_libs_heading">Библиотеки с открытым исходным кодом:</string>
+    <string name="about_lib_dadb">dadb — Apache 2.0</string>
+    <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
+    <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
+    <string name="about_lib_scrcpy">scrcpy (концепции FakeContext/SurfaceScaler) — Apache 2.0</string>
+
+    <!-- Онбординг -->
+    <string name="onboarding_welcome_title">Добро пожаловать в DiLink-Auto</string>
+    <string name="onboarding_welcome_desc">Используйте приложения телефона на экране автомобиля. Настроим несколько разрешений для работы.</string>
+    <string name="onboarding_files_title">Доступ ко всем файлам</string>
+    <string name="onboarding_files_desc">Разворачивает сервер виртуального дисплея в памяти телефона. Без этого автомобиль не сможет запустить зеркалирование.</string>
+    <string name="onboarding_battery_title">Оптимизация батареи</string>
+    <string name="onboarding_battery_desc">Поддерживает соединение при выключенном экране. Без этого трансляция останавливается при сне телефона.</string>
+    <string name="onboarding_accessibility_title">Специальные возможности</string>
+    <string name="onboarding_accessibility_desc">Позволяет экрану автомобиля управлять телефоном. Без этого вы будете видеть экран, но не сможете касаться.</string>
+    <string name="onboarding_notification_title">Доступ к уведомлениям</string>
+    <string name="onboarding_notification_desc">Показывает уведомления телефона на дисплее автомобиля. Без этого вы пропустите звонки и сообщения за рулем.</string>
+    <string name="onboarding_done_title">Всё готово</string>
+    <string name="onboarding_done_desc">Всё настроено. Подключите телефон к USB-порту автомобиля для начала.</string>
+    <string name="onboarding_grant">Предоставить</string>
+    <string name="onboarding_skip">Пропустить</string>
+    <string name="onboarding_continue">Продолжить</string>
+    <string name="onboarding_start">Начать использовать DiLink-Auto</string>
+    <string name="onboarding_skip_btn">Пропустить пока</string>
+    <string name="onboarding_granted_label">Предоставлено</string>
+
+    <!-- Установка в авто (Настройки) -->
+    <string name="car_install_title">Установка в автомобиль</string>
+    <string name="car_install_desc">Отладка ADB автомобиля должна быть включена (порт 5555)</string>
+    <string name="car_install_ip_label">IP-адрес автомобиля</string>
+    <string name="car_install_ip_hint">Оставьте пустым для автоопределения</string>
+    <string name="car_install_button">Установить в автомобиль</string>
+</resources>

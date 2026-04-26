@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">DiLink Auto Service</string>
+    <string name="notification_channel_description">Mantém o DiLink Auto rodando para conexão com o carro</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_connected">Conectado ao carro</string>
+    <string name="notification_waiting">Aguardando conexão do carro…</string>
+    <string name="notification_streaming">Transmitindo para o carro</string>
+    <string name="notification_channel_update">Atualizações do App</string>
+    <string name="accessibility_description">O DiLink Auto usa acessibilidade para encaminhar eventos de toque do carro para seu telefone.</string>
+
+    <!-- Main Screen -->
+    <string name="main_title">DiLink Auto</string>
+    <string name="main_subtitle">Cliente do Telefone</string>
+    <string name="how_to_connect_title">Como Conectar</string>
+    <string name="how_to_step_1">1.  Ative o hotspot WiFi do seu telefone</string>
+    <string name="how_to_step_2">2.  Conecte o carro ao WiFi do hotspot do telefone</string>
+    <string name="how_to_step_3">3.  Conecte o telefone na porta USB do carro</string>
+    <string name="how_to_step_4">4.  Toque em Iniciar Serviço abaixo</string>
+    <string name="how_to_footer">O carro instalará automaticamente no primeiro uso e conectará via WiFi.</string>
+    <string name="start_service">Iniciar Serviço</string>
+    <string name="stop_service">Parar Serviço</string>
+    <string name="manual_ip">IP Manual</string>
+    <string name="install_btn">Instalar</string>
+    <string name="auto_detect_install">Auto-detectar e Instalar</string>
+    <string name="install_on_car">Instalar no Carro</string>
+    <string name="car_ip_hint">ex: 192.168.43.100</string>
+    <string name="car_ip_label">IP do Carro</string>
+
+    <!-- Status -->
+    <string name="status_stopped">Serviço Parado</string>
+    <string name="status_stopped_desc">Toque em Iniciar para começar</string>
+    <string name="status_waiting">Aguardando o Carro</string>
+    <string name="status_waiting_desc">Conecte o telefone no USB do carro e o carro ao WiFi</string>
+    <string name="status_listening">Ouvindo em: %1$s</string>
+    <string name="status_connected">Carro Conectado</string>
+    <string name="status_connected_desc">Aguardando o display virtual…</string>
+    <string name="status_streaming">Transmitindo</string>
+    <string name="status_streaming_desc">Display virtual ativo</string>
+
+    <!-- Updates -->
+    <string name="updates_title">Atualizações</string>
+    <string name="updates_check_phone">Verificar atualização do telefone</string>
+    <string name="updates_checking">Verificando atualizações…</string>
+    <string name="updates_up_to_date">Telefone: atualizado (v%1$s)</string>
+    <string name="updates_available">Telefone: v%1$s disponível</string>
+    <string name="updates_size_mb">%1$.1f MB</string>
+    <string name="updates_download_btn">Baixar Atualização</string>
+    <string name="updates_downloading">Baixando… %1$d%%</string>
+    <string name="updates_ready">Telefone: v%1$s pronto</string>
+    <string name="updates_install_btn">Instalar Atualização</string>
+    <string name="updates_retry">Tentar Novamente</string>
+    <string name="updates_car_title">App do Carro</string>
+    <string name="updates_car_desc">Instalar ou atualizar o app do carro via WiFi ADB</string>
+    <string name="updates_car_install">Instalar</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Configurações</string>
+    <string name="settings_permissions">Permissões</string>
+    <string name="perm_all_files">Acesso a Todos os Arquivos</string>
+    <string name="perm_all_files_granted">Necessário para implantar o servidor de display virtual</string>
+    <string name="perm_battery">Otimização de Bateria</string>
+    <string name="perm_battery_granted">Mantém a transmissão ativa com a tela desligada</string>
+    <string name="perm_accessibility">Serviço de Acessibilidade</string>
+    <string name="perm_accessibility_granted">Permite o controle por toque do carro</string>
+    <string name="perm_notifications">Acesso às Notificações</string>
+    <string name="perm_notifications_granted">Encaminha notificações para o display do carro</string>
+    <string name="perm_granted">Concedido</string>
+    <string name="perm_usb_debugging">Depuração USB</string>
+    <string name="perm_usb_desc">Necessário no telefone e no carro</string>
+
+    <!-- Support -->
+    <string name="support_title">Apoio</string>
+    <string name="support_heading">Ajude a manter o DiLink-Auto</string>
+    <string name="support_sponsor_btn">Patrocinar no GitHub</string>
+    <string name="support_pix_btn">Pagar com Pix (Brasil)</string>
+
+    <!-- About -->
+    <string name="about_title">Sobre</string>
+    <string name="about_version">DiLink-Auto v%1$s</string>
+    <string name="about_tagline">Alternativa open-source ao Android Auto</string>
+    <string name="about_libs_heading">Bibliotecas Open Source:</string>
+    <string name="about_lib_dadb">dadb — Apache 2.0</string>
+    <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
+    <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
+    <string name="about_lib_scrcpy">scrcpy (conceitos FakeContext/SurfaceScaler) — Apache 2.0</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_welcome_title">Bem-vindo ao DiLink-Auto</string>
+    <string name="onboarding_welcome_desc">Use os apps do seu telefone na tela do carro. Vamos configurar algumas permissões para tudo funcionar.</string>
+    <string name="onboarding_files_title">Acesso a Todos os Arquivos</string>
+    <string name="onboarding_files_desc">Implanta o servidor de display virtual no armazenamento do telefone. Sem isso, o carro não pode iniciar o espelhamento.</string>
+    <string name="onboarding_battery_title">Otimização de Bateria</string>
+    <string name="onboarding_battery_desc">Mantém a conexão ativa com a tela desligada. Sem isso, a transmissão para quando o telefone dorme.</string>
+    <string name="onboarding_accessibility_title">Serviço de Acessibilidade</string>
+    <string name="onboarding_accessibility_desc">Permite que a tela do carro controle seu telefone. Sem isso, você verá a tela mas não poderá tocar.</string>
+    <string name="onboarding_notification_title">Acesso às Notificações</string>
+    <string name="onboarding_notification_desc">Mostra as notificações do telefone no display do carro. Sem isso, você perderá chamadas e mensagens enquanto dirige.</string>
+    <string name="onboarding_done_title">Tudo Pronto</string>
+    <string name="onboarding_done_desc">Tudo configurado. Conecte seu telefone na porta USB do carro para começar.</string>
+    <string name="onboarding_grant">Conceder</string>
+    <string name="onboarding_skip">Pular</string>
+    <string name="onboarding_continue">Continuar</string>
+    <string name="onboarding_start">Começar a Usar o DiLink-Auto</string>
+    <string name="onboarding_skip_btn">Pular por enquanto</string>
+    <string name="onboarding_granted_label">Concedido</string>
+
+    <!-- Install on Car (Settings) -->
+    <string name="car_install_title">Instalar no Carro</string>
+    <string name="car_install_desc">O ADB do carro deve estar ativado (porta 5555)</string>
+    <string name="car_install_ip_label">Endereço IP do carro</string>
+    <string name="car_install_ip_hint">Deixe em branco para auto-detectar</string>
+    <string name="car_install_button">Instalar no Carro</string>
+</resources>

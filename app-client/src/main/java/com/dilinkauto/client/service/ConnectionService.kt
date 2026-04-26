@@ -649,62 +649,53 @@ class ConnectionService : Service() {
             }
         }
 
-        // 2. ARP table + ip neigh + gateway on local subnet
+        // 2. Scan ALL local subnets (phone may be on both home WiFi + hotspot)
         val subnetIps = getLocalSubnetIps()
-        val ownIp = subnetIps.firstOrNull() ?: ""
-        val prefix = if (ownIp.isNotEmpty()) ownIp.substringBeforeLast(".") else ""
+        val prefixes = subnetIps.map { it.substringBeforeLast(".") }.distinct()
+        FileLog.d(TAG, "Local subnets: $subnetIps (prefixes: $prefixes)")
 
-        // 3. ARP table
+        // 3. ARP table (may be blocked on Android 14+)
         try {
-            val arp = java.io.File("/proc/net/arp").readText()
-            FileLog.d(TAG, "ARP table:\n$arp")
-            for (line in arp.lines().drop(1)) {
+            for (line in java.io.File("/proc/net/arp").readLines().drop(1)) {
                 val ip = line.split("\\s+".toRegex()).firstOrNull() ?: continue
-                if (ip == "0.0.0.0" || ip == ownIp) continue
-                FileLog.d(TAG, "ARP: probing $ip:5555...")
+                if (ip == "0.0.0.0") continue
+                if (subnetIps.contains(ip)) continue
                 if (probePort(ip, 5555)) {
                     FileLog.i(TAG, "Found car ADB at $ip (ARP)")
                     return ip
                 }
-                FileLog.d(TAG, "ARP: $ip:5555 not responding")
             }
         } catch (e: Exception) {
-            FileLog.w(TAG, "ARP read failed: ${e.message}")
+            FileLog.d(TAG, "ARP not available: ${e.message}")
         }
 
         // 4. Neighbor cache
         try {
-            val proc = Runtime.getRuntime().exec(arrayOf("ip", "neigh"))
-            val output = proc.inputStream.bufferedReader().readText()
-            FileLog.d(TAG, "ip neigh:\n$output")
-            for (line in output.lines()) {
+            for (line in Runtime.getRuntime().exec(arrayOf("ip", "neigh")).inputStream.bufferedReader().readText().lines()) {
                 val ip = line.split("\\s+".toRegex()).firstOrNull() ?: continue
                 if (!ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) continue
-                if (ip == ownIp) continue
-                FileLog.d(TAG, "neigh: probing $ip:5555...")
+                if (subnetIps.contains(ip)) continue
                 if (probePort(ip, 5555)) {
                     FileLog.i(TAG, "Found car ADB at $ip (neighbor)")
                     return ip
                 }
             }
-        } catch (e: Exception) {
-            FileLog.w(TAG, "ip neigh failed: ${e.message}")
-        }
+        } catch (_: Exception) {}
 
-        // 5. Parallel subnet scan — probes entire /24 in ~1s
-        if (prefix.isNotEmpty()) {
-            FileLog.i(TAG, "Parallel scanning $prefix.0/24 for ADB...")
+        // 5. Parallel scan on ALL subnets
+        for (prefix in prefixes) {
+            FileLog.i(TAG, "Scanning $prefix.0/24 for ADB...")
             val startMs = System.currentTimeMillis()
-            val result = probeSubnetConcurrent(prefix, ownIp, maxConcurrent = 32)
+            val result = probeSubnetConcurrent(prefix, ownIp = "", maxConcurrent = 32)
             val elapsed = System.currentTimeMillis() - startMs
             if (result != null) {
-                FileLog.i(TAG, "Found car ADB at $result (parallel scan, ${elapsed}ms)")
+                FileLog.i(TAG, "Found car ADB at $result ($prefix.0/24, ${elapsed}ms)")
                 return result
             }
-            FileLog.d(TAG, "Parallel scan complete — no ADB found (${elapsed}ms)")
+            FileLog.d(TAG, "$prefix.0/24: no ADB found (${elapsed}ms)")
         }
 
-        // 6. Gateway (last resort — may be the phone itself on hotspot)
+        // 6. Gateway
         try {
             val wm = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
             val gw = wm.dhcpInfo.gateway
@@ -712,7 +703,7 @@ class ConnectionService : Service() {
                 val ip = String.format("%d.%d.%d.%d",
                     gw and 0xFF, (gw shr 8) and 0xFF,
                     (gw shr 16) and 0xFF, (gw shr 24) and 0xFF)
-                if (ip != ownIp && probePort(ip, 5555)) {
+                if (!subnetIps.contains(ip) && probePort(ip, 5555)) {
                     FileLog.i(TAG, "Found car ADB at $ip (gateway)")
                     return ip
                 }

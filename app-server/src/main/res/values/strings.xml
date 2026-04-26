@@ -1,8 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">DiLink Auto</string>
+
+    <!-- Notifications -->
     <string name="notification_channel_name">DiLink Auto Car Service</string>
     <string name="notification_title">DiLink Auto</string>
     <string name="notification_searching">Searching for phone…</string>
     <string name="notification_connected">Connected to phone</string>
+
+    <!-- Launcher -->
+    <string name="search_hint">Search apps…</string>
+    <string name="not_connected">Not connected</string>
+    <string name="plug_phone_usb">Plug phone into car USB</string>
+    <string name="phone_ip_label">Phone IP address</string>
+    <string name="connect_button">Connect</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_launcher">Launcher</string>
+    <string name="nav_recent">Recent</string>
+    <string name="nav_notifications">Notifications</string>
+    <string name="nav_back">Back</string>
+    <string name="nav_home">Home</string>
+
+    <!-- Mirror -->
+    <string name="status_updating">Updating car app…</string>
+    <string name="status_please_wait">Please wait</string>
 </resources>
