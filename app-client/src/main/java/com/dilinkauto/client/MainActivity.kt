@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.font.FontWeight
@@ -226,21 +227,35 @@ fun OnboardingScreen(onComplete: () -> Unit) {
         }
     }
 
+    // Resolve strings outside remember to avoid crossinline restriction
+    val welcomeTitle = stringResource(R.string.onboarding_welcome_title)
+    val welcomeDesc = stringResource(R.string.onboarding_welcome_desc)
+    val welcomeAction = stringResource(R.string.onboarding_continue)
+    val filesTitle = stringResource(R.string.onboarding_files_title)
+    val filesDesc = stringResource(R.string.onboarding_files_desc)
+    val batteryTitle = stringResource(R.string.onboarding_battery_title)
+    val batteryDesc = stringResource(R.string.onboarding_battery_desc)
+    val accessibilityTitle = stringResource(R.string.onboarding_accessibility_title)
+    val accessibilityDesc = stringResource(R.string.onboarding_accessibility_desc)
+    val notificationTitle = stringResource(R.string.onboarding_notification_title)
+    val notificationDesc = stringResource(R.string.onboarding_notification_desc)
+    val doneTitle = stringResource(R.string.onboarding_done_title)
+    val doneDesc = stringResource(R.string.onboarding_done_desc)
+    val doneAction = stringResource(R.string.onboarding_start)
+    val grantLabel = stringResource(R.string.onboarding_grant)
+
     val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications) {
         listOf(
             OnboardingStep(
                 icon = Icons.Default.CarRepair,
-                title = "Welcome to DiLink-Auto",
-                description = "Use your phone apps on your car's built-in screen. Let's set up a few permissions to make everything work.",
-                actionLabel = "Continue",
-                isGranted = { true },
-                onAction = {}
+                title = welcomeTitle, description = welcomeDesc,
+                actionLabel = welcomeAction,
+                isGranted = { true }, onAction = {}
             ),
             OnboardingStep(
                 icon = Icons.Default.Folder,
-                title = "All Files Access",
-                description = "Deploys the virtual display server to your phone's storage. Without this, the car can't start screen mirroring.",
-                actionLabel = "Grant",
+                title = filesTitle, description = filesDesc,
+                actionLabel = grantLabel,
                 isGranted = { hasAllFiles },
                 onAction = {
                     if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
@@ -250,9 +265,8 @@ fun OnboardingScreen(onComplete: () -> Unit) {
             ),
             OnboardingStep(
                 icon = Icons.Default.BatterySaver,
-                title = "Battery Optimization",
-                description = "Keeps the connection alive when your screen is off. Without this, streaming stops whenever your phone sleeps.",
-                actionLabel = "Grant",
+                title = batteryTitle, description = batteryDesc,
+                actionLabel = grantLabel,
                 isGranted = { hasBattery },
                 onAction = {
                     if (!pm.isIgnoringBatteryOptimizations(pkg)) {
@@ -268,9 +282,8 @@ fun OnboardingScreen(onComplete: () -> Unit) {
             ),
             OnboardingStep(
                 icon = Icons.Default.TouchApp,
-                title = "Accessibility Service",
-                description = "Lets the car's touchscreen control your phone. Without this, you'll see the screen but can't tap anything.",
-                actionLabel = "Grant",
+                title = accessibilityTitle, description = accessibilityDesc,
+                actionLabel = grantLabel,
                 isGranted = { hasAccessibility },
                 onAction = {
                     context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -278,9 +291,8 @@ fun OnboardingScreen(onComplete: () -> Unit) {
             ),
             OnboardingStep(
                 icon = Icons.Default.Notifications,
-                title = "Notification Access",
-                description = "Shows phone notifications on the car display. Without this, you'll miss calls and messages while driving.",
-                actionLabel = "Grant",
+                title = notificationTitle, description = notificationDesc,
+                actionLabel = grantLabel,
                 isGranted = { hasNotifications },
                 onAction = {
                     context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -288,11 +300,9 @@ fun OnboardingScreen(onComplete: () -> Unit) {
             ),
             OnboardingStep(
                 icon = Icons.Default.CheckCircle,
-                title = "You're All Set",
-                description = "Everything's ready. Plug your phone into the car's USB port to get started.",
-                actionLabel = "Start Using DiLink-Auto",
-                isGranted = { true },
-                onAction = {}
+                title = doneTitle, description = doneDesc,
+                actionLabel = doneAction,
+                isGranted = { true }, onAction = {}
             )
         )
     }
@@ -373,7 +383,7 @@ fun OnboardingScreen(onComplete: () -> Unit) {
 
         if (currentStep > 0 && step.isGranted()) {
             Spacer(Modifier.height(8.dp))
-            Text("Granted", fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.onboarding_granted_label), fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
         }
 
         Spacer(Modifier.height(48.dp))
@@ -414,7 +424,7 @@ fun OnboardingScreen(onComplete: () -> Unit) {
             if (currentStep > 0 && !step.isGranted()) {
                 Spacer(Modifier.height(16.dp))
                 TextButton(onClick = { currentStep++ }) {
-                    Text("Skip for now", color = Color.Gray)
+                    Text(stringResource(R.string.onboarding_skip_btn), color = Color.Gray)
                 }
             }
         } else {
@@ -482,8 +492,8 @@ fun MainScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("DiLink Auto", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Text("Phone Client", fontSize = 14.sp, color = Color.Gray)
+                Text(stringResource(R.string.main_title), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.main_subtitle), fontSize = 14.sp, color = Color.Gray)
             }
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.Gray)
@@ -511,7 +521,7 @@ fun MainScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
-                    Text("How to Connect", fontWeight = FontWeight.Medium, color = Color.White, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.how_to_connect_title), fontWeight = FontWeight.Medium, color = Color.White, modifier = Modifier.weight(1f))
                     Icon(
                         if (howToExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null, tint = Color.Gray
@@ -519,12 +529,12 @@ fun MainScreen(
                 }
                 if (howToExpanded) {
                     Spacer(Modifier.height(12.dp))
-                    Text("1.  Enable your phone's WiFi hotspot", fontSize = 14.sp, color = Color(0xFFB0BEC5))
-                    Text("2.  Connect the car to your phone's hotspot WiFi", fontSize = 14.sp, color = Color(0xFFB0BEC5))
-                    Text("3.  Plug the phone into the car's USB port", fontSize = 14.sp, color = Color(0xFFB0BEC5))
-                    Text("4.  Tap Start Service below", fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    Text(stringResource(R.string.how_to_step_1), fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    Text(stringResource(R.string.how_to_step_2), fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    Text(stringResource(R.string.how_to_step_3), fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    Text(stringResource(R.string.how_to_step_4), fontSize = 14.sp, color = Color(0xFFB0BEC5))
                     Spacer(Modifier.height(8.dp))
-                    Text("The car will auto-install on first use and connect automatically over WiFi.", fontSize = 12.sp, color = Color.Gray)
+                    Text(stringResource(R.string.how_to_footer), fontSize = 12.sp, color = Color.Gray)
                 }
             }
         }
@@ -547,7 +557,7 @@ fun MainScreen(
         ) {
             Icon(if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(8.dp))
-            Text(if (isRunning) "Stop Service" else "Start Service", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            Text(if (isRunning) stringResource(R.string.stop_service) else stringResource(R.string.start_service), fontSize = 18.sp, fontWeight = FontWeight.Medium)
         }
 
         if (installStatus.isNotEmpty()) {
@@ -766,18 +776,18 @@ fun StatusCard(state: ConnectionService.State) {
 
     val (color, title, subtitle) = when (state) {
         ConnectionService.State.IDLE -> Triple(
-            Color(0xFF757575), "Service Stopped", "Tap Start to begin"
+            Color(0xFF757575), stringResource(R.string.status_stopped), stringResource(R.string.status_stopped_desc)
         )
         ConnectionService.State.WAITING -> Triple(
-            Color(0xFFFFA726), "Waiting for Car",
-            if (ipAddresses.isNotEmpty()) "Listening on: ${ipAddresses.joinToString(", ")}"
-            else "Plug phone into car USB, then connect via WiFi"
+            Color(0xFFFFA726), stringResource(R.string.status_waiting),
+            if (ipAddresses.isNotEmpty()) stringResource(R.string.status_listening, ipAddresses.joinToString(", "))
+            else stringResource(R.string.status_waiting_desc)
         )
         ConnectionService.State.CONNECTED -> Triple(
-            Color(0xFF2196F3), "Car Connected", "Waiting for virtual display…"
+            Color(0xFF2196F3), stringResource(R.string.status_connected), stringResource(R.string.status_connected_desc)
         )
         ConnectionService.State.STREAMING -> Triple(
-            Color(0xFF4CAF50), "Streaming", "Virtual display active"
+            Color(0xFF4CAF50), stringResource(R.string.status_streaming), stringResource(R.string.status_streaming_desc)
         )
     }
 
