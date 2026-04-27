@@ -208,9 +208,11 @@ if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
   write_initial_prompt
 
+  echo "--- Starting Claude Code (new conversation) ---"
   if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
     handle_error "Claude Code exited with code $?" "Prompt was written to /tmp/agent-prompt.txt"
   fi
+  echo "--- Claude Code finished ---"
 
   CONV_ID=$(capture_conversation_id "$OUTPUT")
   if [ -z "$CONV_ID" ]; then
@@ -294,16 +296,20 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     write_resume_prompt "$COMMENT_BODY"
 
+    echo "--- Resuming Claude Code conversation: $CONV_ID ---"
     if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
       handle_error "Claude Code exited with code $?" "Conversation ID: $CONV_ID"
     fi
+    echo "--- Claude Code finished ---"
   else
     echo "No prior state — treating as new for issue #$ISSUE_NUM"
     write_initial_prompt
 
+    echo "--- Starting Claude Code (new conversation, no prior state) ---"
     if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
       handle_error "Claude Code exited with code $?"
     fi
+    echo "--- Claude Code finished ---"
 
     CONV_ID=$(capture_conversation_id "$OUTPUT")
     if [ -z "$CONV_ID" ]; then
