@@ -6,6 +6,10 @@ on:
   issue_comment:
     types: [created]
 
+concurrency:
+  group: issue-agent-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   issues: write
