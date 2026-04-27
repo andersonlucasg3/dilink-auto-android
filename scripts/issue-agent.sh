@@ -209,7 +209,7 @@ if [ "$EVENT" = "issues" ]; then
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
-  if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
+  if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(< /tmp/agent-prompt.txt)" 2>&1); then
     handle_error "Claude Code exited with code $?" "Prompt was written to /tmp/agent-prompt.txt"
   fi
   echo "--- Claude Code finished ---"
@@ -306,7 +306,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     write_initial_prompt
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
-    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
+    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(< /tmp/agent-prompt.txt)" 2>&1); then
       handle_error "Claude Code exited with code $?"
     fi
     echo "--- Claude Code finished ---"
