@@ -25,4 +25,7 @@
     <!-- Айна -->
     <string name="status_updating">Автокөлік қолданбасы жаңартылуда…</string>
     <string name="status_please_wait">Күте тұрыңыз</string>
+
+    <!-- Бағдар -->
+    <string name="landscape_app_note">Қолданбалар өз бағдарын өздері басқарады. Тек портреттік қолданбалар жолақтармен көрсетілуі мүмкін.</string>
 </resources>

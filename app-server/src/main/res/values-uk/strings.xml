@@ -25,4 +25,7 @@
     <!-- Дзеркалювання -->
     <string name="status_updating">Оновлення застосунку авто…</string>
     <string name="status_please_wait">Будь ласка, зачекайте</string>
+
+    <!-- Орієнтація -->
+    <string name="landscape_app_note">Застосунки самі керують орієнтацією. Застосунки лише з портретним режимом можуть відображатися зі смугами.</string>
 </resources>

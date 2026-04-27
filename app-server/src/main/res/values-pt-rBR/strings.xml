@@ -25,4 +25,7 @@
     <!-- Mirror -->
     <string name="status_updating">Atualizando app do carro…</string>
     <string name="status_please_wait">Aguarde</string>
+
+    <!-- Orientação -->
+    <string name="landscape_app_note">Os apps controlam sua própria orientação. Apps só retrato podem aparecer com faixas.</string>
 </resources>

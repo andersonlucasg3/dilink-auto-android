@@ -19,11 +19,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.*
+import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
 
@@ -257,6 +259,16 @@ fun AppGrid(
                 unfocusedBorderColor = Color(0xFF2A2F3A),
                 cursorColor = MaterialTheme.colorScheme.primary
             )
+        )
+
+        Text(
+            text = stringResource(R.string.landscape_app_note),
+            fontSize = 11.sp,
+            color = Color(0xFF666666),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 4.dp)
         )
     }
 }

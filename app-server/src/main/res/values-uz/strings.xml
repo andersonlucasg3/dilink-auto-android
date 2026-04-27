@@ -25,4 +25,7 @@
     <!-- Aks ettirish -->
     <string name="status_updating">Avtomobil ilovasi yangilanmoqda…</string>
     <string name="status_please_wait">Iltimos, kuting</string>
+
+    <!-- Yo\'nalish -->
+    <string name="landscape_app_note">Ilovalar o\'z yo\'nalishini o\'zi boshqaradi. Faqat portret ilovalar chiziqlar bilan ko\'rsatilishi mumkin.</string>
 </resources>

@@ -119,10 +119,11 @@ class SurfaceScaler(
 
         GLES20.glViewport(0, 0, outputWidth, outputHeight)
 
-        // Render loop — draws at least once per frameIntervalMs even on static content
+        // Render loop — draws on new frames, skips GPU work on static content.
+        // The encoder's repeat-previous-frame-after setting handles frame continuity.
         var swapCount = 0L
         var newFrameCount = 0L
-        var idleSwapCount = 0L
+        var idleSkipCount = 0L
         println("[SurfaceScaler] Render loop starting, frameIntervalMs=$frameIntervalMs")
 
         while (running) {
@@ -140,11 +141,16 @@ class SurfaceScaler(
                 surfaceTexture.updateTexImage()
                 newFrameCount++
             } else {
-                idleSwapCount++
+                idleSkipCount++
+                if (idleSkipCount <= 3 || idleSkipCount % 30 == 0L) {
+                    println("[SurfaceScaler] idle skip #$idleSkipCount newFrames=$newFrameCount swaps=$swapCount")
+                }
+                // Skip full GL render on idle — encoder handles static content via repeat-previous-frame-after
+                continue
             }
             swapCount++
             if (swapCount <= 3 || swapCount % 30 == 0L) {
-                println("[SurfaceScaler] swap #$swapCount newFrames=$newFrameCount idleSwaps=$idleSwapCount hasNew=$hasNewFrame")
+                println("[SurfaceScaler] swap #$swapCount newFrames=$newFrameCount idleSkips=$idleSkipCount hasNew=$hasNewFrame")
             }
 
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
