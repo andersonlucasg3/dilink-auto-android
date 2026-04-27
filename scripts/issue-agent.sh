@@ -9,8 +9,26 @@ set -euo pipefail
 
 # --- Paths ---
 AGENT_STATE_DIR="$HOME/.claude-agent/issues"
-CLAUDE_PROJECT_DIR="$HOME/.claude/projects/C--Users-anderson-Projetos-DiLink-Auto"
 SHARED_GRADLE_HOME="$HOME/.gradle-agent"
+
+# Source machine-specific config (not in repo — created during runner setup)
+if [ -f "$HOME/.claude-agent/config" ]; then
+  # shellcheck source=/dev/null
+  source "$HOME/.claude-agent/config"
+fi
+
+# Sensible defaults if config didn't set them
+CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+
+# Export API config for Claude Code (secret token is set by the workflow)
+export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-}"
+export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-}"
+export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-}"
+export ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-}"
+export API_TIMEOUT_MS="${API_TIMEOUT_MS:-}"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}"
+export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK="${CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK:-}"
 
 # --- Environment (set by GitHub Actions) ---
 ISSUE_NUM="${ISSUE_NUMBER:?}"
@@ -63,9 +81,9 @@ capture_conversation_id() {
   # Try parsing from stdout
   cid=$(echo "$output" | grep -oiP 'conversation[_-]?\s*(id)?:\s*\K[a-f0-9-]{20,}' | head -1 || true)
 
-  # Fallback: newest .jsonl in the project directory
-  if [ -z "$cid" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then
-    cid=$(ls -t "$CLAUDE_PROJECT_DIR"/*.jsonl 2>/dev/null | head -1 | xargs basename | sed 's/\.jsonl$//' || true)
+  # Fallback: newest .jsonl across ALL project directories
+  if [ -z "$cid" ] && [ -d "$CLAUDE_PROJECTS_DIR" ]; then
+    cid=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -1 | xargs basename | sed 's/\.jsonl$//' || true)
   fi
 
   echo "$cid"
@@ -183,21 +201,21 @@ git branch -D "$BRANCH" 2>/dev/null || true
 git checkout -b "$BRANCH"
 
 # Record which .jsonl files exist before the run (to detect the new one)
-BEFORE_JSONLS=$(ls "$CLAUDE_PROJECT_DIR"/*.jsonl 2>/dev/null | sort || true)
+BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
 
 # --- Run Claude Code ---
 if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
   write_initial_prompt
 
-  if ! OUTPUT=$(claude --dangerously-skip-permissions -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
+  if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
     handle_error "Claude Code exited with code $?" "Prompt was written to /tmp/agent-prompt.txt"
   fi
 
   CONV_ID=$(capture_conversation_id "$OUTPUT")
   if [ -z "$CONV_ID" ]; then
     # Try detecting new .jsonl
-    AFTER_JSONLS=$(ls "$CLAUDE_PROJECT_DIR"/*.jsonl 2>/dev/null | sort || true)
+    AFTER_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
     NEW_JSONL=$(comm -13 <(echo "$BEFORE_JSONLS") <(echo "$AFTER_JSONLS") | head -1 || true)
     if [ -n "$NEW_JSONL" ]; then
       CONV_ID=$(basename "$NEW_JSONL" .jsonl)
@@ -276,20 +294,20 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     write_resume_prompt "$COMMENT_BODY"
 
-    if ! OUTPUT=$(claude --dangerously-skip-permissions --resume "$CONV_ID" -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
+    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
       handle_error "Claude Code exited with code $?" "Conversation ID: $CONV_ID"
     fi
   else
     echo "No prior state — treating as new for issue #$ISSUE_NUM"
     write_initial_prompt
 
-    if ! OUTPUT=$(claude --dangerously-skip-permissions -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
+    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
       handle_error "Claude Code exited with code $?"
     fi
 
     CONV_ID=$(capture_conversation_id "$OUTPUT")
     if [ -z "$CONV_ID" ]; then
-      AFTER_JSONLS=$(ls "$CLAUDE_PROJECT_DIR"/*.jsonl 2>/dev/null | sort || true)
+      AFTER_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
       NEW_JSONL=$(comm -13 <(echo "$BEFORE_JSONLS") <(echo "$AFTER_JSONLS") | head -1 || true)
       if [ -n "$NEW_JSONL" ]; then
         CONV_ID=$(basename "$NEW_JSONL" .jsonl)
