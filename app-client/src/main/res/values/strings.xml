@@ -112,6 +112,13 @@
     <string name="onboarding_skip_btn">Skip for now</string>
     <string name="onboarding_granted_label">Granted</string>
 
+    <!-- Share Logs -->
+    <string name="share_logs_title">Share Logs</string>
+    <string name="share_logs_desc">Zip log files and open a GitHub issue to report problems</string>
+    <string name="share_logs_button">Share</string>
+    <string name="share_logs_zipped">Logs zipped to %s</string>
+    <string name="share_logs_no_logs">No log files found</string>
+
     <!-- Install on Car (Settings) -->
     <string name="car_install_title">Install on Car</string>
     <string name="car_install_desc">Car ADB must be enabled (port 5555)</string>

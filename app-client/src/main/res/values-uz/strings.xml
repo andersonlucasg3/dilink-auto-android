@@ -108,6 +108,13 @@
     <string name="onboarding_skip_btn">Hozircha o\'tkazib yuborish</string>
     <string name="onboarding_granted_label">Berilgan</string>
 
+    <!-- Loglarni ulashish -->
+    <string name="share_logs_title">Loglarni ulashish</string>
+    <string name="share_logs_desc">Loglarni ZIP-ga joylab, muammolarni xabar qilish uchun GitHub-da vazifa ochish</string>
+    <string name="share_logs_button">Ulashish</string>
+    <string name="share_logs_zipped">Loglar %s ichiga joylandi</string>
+    <string name="share_logs_no_logs">Log fayllari topilmadi</string>
+
     <!-- Avtomobilga o'rnatish (Sozlamalar) -->
     <string name="car_install_title">Avtomobilga o\'rnatish</string>
     <string name="car_install_desc">Avtomobil ADB yoqilgan bo\'lishi kerak (5555-port)</string>
