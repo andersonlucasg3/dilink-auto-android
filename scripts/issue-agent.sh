@@ -50,6 +50,17 @@ git config user.name "DiLink-Auto Agent"
 
 # --- Helpers ---
 
+# Add an emoji reaction to the triggering comment (or issue if no comment)
+# Usage: react eyes | react rocket | react heart | react confused
+react() {
+  local content="$1"
+  if [ -n "${COMMENT_ID:-}" ]; then
+    gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content="$content" --silent 2>/dev/null || true
+  else
+    gh api "repos/$REPO/issues/$ISSUE_NUM/reactions" -f content="$content" --silent 2>/dev/null || true
+  fi
+}
+
 post_comment() {
   local body="$1"
   echo "$body" | gh issue comment "$ISSUE_NUM" --body-file -
@@ -58,6 +69,7 @@ post_comment() {
 handle_error() {
   local err_msg="${1:-Unknown error}"
   local details="${2:-}"
+  react confused
   cat > /tmp/error-comment.txt << EOF
 ## 🤖 Agent Error
 
@@ -209,6 +221,7 @@ if [ "$EVENT" = "issues" ]; then
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
+  react eyes
   if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(< /tmp/agent-prompt.txt)" 2>&1); then
     handle_error "Claude Code exited with code $?" "Prompt was written to /tmp/agent-prompt.txt"
   fi
@@ -285,6 +298,7 @@ EOFCOMMENT
 Reply to this issue to continue. The agent will pick up from where it left off.
 EOFCOMMENT
 
+  react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 
 elif [ "$EVENT" = "issue_comment" ]; then
@@ -297,7 +311,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
     write_resume_prompt "$COMMENT_BODY"
 
     echo "--- Resuming Claude Code conversation: $CONV_ID ---"
-    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "$(cat /tmp/agent-prompt.txt)" 2>&1); then
+    react eyes
+    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "$(< /tmp/agent-prompt.txt)" 2>&1); then
       handle_error "Claude Code exited with code $?" "Conversation ID: $CONV_ID"
     fi
     echo "--- Claude Code finished ---"
@@ -306,6 +321,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     write_initial_prompt
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
+    react eyes
     if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(< /tmp/agent-prompt.txt)" 2>&1); then
       handle_error "Claude Code exited with code $?"
     fi
@@ -370,6 +386,7 @@ EOFCOMMENT
 Reply to continue. The agent resumes its conversation and picks up where it left off.
 EOFCOMMENT
 
+  react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 fi
 
