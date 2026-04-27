@@ -358,7 +358,7 @@ EOFCOMMENT
   if [ "$APK_BUILT" = true ]; then
     cat >> /tmp/summary-comment.md << EOFCOMMENT
 ### Build
-✅ APK built — [download](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
+✅ APK built — [download](${SERVER_URL}/${REPO}/releases/tag/issue-${ISSUE_NUM}-debug)
 
 EOFCOMMENT
   else
@@ -542,7 +542,7 @@ EOFCOMMENT
   if [ "$APK_BUILT" = true ]; then
     cat >> /tmp/summary-comment.md << EOFCOMMENT
 ### Build
-✅ APK built — [download](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
+✅ APK built — [download](${SERVER_URL}/${REPO}/releases/tag/issue-${ISSUE_NUM}-debug)
 
 EOFCOMMENT
   else
