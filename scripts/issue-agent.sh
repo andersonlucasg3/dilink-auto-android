@@ -223,14 +223,14 @@ git clean -ffdx -e '.gradle' 2>/dev/null || true
 git fetch origin develop "$BRANCH" 2>/dev/null || true
 if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
   echo "--- Reusing existing branch: $BRANCH ---"
-  git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
+  git checkout -f "$BRANCH" 2>/dev/null || git checkout -f -b "$BRANCH" "origin/$BRANCH"
   git pull origin "$BRANCH" 2>/dev/null || true
 else
   echo "--- Creating new branch: $BRANCH ---"
-  git checkout develop
+  git checkout -f develop
   git pull origin develop
   git branch -D "$BRANCH" 2>/dev/null || true
-  git checkout -b "$BRANCH"
+  git checkout -f -b "$BRANCH"
 fi
 
 # Record which .jsonl files exist before the run (to detect the new one)
