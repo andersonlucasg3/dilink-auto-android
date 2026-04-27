@@ -100,7 +100,11 @@
     <string name="onboarding_notification_title">Bildirishnomalarga kirish</string>
     <string name="onboarding_notification_desc">Telefon bildirishnomalarini avtomobil displeyida ko\'rsatadi. Busiz haydash paytida qo\'ng\'iroqlar va xabarlarni o\'tkazib yuborasiz.</string>
     <string name="onboarding_car_setup_title">Ulanishdan oldin</string>
-    <string name="onboarding_car_setup_desc">Hammasi tayyorligiga ishonch hosil qiling:\n\n• Avtomobilda Wi-Fi ADB yoqilgan\n• Telefon hotspoti yoqilgan\n• Avtomobil hotspotga ulangan\n• Avtomobil ilovasi o\'rnatilgan</string>
+    <string name="onboarding_car_setup_desc">Ulanishdan oldin hammasi tayyorligiga ishonch hosil qiling:</string>
+    <string name="onboarding_car_prereq_wifi_adb">Avtomobilda Wi-Fi ADB yoqilgan</string>
+    <string name="onboarding_car_prereq_hotspot">Telefon hotspoti yoqilgan</string>
+    <string name="onboarding_car_prereq_connected">Avtomobil hotspotga ulangan</string>
+    <string name="onboarding_car_prereq_installed">Avtomobil ilovasi o\'rnatilgan</string>
     <string name="onboarding_car_install_btn">Avtomobilga o\'rnatish</string>
     <string name="onboarding_car_installing">Avtomobil ilovasi o\'rnatilmoqda…</string>
     <string name="onboarding_car_installed">Avtomobil ilovasi o\'rnatildi!</string>

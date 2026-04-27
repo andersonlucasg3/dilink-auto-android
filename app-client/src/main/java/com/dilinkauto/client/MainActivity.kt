@@ -176,7 +176,8 @@ private data class OnboardingStep(
     val description: String,
     val actionLabel: String,
     val isGranted: () -> Boolean,
-    val onAction: () -> Unit
+    val onAction: () -> Unit,
+    val prerequisites: List<String> = emptyList()
 )
 
 @Composable
@@ -188,7 +189,6 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
 
     var currentStep by rememberSaveable { mutableIntStateOf(0) }
     var refreshKey by remember { mutableIntStateOf(0) }
-    refreshKey // read to track recomposition
 
     // Re-check permissions instantly when returning from settings (handles both
     // full activities like Accessibility and dialogs like Battery Optimization)
@@ -258,12 +258,16 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
     val carSetupContinue = stringResource(R.string.onboarding_continue)
     val carInstallBtn = stringResource(R.string.onboarding_car_install_btn)
     val carSkipBtn = stringResource(R.string.onboarding_skip_btn)
+    val carPrereqWifiAdb = stringResource(R.string.onboarding_car_prereq_wifi_adb)
+    val carPrereqHotspot = stringResource(R.string.onboarding_car_prereq_hotspot)
+    val carPrereqConnected = stringResource(R.string.onboarding_car_prereq_connected)
+    val carPrereqInstalled = stringResource(R.string.onboarding_car_prereq_installed)
     val doneTitle = stringResource(R.string.onboarding_done_title)
     val doneDesc = stringResource(R.string.onboarding_done_desc)
     val doneAction = stringResource(R.string.onboarding_start)
     val grantLabel = stringResource(R.string.onboarding_grant)
 
-    val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications) {
+    val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications, refreshKey) {
         listOf(
             OnboardingStep(
                 icon = Icons.Default.CarRepair,
@@ -321,7 +325,8 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                 icon = Icons.Default.DirectionsCar,
                 title = carSetupTitle, description = carSetupDesc,
                 actionLabel = carSetupContinue,
-                isGranted = { true }, onAction = {}
+                isGranted = { true }, onAction = {},
+                prerequisites = listOf(carPrereqWifiAdb, carPrereqHotspot, carPrereqConnected, carPrereqInstalled)
             ),
             OnboardingStep(
                 icon = Icons.Default.CheckCircle,
@@ -411,9 +416,44 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
             Text(stringResource(R.string.onboarding_granted_label), fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
         }
 
-        // Car setup step: install button + skip
+        // Car setup step: prerequisites + install button + skip
         if (currentStep == 5) {
             Spacer(Modifier.height(16.dp))
+
+            // Prerequisite items
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                step.prerequisites.forEachIndexed { index, prereq ->
+                    val icon = when (index) {
+                        0 -> Icons.Default.Build
+                        1 -> Icons.Default.Wifi
+                        2 -> Icons.Default.Link
+                        3 -> Icons.Default.Download
+                        else -> Icons.Default.CheckCircle
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = Color(0xFF8AB4F8),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            prereq,
+                            fontSize = 14.sp,
+                            color = Color(0xFFB0BEC5)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
 
             val isInstalling = installStatus.isNotEmpty() &&
                 !installStatus.contains("Success", ignoreCase = true) &&
@@ -432,22 +472,44 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                 installStatus.contains("not found", ignoreCase = true)
 
             if (isInstalling) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(12.dp))
-                    Text(installStatus, fontSize = 13.sp, color = Color.Gray)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332))
+                ) {
+                    InstallStageProgress(installStatus)
                 }
+                Spacer(Modifier.height(8.dp))
+                Text(carSkipBtn, fontSize = 13.sp, color = Color.Gray)
             } else if (isDone) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(installStatus, fontSize = 13.sp, color = Color(0xFF4CAF50))
+                    Text(installStatus, fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
                 }
+                Spacer(Modifier.height(8.dp))
             } else if (isError) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEF5350), modifier = Modifier.size(16.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEF5350), modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(installStatus, fontSize = 13.sp, color = Color(0xFFEF5350))
+                    Text(installStatus, fontSize = 14.sp, color = Color(0xFFEF5350))
+                }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onInstallOnCar,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A73E8))
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Retry", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
             } else {
                 Button(
@@ -615,10 +677,23 @@ fun MainScreen(
                 }
                 if (howToExpanded) {
                     Spacer(Modifier.height(12.dp))
-                    Text(stringResource(R.string.how_to_step_1), fontSize = 14.sp, color = Color(0xFFB0BEC5))
-                    Text(stringResource(R.string.how_to_step_2), fontSize = 14.sp, color = Color(0xFFB0BEC5))
-                    Text(stringResource(R.string.how_to_step_3), fontSize = 14.sp, color = Color(0xFFB0BEC5))
-                    Text(stringResource(R.string.how_to_step_4), fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                    val howToSteps = listOf(
+                        Icons.Default.Wifi to stringResource(R.string.how_to_step_1),
+                        Icons.Default.Link to stringResource(R.string.how_to_step_2),
+                        Icons.Default.Usb to stringResource(R.string.how_to_step_3),
+                        Icons.Default.PlayArrow to stringResource(R.string.how_to_step_4),
+                    )
+                    howToSteps.forEach { (icon, text) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                        ) {
+                            Icon(icon, contentDescription = null,
+                                tint = Color(0xFF8AB4F8), modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text(text, fontSize = 14.sp, color = Color(0xFFB0BEC5))
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text(stringResource(R.string.how_to_footer), fontSize = 12.sp, color = Color.Gray)
                 }
@@ -1057,7 +1132,7 @@ fun UpdatesCard(
 
 @Composable
 fun InstallStatusCard(status: String) {
-    val (icon, color, isInProgress) = when {
+    val (_, color, isInProgress) = when {
         status.contains("Searching", ignoreCase = true) -> Triple(Icons.Default.Search, Color(0xFFFFA726), true)
         status.contains("Connecting", ignoreCase = true) -> Triple(Icons.Default.Usb, Color(0xFFFFA726), true)
         status.contains("Push", ignoreCase = true) -> Triple(Icons.Default.Download, Color(0xFF2196F3), true)
@@ -1069,22 +1144,164 @@ fun InstallStatusCard(status: String) {
         else -> Triple(Icons.Default.Info, Color(0xFF757575), true)
     }
 
+    val isDone = !isInProgress && color == Color(0xFF4CAF50)
+    val isError = !isInProgress && color == Color(0xFFEF5350)
+    val isActive = isInProgress
+
+    // Determine current stage index for progress visualization
+    val stageLabels = listOf(
+        "Searching" to "Searching for car",
+        "Connecting" to "Connecting to car",
+        "Checking" to "Checking version",
+        "Push" to "Pushing APK",
+        "Install" to "Installing",
+        "Launching" to "Launching"
+    )
+    val currentStage = stageLabels.indexOfLast { status.contains(it.first, ignoreCase = true) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332))
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (isInProgress) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = color)
-            } else {
-                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.DirectionsCar,
+                    contentDescription = null,
+                    tint = when {
+                        isDone -> Color(0xFF4CAF50)
+                        isError -> Color(0xFFEF5350)
+                        isActive -> MaterialTheme.colorScheme.primary
+                        else -> Color.Gray
+                    },
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    when {
+                        isDone -> "Car App Installed"
+                        isError -> "Installation Failed"
+                        isActive -> "Installing on Car"
+                        else -> "Car App"
+                    },
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
             }
-            Spacer(Modifier.width(8.dp))
-            Text(status, fontSize = 13.sp, color = Color(0xFFB0BEC5), modifier = Modifier.weight(1f))
+
+            // Stage progress
+            if (isActive && currentStage >= 0) {
+                Spacer(Modifier.height(12.dp))
+                stageLabels.forEachIndexed { index, (_, label) ->
+                    val stageState = when {
+                        index < currentStage -> "done"
+                        index == currentStage -> "active"
+                        else -> "pending"
+                    }
+                    Row(
+                        modifier = Modifier.padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                            when (stageState) {
+                                "done" -> Icon(Icons.Default.CheckCircle, contentDescription = null,
+                                    tint = Color(0xFF4CAF50), modifier = Modifier.size(14.dp))
+                                "active" -> CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp), strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary)
+                                "pending" -> Box(modifier = Modifier
+                                    .size(8.dp)
+                                    .background(Color(0xFF30363D), RoundedCornerShape(4.dp)))
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            label,
+                            fontSize = 13.sp,
+                            color = when (stageState) {
+                                "done" -> Color(0xFF4CAF50)
+                                "active" -> Color.White
+                                else -> Color(0xFF757575)
+                            }
+                        )
+                    }
+                }
+            } else if (isDone || isError) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (isDone) Icons.Default.CheckCircle else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (isDone) Color(0xFF4CAF50) else Color(0xFFEF5350),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(status, fontSize = 13.sp, color = if (isDone) Color(0xFF4CAF50) else Color(0xFFEF5350))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun InstallStageProgress(status: String) {
+    val stageLabels = listOf(
+        "Searching" to "Searching for car",
+        "Connecting" to "Connecting to car",
+        "Checking" to "Checking version",
+        "Push" to "Pushing APK",
+        "Install" to "Installing",
+        "Launching" to "Launching"
+    )
+    val currentStage = stageLabels.indexOfLast { status.contains(it.first, ignoreCase = true) }
+
+    Column(modifier = Modifier.padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp), strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text(status, fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Medium)
+        }
+        if (currentStage >= 0) {
+            Spacer(Modifier.height(10.dp))
+            stageLabels.forEachIndexed { index, (_, label) ->
+                val stageState = when {
+                    index < currentStage -> "done"
+                    index == currentStage -> "active"
+                    else -> "pending"
+                }
+                Row(
+                    modifier = Modifier.padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                        when (stageState) {
+                            "done" -> Icon(Icons.Default.CheckCircle, contentDescription = null,
+                                tint = Color(0xFF4CAF50), modifier = Modifier.size(12.dp))
+                            "active" -> CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp), strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary)
+                            "pending" -> Box(modifier = Modifier
+                                .size(6.dp)
+                                .background(Color(0xFF30363D), RoundedCornerShape(3.dp)))
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        label,
+                        fontSize = 12.sp,
+                        color = when (stageState) {
+                            "done" -> Color(0xFF4CAF50)
+                            "active" -> Color.White
+                            else -> Color(0xFF757575)
+                        }
+                    )
+                }
+            }
         }
     }
 }

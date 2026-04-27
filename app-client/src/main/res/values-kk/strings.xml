@@ -100,7 +100,11 @@
     <string name="onboarding_notification_title">Хабарландыруларға қол жеткізу</string>
     <string name="onboarding_notification_desc">Телефон хабарландыруларын автокөлік дисплейінде көрсетеді. Онсыз жүргізу кезінде қоңыраулар мен хабарларды өткізіп аласыз.</string>
     <string name="onboarding_car_setup_title">Қосылу алдында</string>
-    <string name="onboarding_car_setup_desc">Барлығы дайын екеніне көз жеткізіңіз:\n\n• Автокөлікте Wi-Fi ADB қосулы\n• Телефон хотспоты қосулы\n• Автокөлік хотспотқа қосылған\n• Автокөлік қолданбасы орнатылған</string>
+    <string name="onboarding_car_setup_desc">Қосылу алдында барлығы дайын екеніне көз жеткізіңіз:</string>
+    <string name="onboarding_car_prereq_wifi_adb">Автокөлікте Wi-Fi ADB қосулы</string>
+    <string name="onboarding_car_prereq_hotspot">Телефон хотспоты қосулы</string>
+    <string name="onboarding_car_prereq_connected">Автокөлік хотспотқа қосылған</string>
+    <string name="onboarding_car_prereq_installed">Автокөлік қолданбасы орнатылған</string>
     <string name="onboarding_car_install_btn">Автокөлікке орнату</string>
     <string name="onboarding_car_installing">Автокөлік қолданбасы орнатылуда…</string>
     <string name="onboarding_car_installed">Автокөлік қолданбасы орнатылды!</string>

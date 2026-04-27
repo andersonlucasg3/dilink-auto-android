@@ -104,7 +104,11 @@
     <string name="onboarding_notification_title">Notification Access</string>
     <string name="onboarding_notification_desc">Shows phone notifications on the car display. Without this, you\'ll miss calls and messages while driving.</string>
     <string name="onboarding_car_setup_title">Before You Connect</string>
-    <string name="onboarding_car_setup_desc">Make sure everything is ready:\n\n• Wi-Fi ADB is enabled on the car\n• Your phone hotspot is turned on\n• The car is connected to your hotspot\n• The car app must be installed</string>
+    <string name="onboarding_car_setup_desc">Make sure everything is ready before connecting:</string>
+    <string name="onboarding_car_prereq_wifi_adb">Wi-Fi ADB enabled on car</string>
+    <string name="onboarding_car_prereq_hotspot">Phone hotspot turned on</string>
+    <string name="onboarding_car_prereq_connected">Car connected to your hotspot</string>
+    <string name="onboarding_car_prereq_installed">Car app must be installed</string>
     <string name="onboarding_car_install_btn">Install on Car</string>
     <string name="onboarding_car_installing">Installing car app…</string>
     <string name="onboarding_car_installed">Car app installed!</string>

@@ -100,7 +100,11 @@
     <string name="onboarding_notification_title">Доступ к уведомлениям</string>
     <string name="onboarding_notification_desc">Показывает уведомления телефона на дисплее автомобиля. Без этого вы пропустите звонки и сообщения за рулем.</string>
     <string name="onboarding_car_setup_title">Перед подключением</string>
-    <string name="onboarding_car_setup_desc">Убедитесь, что всё готово:\n\n• Отладка Wi-Fi ADB включена на авто\n• Точка доступа телефона включена\n• Авто подключено к точке доступа\n• Приложение авто установлено</string>
+    <string name="onboarding_car_setup_desc">Убедитесь, что всё готово к подключению:</string>
+    <string name="onboarding_car_prereq_wifi_adb">Отладка Wi-Fi ADB включена на авто</string>
+    <string name="onboarding_car_prereq_hotspot">Точка доступа телефона включена</string>
+    <string name="onboarding_car_prereq_connected">Авто подключено к точке доступа</string>
+    <string name="onboarding_car_prereq_installed">Приложение авто установлено</string>
     <string name="onboarding_car_install_btn">Установить в авто</string>
     <string name="onboarding_car_installing">Установка приложения авто…</string>
     <string name="onboarding_car_installed">Приложение авто установлено!</string>

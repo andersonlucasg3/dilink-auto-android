@@ -100,7 +100,11 @@
     <string name="onboarding_notification_title">Acesso às Notificações</string>
     <string name="onboarding_notification_desc">Mostra as notificações do telefone no display do carro. Sem isso, você perderá chamadas e mensagens enquanto dirige.</string>
     <string name="onboarding_car_setup_title">Antes de Conectar</string>
-    <string name="onboarding_car_setup_desc">Certifique-se de que tudo está pronto:\n\n• O ADB Wi-Fi está ativado no carro\n• O hotspot do telefone está ligado\n• O carro está conectado ao hotspot\n• O app do carro está instalado</string>
+    <string name="onboarding_car_setup_desc">Certifique-se de que tudo está pronto antes de conectar:</string>
+    <string name="onboarding_car_prereq_wifi_adb">ADB Wi-Fi ativado no carro</string>
+    <string name="onboarding_car_prereq_hotspot">Hotspot do telefone ligado</string>
+    <string name="onboarding_car_prereq_connected">Carro conectado ao hotspot</string>
+    <string name="onboarding_car_prereq_installed">App do carro instalado</string>
     <string name="onboarding_car_install_btn">Instalar no Carro</string>
     <string name="onboarding_car_installing">Instalando app do carro…</string>
     <string name="onboarding_car_installed">App do carro instalado!</string>
