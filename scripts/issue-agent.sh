@@ -80,23 +80,9 @@ status() {
   echo "[status] $body"
 }
 
-post_comment() {
-  local body="$1"
-  local tmpfile="/tmp/comment-body-${ISSUE_NUM}.txt"
-  echo "$body" > "$tmpfile"
-  jq -n --rawfile body "$tmpfile" '{body: $body}' |
-    curl -s -X POST \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-      -H "Accept: application/vnd.github+json" \
-      "https://api.github.com/repos/${REPO}/issues/${ISSUE_NUM}/comments" \
-      -d @- > /dev/null
-  rm -f "$tmpfile"
-}
-
 handle_error() {
   local err_msg="${1:-Unknown error}"
   local details="${2:-}"
-  status "❌ Error encountered — see below"
   cat > /tmp/error-comment.txt << EOF
 ## 🤖 Agent Error
 
@@ -108,7 +94,7 @@ ${details}
 
 [Workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
 EOF
-  post_comment "$(cat /tmp/error-comment.txt)"
+  status "$(cat /tmp/error-comment.txt)"
   exit 1
 }
 
@@ -369,8 +355,7 @@ EOFCOMMENT
 Reply to this issue to continue. The agent will pick up from where it left off.
 EOFCOMMENT
 
-  status "✅ Complete — see summary below"
-  post_comment "$(cat /tmp/summary-comment.md)"
+  status "$(cat /tmp/summary-comment.md)"
 
   # Handle agent-requested actions
   ACTION=$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')
@@ -554,8 +539,7 @@ EOFCOMMENT
 Reply to continue. The agent resumes its conversation and picks up where it left off.
 EOFCOMMENT
 
-  status "✅ Complete — see summary below"
-  post_comment "$(cat /tmp/summary-comment.md)"
+  status "$(cat /tmp/summary-comment.md)"
 
   # Handle agent-requested actions
   ACTION=$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')
