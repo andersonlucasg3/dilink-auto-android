@@ -3,6 +3,7 @@ name: Build (Develop)
 on:
   push:
     branches: [develop]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+-dev']
   pull_request:
     branches: [develop]
 
@@ -55,16 +56,19 @@ jobs:
           path: app-client/build/outputs/apk/debug/app-client-debug.apk
 
       - name: Update Dev Prerelease
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
-          VERSION_NAME=$(grep 'app.versionName' gradle.properties | sed 's/.*=//')
-          # Only create prereleases for -dev versions
-          if ! echo "$VERSION_NAME" | grep -q '\-dev'; then
-            echo "Skipping prerelease: $VERSION_NAME is not a dev version"
-            exit 0
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION_NAME="${TAG#v}"
+
+          # Verify tag version matches gradle.properties
+          FILE_VERSION=$(grep 'app.versionName' gradle.properties | sed 's/.*=//')
+          if [ "$VERSION_NAME" != "$FILE_VERSION" ]; then
+            echo "ERROR: Tag version ($VERSION_NAME) does not match gradle.properties ($FILE_VERSION)"
+            exit 1
           fi
+
           VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
-          TAG="v${VERSION_NAME}"
 
           # Delete old dev prerelease if it exists
           gh release delete "$TAG" --yes 2>/dev/null || true
@@ -73,7 +77,7 @@ jobs:
           gh release create "$TAG" \
             --prerelease \
             --title "Development Build $TAG (code $VERSION_CODE)" \
-            --notes "Automated development build from develop branch.\n\nVersion: $TAG\nVersion code: $VERSION_CODE\nCommit: ${{ github.sha }}" \
+            --notes "Automated development build.\n\nVersion: $TAG\nVersion code: $VERSION_CODE\nCommit: ${{ github.sha }}" \
             app-client/build/outputs/apk/debug/app-client-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
