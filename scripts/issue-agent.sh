@@ -193,7 +193,7 @@ if [ "$EVENT" = "issues" ]; then
 
   echo "--- Starting Claude Code (new conversation) ---"
   react eyes
-  if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(< /tmp/agent-prompt.txt)" 2>&1); then
+  if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt.txt and complete the task described there." 2>&1); then
     handle_error "Claude Code exited with code $?" "Prompt was written to /tmp/agent-prompt.txt"
   fi
   echo "--- Claude Code finished ---"
@@ -293,7 +293,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
     react eyes
-    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "$(< /tmp/agent-prompt.txt)" 2>&1); then
+    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt.txt and complete the task described there." 2>&1); then
       handle_error "Claude Code exited with code $?"
     fi
     echo "--- Claude Code finished ---"
