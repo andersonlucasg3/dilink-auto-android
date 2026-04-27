@@ -123,7 +123,7 @@ PRs welcome. See [Architecture](./architecture.md) and [Protocol](./protocol.md)
 | `fix/*` | Bug fixes | Merge to `develop` via PR |
 | `release/*` | Release preparation | Merge to `main` → triggers release |
 
-**Release process:** Create a `release/vX.Y.Z` branch from `develop`, bump version, merge into `main`. The CI automatically creates a signed GitHub Release when a `v*` tag is pushed.
+**Release process:** Create a `release/vX.Y.Z` branch from `develop`, bump version, merge into `main`. Push a `vX.Y.Z` tag and CI creates a signed GitHub Release. Then merge `main` back into `develop` to sync the release version and any hotfixes.
 
 **Debug build updates:** Debug builds check for the latest prerelease from `develop`. To push a dev update, merge your changes to `develop` — CI creates a prerelease that debug builds detect as an update.
 
