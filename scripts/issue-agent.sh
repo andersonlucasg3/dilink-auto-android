@@ -125,8 +125,19 @@ extract_summary_json() {
   echo "$json"
 }
 
+RELEASE_VERSION=""
+RELEASE_TARGET="develop"
+
 branch_name() {
-  echo "issue/${ISSUE_NUM}-agent"
+  # Check if this is a release issue
+  RELEASE_VERSION=$(echo "$ISSUE_BODY" | grep -oP '### Version\s*\n*\s*\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  if [ -n "$RELEASE_VERSION" ]; then
+    RELEASE_TARGET="main"
+    echo "release/v${RELEASE_VERSION}"
+  else
+    RELEASE_TARGET="develop"
+    echo "issue/${ISSUE_NUM}-agent"
+  fi
 }
 
 # Register a headless session so --resume can find it later
@@ -214,6 +225,11 @@ echo " Issue:  #$ISSUE_NUM"
 echo "=========================================="
 
 BRANCH=$(branch_name)
+if [ -n "$RELEASE_VERSION" ]; then
+  echo " Type:   release → $RELEASE_TARGET (v$RELEASE_VERSION)"
+else
+  echo " Type:   feature → $RELEASE_TARGET"
+fi
 
 # Set up branch — reuse if it exists (resume), create fresh if new
 git fetch origin develop "$BRANCH" 2>/dev/null || true
@@ -366,7 +382,7 @@ EOFCOMMENT
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → develop"
     PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
-      --base develop \
+      --base "$RELEASE_TARGET" \
       --head "$BRANCH" \
       --title "${ISSUE_TITLE}" \
       --body "Closes #${ISSUE_NUM}" \
@@ -550,7 +566,7 @@ EOFCOMMENT
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → develop"
     PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
-      --base develop \
+      --base "$RELEASE_TARGET" \
       --head "$BRANCH" \
       --title "${ISSUE_TITLE}" \
       --body "Closes #${ISSUE_NUM}" \
