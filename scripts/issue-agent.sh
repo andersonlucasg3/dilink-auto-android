@@ -215,48 +215,23 @@ BRANCH=$(branch_name)
 # Set up branch — reuse if it exists (resume), create fresh if new
 git fetch origin develop "$BRANCH" 2>/dev/null || true
 
-# Discard any leftover changes and prune stale worktrees
+# Discard leftover changes — each runner has its own isolated workspace
 git checkout -- . 2>/dev/null || true
 git clean -ffdx -e '.gradle' 2>/dev/null || true
-git worktree prune 2>/dev/null || true
 
-# Use a dedicated git worktree per issue for isolation and consistent paths
-ISSUE_WORKTREE="$AGENT_STATE_DIR/../worktrees/issue-${ISSUE_NUM}"
+# Set up branch
 git fetch origin develop "$BRANCH" 2>/dev/null || true
-
-if [ -d "$ISSUE_WORKTREE" ]; then
-  echo "--- Reusing worktree: $ISSUE_WORKTREE ---"
-  cd "$ISSUE_WORKTREE"
+if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+  echo "--- Reusing existing branch: $BRANCH ---"
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
   git pull origin "$BRANCH" 2>/dev/null || true
 else
-  echo "--- Creating worktree: $ISSUE_WORKTREE ---"
-  if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
-    git worktree add "$ISSUE_WORKTREE" "origin/$BRANCH" 2>/dev/null || {
-      # Worktree may already exist but be unregistered — force it
-      git worktree prune 2>/dev/null || true
-      mkdir -p "$ISSUE_WORKTREE"
-      cd "$ISSUE_WORKTREE"
-      git init
-      git remote add origin "https://github.com/${REPO}.git"
-      git fetch origin "$BRANCH"
-      git checkout -b "$BRANCH" "origin/$BRANCH"
-    }
-  else
-    git worktree add -b "$BRANCH" "$ISSUE_WORKTREE" origin/develop 2>/dev/null || {
-      git worktree prune 2>/dev/null || true
-      mkdir -p "$ISSUE_WORKTREE"
-      cd "$ISSUE_WORKTREE"
-      git init
-      git remote add origin "https://github.com/${REPO}.git"
-      git fetch origin develop
-      git checkout -b "$BRANCH" origin/develop
-    }
-  fi
-  cd "$ISSUE_WORKTREE"
+  echo "--- Creating new branch: $BRANCH ---"
+  git checkout develop
+  git pull origin develop
+  git branch -D "$BRANCH" 2>/dev/null || true
+  git checkout -b "$BRANCH"
 fi
-
-echo "Working in: $(pwd)"
 
 # Record which .jsonl files exist before the run (to detect the new one)
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
@@ -340,8 +315,6 @@ if [ "$EVENT" = "issues" ]; then
   if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
     if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
       APK_BUILT=true
-      # Copy APK to the original checkout so the workflow upload step finds it
-      cp -f app-client/build/outputs/apk/debug/app-client-debug.apk "$GITHUB_WORKSPACE/app-client/build/outputs/apk/debug/" 2>/dev/null || true
     fi
   fi
 
@@ -383,8 +356,6 @@ EOFCOMMENT
   if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
-    # Cleanup worktree and state
-    git worktree remove "$ISSUE_WORKTREE" --force 2>/dev/null || true
     rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → develop"
@@ -527,8 +498,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
   if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
     if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
       APK_BUILT=true
-      # Copy APK to the original checkout so the workflow upload step finds it
-      cp -f app-client/build/outputs/apk/debug/app-client-debug.apk "$GITHUB_WORKSPACE/app-client/build/outputs/apk/debug/" 2>/dev/null || true
     fi
   fi
 
@@ -569,8 +538,6 @@ EOFCOMMENT
   if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
-    # Cleanup worktree and state
-    git worktree remove "$ISSUE_WORKTREE" --force 2>/dev/null || true
     rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → develop"
