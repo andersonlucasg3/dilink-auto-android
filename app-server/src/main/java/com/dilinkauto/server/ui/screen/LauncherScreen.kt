@@ -258,6 +258,17 @@ fun AppGrid(
                 cursorColor = MaterialTheme.colorScheme.primary
             )
         )
+
+        // Note: apps control their own layout — portrait-only apps will be letterboxed
+        Text(
+            text = "Apps control their own orientation. Portrait-only apps may appear letterboxed.",
+            fontSize = 11.sp,
+            color = Color(0xFF666666),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 4.dp)
+        )
     }
 }
 
