@@ -282,14 +282,16 @@ if [ "$EVENT" = "issues" ]; then
   if ! git diff --quiet --cached; then
     git diff --cached --stat
     git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent: \(.summary)"')" || true
-    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
-    COMMIT_SHA=$(git rev-parse --short HEAD)
-  elif [ "$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')" = "true" ]; then
-    # Agent claims changes but git sees none — force an empty commit to save state
-    git commit --allow-empty -m "Agent: $(echo "$SUMMARY_JSON" | jq -r '.summary' | head -1)" || true
-    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
-    COMMIT_SHA=$(git rev-parse --short HEAD)
   fi
+  # Push if local differs from remote (agent may have committed without pushing)
+  if git rev-parse "origin/$BRANCH" >/dev/null 2>&1; then
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$BRANCH")" ]; then
+      git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+    fi
+  else
+    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+  fi
+  COMMIT_SHA=$(git rev-parse --short HEAD)
 
   # Always build after the agent finishes (don't trust agent's build claim)
   echo "--- Building APK ---"
