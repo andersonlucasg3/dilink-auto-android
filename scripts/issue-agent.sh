@@ -279,7 +279,7 @@ if [ "$EVENT" = "issues" ]; then
     if ! git diff --quiet || ! git diff --cached --quiet; then
       git add -A
       git diff --cached --stat
-      git commit -m "Agent: $(echo "$SUMMARY_JSON" | jq -r '.summary' | head -1 | sed 's/^##*\s*//')" || true
+      git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent: \(.summary)"')" || true
       git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
       COMMIT_SHA=$(git rev-parse --short HEAD)
     fi
@@ -412,7 +412,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     if ! git diff --quiet || ! git diff --cached --quiet; then
       git add -A
       git diff --cached --stat
-      git commit -m "Agent follow-up: $(echo "$SUMMARY_JSON" | jq -r '.summary' | head -c 200)" || true
+      git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent follow-up: \(.summary)"')" || true
       git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
       COMMIT_SHA=$(git rev-parse --short HEAD)
     fi
