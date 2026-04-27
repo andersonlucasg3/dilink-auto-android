@@ -99,8 +99,13 @@
     <string name="onboarding_accessibility_desc">Позволяет экрану автомобиля управлять телефоном. Без этого вы будете видеть экран, но не сможете касаться.</string>
     <string name="onboarding_notification_title">Доступ к уведомлениям</string>
     <string name="onboarding_notification_desc">Показывает уведомления телефона на дисплее автомобиля. Без этого вы пропустите звонки и сообщения за рулем.</string>
+    <string name="onboarding_car_setup_title">Перед подключением</string>
+    <string name="onboarding_car_setup_desc">Убедитесь, что всё готово:\n\n• Отладка Wi-Fi ADB включена на авто\n• Точка доступа телефона включена\n• Авто подключено к точке доступа\n• Приложение авто установлено</string>
+    <string name="onboarding_car_install_btn">Установить в авто</string>
+    <string name="onboarding_car_installing">Установка приложения авто…</string>
+    <string name="onboarding_car_installed">Приложение авто установлено!</string>
     <string name="onboarding_done_title">Всё готово</string>
-    <string name="onboarding_done_desc">Всё настроено. Подключите телефон к USB-порту автомобиля для начала.</string>
+    <string name="onboarding_done_desc">Всё настроено. Нажмите ниже, чтобы начать.</string>
     <string name="onboarding_grant">Предоставить</string>
     <string name="onboarding_skip">Пропустить</string>
     <string name="onboarding_continue">Продолжить</string>

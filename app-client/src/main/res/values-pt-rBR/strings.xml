@@ -99,8 +99,13 @@
     <string name="onboarding_accessibility_desc">Permite que a tela do carro controle seu telefone. Sem isso, você verá a tela mas não poderá tocar.</string>
     <string name="onboarding_notification_title">Acesso às Notificações</string>
     <string name="onboarding_notification_desc">Mostra as notificações do telefone no display do carro. Sem isso, você perderá chamadas e mensagens enquanto dirige.</string>
+    <string name="onboarding_car_setup_title">Antes de Conectar</string>
+    <string name="onboarding_car_setup_desc">Certifique-se de que tudo está pronto:\n\n• O ADB Wi-Fi está ativado no carro\n• O hotspot do telefone está ligado\n• O carro está conectado ao hotspot\n• O app do carro está instalado</string>
+    <string name="onboarding_car_install_btn">Instalar no Carro</string>
+    <string name="onboarding_car_installing">Instalando app do carro…</string>
+    <string name="onboarding_car_installed">App do carro instalado!</string>
     <string name="onboarding_done_title">Tudo Pronto</string>
-    <string name="onboarding_done_desc">Tudo configurado. Conecte seu telefone na porta USB do carro para começar.</string>
+    <string name="onboarding_done_desc">Tudo configurado. Toque abaixo para começar.</string>
     <string name="onboarding_grant">Conceder</string>
     <string name="onboarding_skip">Pular</string>
     <string name="onboarding_continue">Continuar</string>

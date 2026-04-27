@@ -62,11 +62,15 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             DiLinkAutoTheme {
+                val installStatus by ConnectionService.installStatusFlow.collectAsState()
                 if (showOnboarding.value) {
-                    OnboardingScreen(onComplete = {
+                    OnboardingScreen(
+                        onComplete = {
                             onboardingCompleted = true
                             showOnboarding.value = false
-                        }
+                        },
+                        onInstallOnCar = { installOnCar(null) },
+                        installStatus = installStatus
                     )
                 } else {
                     var showSettings by remember { mutableStateOf(false) }
@@ -169,7 +173,7 @@ private data class OnboardingStep(
 )
 
 @Composable
-fun OnboardingScreen(onComplete: () -> Unit) {
+fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, installStatus: String) {
     val context = LocalContext.current
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     val pkg = context.packageName
@@ -242,6 +246,11 @@ fun OnboardingScreen(onComplete: () -> Unit) {
     val accessibilityDesc = stringResource(R.string.onboarding_accessibility_desc)
     val notificationTitle = stringResource(R.string.onboarding_notification_title)
     val notificationDesc = stringResource(R.string.onboarding_notification_desc)
+    val carSetupTitle = stringResource(R.string.onboarding_car_setup_title)
+    val carSetupDesc = stringResource(R.string.onboarding_car_setup_desc)
+    val carSetupContinue = stringResource(R.string.onboarding_continue)
+    val carInstallBtn = stringResource(R.string.onboarding_car_install_btn)
+    val carSkipBtn = stringResource(R.string.onboarding_skip_btn)
     val doneTitle = stringResource(R.string.onboarding_done_title)
     val doneDesc = stringResource(R.string.onboarding_done_desc)
     val doneAction = stringResource(R.string.onboarding_start)
@@ -302,6 +311,12 @@ fun OnboardingScreen(onComplete: () -> Unit) {
                 }
             ),
             OnboardingStep(
+                icon = Icons.Default.DirectionsCar,
+                title = carSetupTitle, description = carSetupDesc,
+                actionLabel = carSetupContinue,
+                isGranted = { true }, onAction = {}
+            ),
+            OnboardingStep(
                 icon = Icons.Default.CheckCircle,
                 title = doneTitle, description = doneDesc,
                 actionLabel = doneAction,
@@ -312,9 +327,9 @@ fun OnboardingScreen(onComplete: () -> Unit) {
 
     val step = steps[currentStep]
 
-    // Auto-advance if current permission is already granted (skip welcome step)
+    // Auto-advance if current permission is already granted (skip welcome and car setup steps)
     LaunchedEffect(refreshKey, currentStep) {
-        if (currentStep > 0 && currentStep < steps.lastIndex && step.isGranted()) {
+        if (currentStep > 0 && currentStep != 5 && currentStep < steps.lastIndex && step.isGranted()) {
             kotlinx.coroutines.delay(300)
             currentStep++
         }
@@ -384,9 +399,70 @@ fun OnboardingScreen(onComplete: () -> Unit) {
             )
         }
 
-        if (currentStep > 0 && step.isGranted()) {
+        if (currentStep > 0 && currentStep != 5 && step.isGranted()) {
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.onboarding_granted_label), fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
+        }
+
+        // Car setup step: install button + skip
+        if (currentStep == 5) {
+            Spacer(Modifier.height(16.dp))
+
+            val isInstalling = installStatus.isNotEmpty() &&
+                !installStatus.contains("Success", ignoreCase = true) &&
+                !installStatus.contains("installed", ignoreCase = true) &&
+                !installStatus.contains("up-to-date", ignoreCase = true) &&
+                !installStatus.contains("Error", ignoreCase = true) &&
+                !installStatus.contains("Failed", ignoreCase = true) &&
+                !installStatus.contains("not found", ignoreCase = true)
+
+            val isDone = installStatus.contains("Success", ignoreCase = true) ||
+                installStatus.contains("installed", ignoreCase = true) ||
+                installStatus.contains("up-to-date", ignoreCase = true)
+
+            val isError = installStatus.contains("Error", ignoreCase = true) ||
+                installStatus.contains("Failed", ignoreCase = true) ||
+                installStatus.contains("not found", ignoreCase = true)
+
+            if (isInstalling) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Text(installStatus, fontSize = 13.sp, color = Color.Gray)
+                }
+            } else if (isDone) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(installStatus, fontSize = 13.sp, color = Color(0xFF4CAF50))
+                }
+            } else if (isError) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEF5350), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(installStatus, fontSize = 13.sp, color = Color(0xFFEF5350))
+                }
+            } else {
+                Button(
+                    onClick = onInstallOnCar,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A73E8))
+                ) {
+                    Icon(Icons.Default.DirectionsCar, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(carInstallBtn, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            if (!isInstalling) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { currentStep++ }) {
+                    Text(carSkipBtn, color = Color.Gray)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
         }
 
         Spacer(Modifier.height(48.dp))
@@ -565,7 +641,7 @@ fun MainScreen(
 
         if (installStatus.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            Text(installStatus, fontSize = 13.sp, color = Color.Gray)
+            InstallStatusCard(installStatus)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -871,6 +947,7 @@ fun UpdatesCard(
 ) {
     val updateState by UpdateManager.updateState.collectAsState()
     val downloadProgress by UpdateManager.downloadProgress.collectAsState()
+    val carInstallStatus by ConnectionService.installStatusFlow.collectAsState()
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -932,18 +1009,75 @@ fun UpdatesCard(
 
             // ── Car install ──
             Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFF30363D))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Car App", fontSize = 14.sp, color = Color.White)
-                    Text("Install or update the car app over WiFi ADB", fontSize = 12.sp, color = Color.Gray)
-                }
-                Button(onClick = { onInstallOnCar(null) }, shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
-                    Text("Install", fontSize = 13.sp)
+            val carInstalling = carInstallStatus.isNotEmpty() &&
+                !carInstallStatus.contains("Success", ignoreCase = true) &&
+                !carInstallStatus.contains("installed", ignoreCase = true) &&
+                !carInstallStatus.contains("up-to-date", ignoreCase = true) &&
+                !carInstallStatus.contains("Error", ignoreCase = true) &&
+                !carInstallStatus.contains("Failed", ignoreCase = true) &&
+                !carInstallStatus.contains("not found", ignoreCase = true)
+            val carDone = carInstallStatus.contains("Success", ignoreCase = true) ||
+                carInstallStatus.contains("installed", ignoreCase = true) ||
+                carInstallStatus.contains("up-to-date", ignoreCase = true)
+            val carError = carInstallStatus.contains("Error", ignoreCase = true) ||
+                carInstallStatus.contains("Failed", ignoreCase = true) ||
+                carInstallStatus.contains("not found", ignoreCase = true)
+
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Car App", fontSize = 14.sp, color = Color.White)
+                        Text(if (carInstallStatus.isEmpty()) "Install or update the car app over WiFi ADB" else carInstallStatus,
+                            fontSize = 12.sp, color = if (carDone) Color(0xFF4CAF50) else if (carError) Color(0xFFEF5350) else Color.Gray)
+                    }
+                    if (!carInstalling && !carDone) {
+                        Button(onClick = { onInstallOnCar(null) }, shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
+                            Text(if (carError) "Retry" else "Install", fontSize = 13.sp)
+                        }
+                    } else if (carInstalling) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                    } else if (carDone) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(20.dp))
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun InstallStatusCard(status: String) {
+    val (icon, color, isInProgress) = when {
+        status.contains("Searching", ignoreCase = true) -> Triple(Icons.Default.Search, Color(0xFFFFA726), true)
+        status.contains("Connecting", ignoreCase = true) -> Triple(Icons.Default.Usb, Color(0xFFFFA726), true)
+        status.contains("Push", ignoreCase = true) -> Triple(Icons.Default.Download, Color(0xFF2196F3), true)
+        status.contains("Install", ignoreCase = true) -> Triple(Icons.Default.InstallMobile, Color(0xFF2196F3), true)
+        status.contains("Launching", ignoreCase = true) -> Triple(Icons.Default.PlayArrow, Color(0xFF4CAF50), true)
+        status.contains("Checking", ignoreCase = true) -> Triple(Icons.Default.Info, Color(0xFFFFA726), true)
+        status.contains("Success", ignoreCase = true) || status.contains("installed", ignoreCase = true) || status.contains("up-to-date", ignoreCase = true) -> Triple(Icons.Default.CheckCircle, Color(0xFF4CAF50), false)
+        status.contains("Error", ignoreCase = true) || status.contains("Failed", ignoreCase = true) || status.contains("not found", ignoreCase = true) -> Triple(Icons.Default.Warning, Color(0xFFEF5350), false)
+        else -> Triple(Icons.Default.Info, Color(0xFF757575), true)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332))
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isInProgress) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = color)
+            } else {
+                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(status, fontSize = 13.sp, color = Color(0xFFB0BEC5), modifier = Modifier.weight(1f))
         }
     }
 }

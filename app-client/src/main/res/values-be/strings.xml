@@ -99,8 +99,13 @@
     <string name="onboarding_accessibility_desc">Дазваляе сэнсарнаму экрану аўтамабіля кіраваць тэлефонам. Без гэтага вы будзеце бачыць экран, але не зможаце націскаць.</string>
     <string name="onboarding_notification_title">Доступ да апавяшчэнняў</string>
     <string name="onboarding_notification_desc">Паказвае апавяшчэнні тэлефона на дысплеі аўтамабіля. Без гэтага вы прапусціце званкі і паведамленні падчас кіравання.</string>
+    <string name="onboarding_car_setup_title">Перад падключэннем</string>
+    <string name="onboarding_car_setup_desc">Пераканайцеся, што ўсё гатова:\n\n• Wi-Fi ADB уключаны на аўто\n• Кропка доступу тэлефона ўключана\n• Аўто падключана да кропкі доступу\n• Праграма аўто ўсталявана</string>
+    <string name="onboarding_car_install_btn">Усталяваць у аўто</string>
+    <string name="onboarding_car_installing">Усталяванне праграмы аўто…</string>
+    <string name="onboarding_car_installed">Праграма аўто ўсталявана!</string>
     <string name="onboarding_done_title">Усё гатова</string>
-    <string name="onboarding_done_desc">Усё наладжана. Падключыце тэлефон да USB-порта аўтамабіля, каб пачаць.</string>
+    <string name="onboarding_done_desc">Усё наладжана. Націсніце ніжэй, каб пачаць.</string>
     <string name="onboarding_grant">Даць дазвол</string>
     <string name="onboarding_skip">Прапусціць</string>
     <string name="onboarding_continue">Працягнуць</string>

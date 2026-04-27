@@ -99,8 +99,13 @@
     <string name="onboarding_accessibility_desc">Avtomobilning sensorli ekrani telefoningizni boshqarishiga imkon beradi. Busiz ekranni ko\'rasiz, lekin tegina olmaysiz.</string>
     <string name="onboarding_notification_title">Bildirishnomalarga kirish</string>
     <string name="onboarding_notification_desc">Telefon bildirishnomalarini avtomobil displeyida ko\'rsatadi. Busiz haydash paytida qo\'ng\'iroqlar va xabarlarni o\'tkazib yuborasiz.</string>
+    <string name="onboarding_car_setup_title">Ulanishdan oldin</string>
+    <string name="onboarding_car_setup_desc">Hammasi tayyorligiga ishonch hosil qiling:\n\n• Avtomobilda Wi-Fi ADB yoqilgan\n• Telefon hotspoti yoqilgan\n• Avtomobil hotspotga ulangan\n• Avtomobil ilovasi o\'rnatilgan</string>
+    <string name="onboarding_car_install_btn">Avtomobilga o\'rnatish</string>
+    <string name="onboarding_car_installing">Avtomobil ilovasi o\'rnatilmoqda…</string>
+    <string name="onboarding_car_installed">Avtomobil ilovasi o\'rnatildi!</string>
     <string name="onboarding_done_title">Hammasi tayyor</string>
-    <string name="onboarding_done_desc">Hammasi tayyor. Boshlash uchun telefonni avtomobilning USB portiga ulang.</string>
+    <string name="onboarding_done_desc">Hammasi tayyor. Boshlash uchun pastga teging.</string>
     <string name="onboarding_grant">Ruxsat berish</string>
     <string name="onboarding_skip">O\'tkazib yuborish</string>
     <string name="onboarding_continue">Davom etish</string>

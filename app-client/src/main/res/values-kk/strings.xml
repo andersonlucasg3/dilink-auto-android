@@ -99,8 +99,13 @@
     <string name="onboarding_accessibility_desc">Автокөліктің сенсорлық экраны телефонды басқаруына мүмкіндік береді. Онсыз экранды көресіз, бірақ түрте алмайсыз.</string>
     <string name="onboarding_notification_title">Хабарландыруларға қол жеткізу</string>
     <string name="onboarding_notification_desc">Телефон хабарландыруларын автокөлік дисплейінде көрсетеді. Онсыз жүргізу кезінде қоңыраулар мен хабарларды өткізіп аласыз.</string>
+    <string name="onboarding_car_setup_title">Қосылу алдында</string>
+    <string name="onboarding_car_setup_desc">Барлығы дайын екеніне көз жеткізіңіз:\n\n• Автокөлікте Wi-Fi ADB қосулы\n• Телефон хотспоты қосулы\n• Автокөлік хотспотқа қосылған\n• Автокөлік қолданбасы орнатылған</string>
+    <string name="onboarding_car_install_btn">Автокөлікке орнату</string>
+    <string name="onboarding_car_installing">Автокөлік қолданбасы орнатылуда…</string>
+    <string name="onboarding_car_installed">Автокөлік қолданбасы орнатылды!</string>
     <string name="onboarding_done_title">Барлығы дайын</string>
-    <string name="onboarding_done_desc">Барлығы дайын. Бастау үшін телефонды автокөліктің USB портына жалғаңыз.</string>
+    <string name="onboarding_done_desc">Барлығы дайын. Бастау үшін төменде түртіңіз.</string>
     <string name="onboarding_grant">Рұқсат беру</string>
     <string name="onboarding_skip">Өткізіп жіберу</string>
     <string name="onboarding_continue">Жалғастыру</string>
