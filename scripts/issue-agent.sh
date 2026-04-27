@@ -215,9 +215,10 @@ BRANCH=$(branch_name)
 # Set up branch — reuse if it exists (resume), create fresh if new
 git fetch origin develop "$BRANCH" 2>/dev/null || true
 
-# Discard any leftover changes from previous runs
+# Discard any leftover changes and prune stale worktrees
 git checkout -- . 2>/dev/null || true
 git clean -ffdx -e '.gradle' 2>/dev/null || true
+git worktree prune 2>/dev/null || true
 
 # Use a dedicated git worktree per issue for isolation and consistent paths
 ISSUE_WORKTREE="$AGENT_STATE_DIR/../worktrees/issue-${ISSUE_NUM}"
@@ -380,6 +381,9 @@ EOFCOMMENT
   if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+    # Cleanup worktree and state
+    git worktree remove "$ISSUE_WORKTREE" --force 2>/dev/null || true
+    rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → develop"
     PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
@@ -561,6 +565,9 @@ EOFCOMMENT
   if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+    # Cleanup worktree and state
+    git worktree remove "$ISSUE_WORKTREE" --force 2>/dev/null || true
+    rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → develop"
     PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
