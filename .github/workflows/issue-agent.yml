@@ -40,7 +40,7 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          if [ ! -d "$ANDROID_HOME" ]; then
+          if [ ! -f "$ANDROID_HOME/platforms/android-34/build.prop" ]; then
             SDK_MGR_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
             wget -q "$SDK_MGR_URL" -O /tmp/cmdline-tools.zip
             mkdir -p $ANDROID_HOME/cmdline-tools/latest
