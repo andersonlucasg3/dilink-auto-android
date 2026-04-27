@@ -278,10 +278,15 @@ if [ "$EVENT" = "issues" ]; then
   # Commit and push if changes were made
   CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
   COMMIT_SHA=""
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    git add -A
+  git add -A
+  if ! git diff --quiet --cached; then
     git diff --cached --stat
     git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent: \(.summary)"')" || true
+    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+    COMMIT_SHA=$(git rev-parse --short HEAD)
+  elif [ "$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')" = "true" ]; then
+    # Agent claims changes but git sees none — force an empty commit to save state
+    git commit --allow-empty -m "Agent: $(echo "$SUMMARY_JSON" | jq -r '.summary' | head -1)" || true
     git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
     COMMIT_SHA=$(git rev-parse --short HEAD)
   fi
