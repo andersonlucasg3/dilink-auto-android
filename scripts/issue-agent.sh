@@ -340,6 +340,8 @@ if [ "$EVENT" = "issues" ]; then
   if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
     if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
       APK_BUILT=true
+      # Copy APK to the original checkout so the workflow upload step finds it
+      cp -f app-client/build/outputs/apk/debug/app-client-debug.apk "$GITHUB_WORKSPACE/app-client/build/outputs/apk/debug/" 2>/dev/null || true
     fi
   fi
 
@@ -525,6 +527,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
   if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
     if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
       APK_BUILT=true
+      # Copy APK to the original checkout so the workflow upload step finds it
+      cp -f app-client/build/outputs/apk/debug/app-client-debug.apk "$GITHUB_WORKSPACE/app-client/build/outputs/apk/debug/" 2>/dev/null || true
     fi
   fi
 
