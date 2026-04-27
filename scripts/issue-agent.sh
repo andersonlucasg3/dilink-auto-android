@@ -279,7 +279,7 @@ if [ "$EVENT" = "issues" ]; then
     if ! git diff --quiet || ! git diff --cached --quiet; then
       git add -A
       git diff --cached --stat
-      git commit -m "Agent: $(echo "$SUMMARY_JSON" | jq -r '.summary' | head -c 200)" || true
+      git commit -m "Agent: $(echo "$SUMMARY_JSON" | jq -r '.summary' | head -1 | sed 's/^##*\s*//')" || true
       git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
       COMMIT_SHA=$(git rev-parse --short HEAD)
     fi
