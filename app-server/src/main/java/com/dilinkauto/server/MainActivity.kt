@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.sp
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.nav.PersistentNavBar
 import com.dilinkauto.server.ui.nav.RecentAppsState
+import com.dilinkauto.server.ui.screen.CarLaunchScreen
 import com.dilinkauto.server.ui.screen.HomeContent
 import com.dilinkauto.server.ui.screen.MirrorContent
 import com.dilinkauto.server.ui.screen.NotificationContent
@@ -149,75 +150,74 @@ fun CarShell(service: CarConnectionService) {
         currentScreen = Screen.APP
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // Persistent left nav bar
-        PersistentNavBar(
-            recentAppsState = recentAppsState,
-            activeAppPackage = activeAppPackage,
-            isPhoneConnected = isConnected,
-            appList = appList,
-            notificationCount = notifications.size,
-            onAppClick = launchApp,
-            onBack = {
-                service.goBack()
-            },
-            onHome = {
-                service.goHome()
-                currentScreen = Screen.HOME
-                activeAppPackage = null
-            },
-            onNotifications = {
-                currentScreen = if (currentScreen == Screen.NOTIFICATIONS) Screen.HOME
-                    else Screen.NOTIFICATIONS
-            },
-            onDisconnect = {
-                service.disconnectFromPhone()
-                currentScreen = Screen.HOME
-                activeAppPackage = null
-            }
-        )
+    val showStreamingMode = appList.isNotEmpty() && isConnected
 
-        // Content area
-        Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-            // Show setup/connecting overlay until video stream is ready
-            val showSetupOverlay = state == CarConnectionService.State.CONNECTING ||
-                    (isConnected && !videoReady && currentScreen != Screen.NOTIFICATIONS)
-            when {
-                showSetupOverlay -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
-                        contentAlignment = androidx.compose.ui.Alignment.Center
-                    ) {
-                        androidx.compose.foundation.layout.Column(
-                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+    if (showStreamingMode) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            // Persistent left nav bar (streaming mode only)
+            PersistentNavBar(
+                recentAppsState = recentAppsState,
+                activeAppPackage = activeAppPackage,
+                isPhoneConnected = isConnected,
+                appList = appList,
+                notificationCount = notifications.size,
+                onAppClick = launchApp,
+                onBack = {
+                    service.goBack()
+                },
+                onHome = {
+                    service.goHome()
+                    currentScreen = Screen.HOME
+                    activeAppPackage = null
+                },
+                onNotifications = {
+                    currentScreen = if (currentScreen == Screen.NOTIFICATIONS) Screen.HOME
+                        else Screen.NOTIFICATIONS
+                },
+                onDisconnect = {
+                    service.disconnectFromPhone()
+                    currentScreen = Screen.HOME
+                    activeAppPackage = null
+                }
+            )
+
+            // Content area
+            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                // Show a brief transition overlay while waiting for the first video frame
+                val showVideoWaitOverlay = !videoReady && currentScreen != Screen.NOTIFICATIONS
+                when {
+                    showVideoWaitOverlay -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+                            contentAlignment = androidx.compose.ui.Alignment.Center
                         ) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
-                            val message = statusMessage.ifEmpty {
-                                when (state) {
-                                    CarConnectionService.State.CONNECTING -> "Connecting..."
-                                    CarConnectionService.State.CONNECTED -> "Starting virtual display..."
-                                    else -> "Connecting..."
-                                }
+                            androidx.compose.foundation.layout.Column(
+                                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                            ) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
+                                androidx.compose.material3.Text(
+                                    statusMessage.ifEmpty { "Starting virtual display..." },
+                                    color = androidx.compose.ui.graphics.Color.White,
+                                    fontSize = 18.sp
+                                )
                             }
-                            androidx.compose.material3.Text(
-                                message,
-                                color = androidx.compose.ui.graphics.Color.White,
-                                fontSize = 18.sp
-                            )
                         }
                     }
+                    currentScreen == Screen.HOME -> HomeContent(service = service, onAppClick = launchApp)
+                    currentScreen == Screen.APP -> MirrorContent(service = service)
+                    currentScreen == Screen.NOTIFICATIONS -> NotificationContent(service = service, onAppLaunch = launchApp)
                 }
-                currentScreen == Screen.HOME -> HomeContent(service = service, onAppClick = launchApp)
-                currentScreen == Screen.APP -> MirrorContent(service = service)
-                currentScreen == Screen.NOTIFICATIONS -> NotificationContent(service = service, onAppLaunch = launchApp)
             }
         }
+    } else {
+        // Full-screen launch / connection screen — no nav bar, connection-focused
+        CarLaunchScreen(service = service)
     }
 }
