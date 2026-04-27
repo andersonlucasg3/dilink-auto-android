@@ -15,6 +15,16 @@ States: IDLE → CONNECTING → CONNECTED → STREAMING
 
 Car APK is embedded in the phone APK. The phone auto-updates the car app via dadb when version mismatch is detected during handshake. Car receives `UPDATING_CAR` message and shows status instead of reconnecting blindly.
 
+### Two-Mode UI
+
+The car app separates the connection flow from the streaming experience into two distinct modes, matching the phone app's approach:
+
+- **Launch mode** (`CarLaunchScreen`): Full-screen, connection-focused. Shows branding, step-by-step connection instructions, connection status, and manual IP entry. No navigation bar — the entire screen is dedicated to getting connected. Shown when the car app starts and remains until app icons are received from the phone via the control connection.
+
+- **Streaming mode** (`CarShell` with `PersistentNavBar`): The familiar layout with left navigation bar (notifications, home, back, recent apps) and content area (app grid, mirror view, notifications). Shown once `appList` is non-empty and the state is CONNECTED or STREAMING.
+
+The transition trigger: when the phone sends `APP_LIST` via the control connection and the connection state reaches CONNECTED/STREAMING, the UI switches from launch mode to streaming mode.
+
 ## Components
 
 ### CarConnectionService
@@ -84,9 +94,19 @@ H.264 decoder using MediaCodec with Surface output (GPU-direct rendering).
 - `logSink` callback routes all decoder logs to phone via carLogSend
 - Catchup mode: when queue exceeds 100ms of frames, skips every other non-keyframe (2x speed) to stay realtime
 
+### CarLaunchScreen
+
+Full-screen connection-focused composable shown before the phone connection is established — no nav bar, no app grid.
+
+- DiLink Auto branding (icon, title, tagline)
+- Connection status card with colored indicator dot (green=streaming, orange=connected/connecting, gray=idle) and live status text
+- "How to connect" instructions: 4 numbered steps (enable hotspot, plug USB, open phone app, wait for auto-connect)
+- Manual IP entry for direct connection
+- Replaced by streaming mode layout when `appList` becomes non-empty and state reaches CONNECTED/STREAMING
+
 ### PersistentNavBar
 
-76dp left navigation bar with:
+76dp left navigation bar — **only shown in streaming mode** — with:
 - Notifications button with badge
 - Home button
 - Back button
@@ -102,9 +122,9 @@ Width computed to guarantee even viewport for H.264 encoder.
 - Progress bars: determinate (filled) and indeterminate (spinning)
 - Tap-to-launch: tapping a notification launches the owner app on the VD and switches to mirror view
 
-### App Grid
+### App Grid (HomeContent)
 
-LauncherScreen features:
+Shown as the main content area when streaming mode is active and current screen is HOME:
 - Search field with `imePadding()` — keyboard doesn't push activity, only search bar moves
 - `windowSoftInputMode="adjustNothing"` in manifest
 - 64dp app icons in 160dp adaptive grid cells
