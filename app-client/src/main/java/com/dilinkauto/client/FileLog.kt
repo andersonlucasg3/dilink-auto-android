@@ -44,7 +44,7 @@ object FileLog {
                         writer?.write("\n")
                         writer?.flush()
                     } else {
-                        Thread.sleep(50)
+                        Thread.sleep(200) // reduced poll rate for low-end devices
                     }
                 } catch (_: Exception) {}
             }

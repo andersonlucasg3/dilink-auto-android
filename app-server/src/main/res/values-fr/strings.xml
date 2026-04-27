@@ -25,4 +25,7 @@
     <!-- Miroir -->
     <string name="status_updating">Mise à jour de l\'appli voiture…</string>
     <string name="status_please_wait">Veuillez patienter</string>
+
+    <!-- Orientation -->
+    <string name="landscape_app_note">Les applis contrôlent leur propre orientation. Les applis en mode portrait uniquement peuvent apparaître avec des bandes.</string>
 </resources>

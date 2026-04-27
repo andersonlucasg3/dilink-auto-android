@@ -25,4 +25,7 @@
     <!-- Зеркало -->
     <string name="status_updating">Обновление приложения авто…</string>
     <string name="status_please_wait">Пожалуйста, подождите</string>
+
+    <!-- Ориентация -->
+    <string name="landscape_app_note">Приложения сами управляют ориентацией. Приложения только с портретным режимом могут отображаться с полосами.</string>
 </resources>

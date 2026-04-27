@@ -804,7 +804,7 @@ class ConnectionService : Service() {
                     val iconPng = try {
                         val drawable = info.loadIcon(pm)
                         val bitmap = android.graphics.Bitmap.createBitmap(
-                            96, 96, android.graphics.Bitmap.Config.ARGB_8888
+                            96, 96, android.graphics.Bitmap.Config.RGB_565
                         )
                         val canvas = android.graphics.Canvas(bitmap)
                         drawable.setBounds(0, 0, 96, 96)

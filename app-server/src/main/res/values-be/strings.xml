@@ -25,4 +25,7 @@
     <!-- Люстраванне -->
     <string name="status_updating">Абнаўленне праграмы аўто…</string>
     <string name="status_please_wait">Калі ласка, пачакайце</string>
+
+    <!-- Арыентацыя -->
+    <string name="landscape_app_note">Праграмы самі кіруюць арыентацыяй. Праграмы толькі з партрэтным рэжымам могуць адлюстроўвацца з палосамі.</string>
 </resources>

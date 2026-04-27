@@ -93,7 +93,7 @@ class VirtualDisplayServer(
         private const val CMD_INPUT_TOUCH = 0x32
         private const val CMD_STOP = 0xFF
 
-        private const val BITRATE = 12_000_000
+        private const val BITRATE = 8_000_000
         private const val I_FRAME_INTERVAL = 1
         private const val MAX_POINTERS = 10
 
@@ -288,16 +288,16 @@ class VirtualDisplayServer(
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
         format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
+        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
         format.setInteger(MediaFormat.KEY_LATENCY, 1)
         format.setInteger(MediaFormat.KEY_PRIORITY, 0) // real-time — ensures P-frames between keyframes
-        format.setLong("repeat-previous-frame-after", 1_000_000L)
+        format.setLong("repeat-previous-frame-after", 500_000L)
 
         try {
             encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).also {
                 it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
-            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps High low-latency")
+            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps Main low-latency")
         } catch (e: Exception) {
             throw IOException("Failed to create encoder: ${e.message}", e)
         }
