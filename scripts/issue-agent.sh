@@ -56,22 +56,14 @@ git config core.autocrlf false
 # Usage: react eyes | react rocket | react heart | react confused
 react() {
   local content="$1"
-  local list_target delete_url
+  local list_target
   if [ -n "${COMMENT_ID:-}" ]; then
     list_target="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
-    delete_url="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
   else
     list_target="repos/$REPO/issues/$ISSUE_NUM/reactions"
-    delete_url="repos/$REPO/issues/$ISSUE_NUM/reactions"
   fi
 
   echo "[reaction] Setting :${content}: on ${list_target}"
-
-  # Remove ALL previous reactions by us before adding the new one
-  timeout 10 gh api "$list_target" --jq '.[] | select(.user.login == "andersonlucasg3") | .id' 2>/dev/null | while read -r prev_id; do
-    [ -n "$prev_id" ] && timeout 10 gh api "${delete_url}/${prev_id}" --method DELETE --silent 2>/dev/null || true
-  done
-
   timeout 10 gh api "$list_target" -f content="$content" --silent 2>/dev/null || true
 }
 
@@ -243,12 +235,12 @@ fi
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
 
 # --- Run Claude Code ---
+react eyes
 if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
-  react eyes
   set +e
   OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
@@ -348,7 +340,6 @@ EOFCOMMENT
 Reply to this issue to continue. The agent will pick up from where it left off.
 EOFCOMMENT
 
-  react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 
   # Handle agent-requested actions
@@ -396,7 +387,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     register_session "$CONV_ID"
 
-    react eyes
     set +e
     OUTPUT=$(timeout 300 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
@@ -405,7 +395,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
       echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
       rm -f "$STATE_FILE"
       write_initial_prompt
-      react eyes
       set +e
       OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
       CLAUDE_EXIT=$?
@@ -434,7 +423,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
     rm -rf "$STABLE_WORK"
     ln -sf "$(pwd -P)" "$STABLE_WORK"
 
-    react eyes
     set +e
     OUTPUT=$(cd "$STABLE_WORK" && timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
@@ -533,7 +521,6 @@ EOFCOMMENT
 Reply to continue. The agent resumes its conversation and picks up where it left off.
 EOFCOMMENT
 
-  react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 
   # Handle agent-requested actions
