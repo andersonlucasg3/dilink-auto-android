@@ -120,10 +120,10 @@ branch_name() {
 }
 
 # --- Prompt builders ---
-# Each writes to /tmp/agent-prompt.txt to avoid shell escaping issues
+# Each writes to /tmp/agent-prompt-${ISSUE_NUM}.txt to avoid shell escaping issues
 
 write_initial_prompt() {
-  cat > /tmp/agent-prompt.txt << 'ENDPROMPT'
+  cat > /tmp/agent-prompt-${ISSUE_NUM}.txt << 'ENDPROMPT'
 You are an autonomous development agent for **DiLink-Auto** — an open-source Android Auto alternative for BYD DiLink 3.0+ cars. Phone apps run on a virtual display, encode as H.264 video, and stream to the car over WiFi TCP. Touch events flow back from car to phone.
 
 Read all docs in docs/*.md before starting.
@@ -131,7 +131,7 @@ Build with: `./gradlew :app-client:assembleDebug`
 
 ENDPROMPT
 
-  cat >> /tmp/agent-prompt.txt << ENDPROMPT
+  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
 ## GitHub Issue #${ISSUE_NUM}: ${ISSUE_TITLE}
 
 ${ISSUE_BODY}
@@ -150,7 +150,7 @@ ENDPROMPT
 write_resume_prompt() {
   local comment="$1"
 
-  cat >> /tmp/agent-prompt.txt << ENDPROMPT
+  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
 ## Follow-Up Comment
 
 ${comment}
@@ -193,8 +193,8 @@ if [ "$EVENT" = "issues" ]; then
 
   echo "--- Starting Claude Code (new conversation) ---"
   react eyes
-  if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt.txt and complete the task described there." 2>&1); then
-    handle_error "Claude Code exited with code $?" "Prompt was written to /tmp/agent-prompt.txt"
+  if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1); then
+    handle_error "Claude Code exited with code $?" "Prompt was written to /tmp/agent-prompt-${ISSUE_NUM}.txt"
   fi
   echo "--- Claude Code finished ---"
 
@@ -283,7 +283,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Resuming Claude Code conversation: $CONV_ID ---"
     react eyes
-    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "$(< /tmp/agent-prompt.txt)" 2>&1); then
+    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "$(< /tmp/agent-prompt-${ISSUE_NUM}.txt)" 2>&1); then
       handle_error "Claude Code exited with code $?" "Conversation ID: $CONV_ID"
     fi
     echo "--- Claude Code finished ---"
@@ -293,7 +293,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
     react eyes
-    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt.txt and complete the task described there." 2>&1); then
+    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1); then
       handle_error "Claude Code exited with code $?"
     fi
     echo "--- Claude Code finished ---"
