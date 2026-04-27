@@ -300,6 +300,8 @@ if [ "$EVENT" = "issues" ]; then
   chmod +x gradlew 2>/dev/null || true
   # Convert CRLF to LF (Windows repo, Linux runner)
   sed -i 's/\r$//' gradlew 2>/dev/null || true
+  # Kill any stale Gradle daemon from previous runs
+  ./gradlew --stop 2>/dev/null || true
   # Ensure JDK 17 from setup-java, not Windows JDK 25 from PATH
   export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
   export PATH="${JAVA_HOME}/bin:$PATH"
@@ -484,6 +486,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
   chmod +x gradlew 2>/dev/null || true
   # Convert CRLF to LF (Windows repo, Linux runner)
   sed -i 's/\r$//' gradlew 2>/dev/null || true
+  # Kill any stale Gradle daemon from previous runs
+  ./gradlew --stop 2>/dev/null || true
   # Ensure JDK 17 from setup-java, not Windows JDK 25 from PATH
   export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
   export PATH="${JAVA_HOME}/bin:$PATH"
@@ -551,6 +555,8 @@ EOFCOMMENT
   fi
 fi
 
+# Stop Gradle daemon to free resources for the next job
+./gradlew --stop 2>/dev/null || true
 echo "=========================================="
 echo " Done"
 echo "=========================================="
