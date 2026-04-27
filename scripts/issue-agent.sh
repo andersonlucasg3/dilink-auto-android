@@ -66,7 +66,15 @@ react() {
 
 post_comment() {
   local body="$1"
-  echo "$body" | GH_TOKEN="$GITHUB_TOKEN" gh issue comment "$ISSUE_NUM" --body-file -
+  local tmpfile="/tmp/comment-body-${ISSUE_NUM}.txt"
+  echo "$body" > "$tmpfile"
+  jq -n --rawfile body "$tmpfile" '{body: $body}' |
+    curl -s -X POST \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${REPO}/issues/${ISSUE_NUM}/comments" \
+      -d @- > /dev/null
+  rm -f "$tmpfile"
 }
 
 handle_error() {
