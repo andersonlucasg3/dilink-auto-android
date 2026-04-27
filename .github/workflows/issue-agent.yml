@@ -68,11 +68,9 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload APK to Release
+      - name: Upload APK
         if: hashFiles('app-client/build/outputs/apk/debug/app-client-debug.apk') != ''
-        run: |
-          TAG="issue-${{ github.event.issue.number }}-debug"
-          gh release delete "$TAG" --yes 2>/dev/null || true
-          gh release create "$TAG" --prerelease --title "Issue #${{ github.event.issue.number }} Build" --notes "APK from [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)" app-client/build/outputs/apk/debug/app-client-debug.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: app-client/build/outputs/apk/debug/app-client-debug.apk
+          archive: false
