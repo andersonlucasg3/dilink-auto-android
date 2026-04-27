@@ -61,7 +61,7 @@ react() {
     target="repos/$REPO/issues/$ISSUE_NUM/reactions"
   fi
   echo "[reaction] Adding :${content}: to ${target}"
-  GH_TOKEN="$GITHUB_TOKEN" gh api "$target" -f content="$content" --silent || true
+  timeout 10 gh api "$target" -f content="$content" --silent 2>/dev/null || true
 }
 
 post_comment() {
