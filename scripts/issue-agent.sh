@@ -209,8 +209,10 @@ ENDPROMPT
 }
 
 # --- Main ---
-# Remove any stale APK from previous runs
+# Clean up any stale artifacts from previous runs on this workspace
 rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
+git clean -ffdx -e '.gradle' 2>/dev/null || true
+git reset --hard HEAD 2>/dev/null || true
 
 echo "=========================================="
 echo " DiLink-Auto Issue Agent"
