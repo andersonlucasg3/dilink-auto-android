@@ -211,6 +211,9 @@ ENDPROMPT
 }
 
 # --- Main ---
+# Remove any stale APK from previous runs
+rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
+
 echo "=========================================="
 echo " DiLink-Auto Issue Agent"
 echo " Event:  $EVENT"
@@ -285,6 +288,7 @@ if [ "$EVENT" = "issues" ]; then
 
   # Always build after the agent finishes (don't trust agent's build claim)
   echo "--- Building APK ---"
+  rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
   chmod +x gradlew 2>/dev/null || true
   APK_BUILT=false
   if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
@@ -458,6 +462,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
   # Always build after the agent finishes (don't trust agent's build claim)
   echo "--- Building APK ---"
+  rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
   chmod +x gradlew 2>/dev/null || true
   APK_BUILT=false
   if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
