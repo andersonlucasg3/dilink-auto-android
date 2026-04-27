@@ -52,19 +52,32 @@ git config core.autocrlf false
 
 # --- Helpers ---
 
-# Add an emoji reaction to the triggering comment (or issue if no comment)
-# Usage: react eyes | react rocket | react heart | react confused
-react() {
-  local content="$1"
-  local list_target
-  if [ -n "${COMMENT_ID:-}" ]; then
-    list_target="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
-  else
-    list_target="repos/$REPO/issues/$ISSUE_NUM/reactions"
-  fi
+# Post or update a single status comment — first call creates, later calls edit
+status() {
+  local body="$1"
+  local status_id=""
+  [ -f "$STATE_FILE" ] && status_id=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || true)
 
-  echo "[reaction] Setting :${content}: on ${list_target}"
-  timeout 10 gh api "$list_target" -f content="$content" --silent 2>/dev/null || true
+  if [ -n "$status_id" ] && [ "$status_id" != "null" ]; then
+    curl -s -X PATCH \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${REPO}/issues/comments/${status_id}" \
+      -d "$(jq -n --arg body "$body" '{body: $body}')" > /dev/null 2>&1 || true
+  else
+    local new_id
+    new_id=$(curl -s -X POST \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${REPO}/issues/${ISSUE_NUM}/comments" \
+      -d "$(jq -n --arg body "$body" '{body: $body}')" 2>/dev/null | jq -r '.id // ""')
+    if [ -n "$new_id" ] && [ "$new_id" != "null" ]; then
+      local tmp
+      tmp=$(jq --arg sid "$new_id" '. + {status_comment_id: $sid}' "$STATE_FILE" 2>/dev/null)
+      echo "$tmp" > "$STATE_FILE" 2>/dev/null || true
+    fi
+  fi
+  echo "[status] $body"
 }
 
 post_comment() {
@@ -83,7 +96,7 @@ post_comment() {
 handle_error() {
   local err_msg="${1:-Unknown error}"
   local details="${2:-}"
-  react confused
+  status "❌ Error encountered — see below"
   cat > /tmp/error-comment.txt << EOF
 ## 🤖 Agent Error
 
@@ -153,7 +166,7 @@ Read all docs in docs/*.md before starting.
 Build with: `./gradlew :app-client:assembleDebug`
 This is a temporary GitHub Actions runner session. You must `git add -A && git commit` all changes before your final output.
 
-CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, reactions, push, and issue close.
+CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, push, and issue close.
 
 ENDPROMPT
 
@@ -186,7 +199,7 @@ write_resume_prompt() {
 
 ${comment}
 
-CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, reactions, push, and issue close.
+CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, push, and issue close.
 
 ## After Finishing
 1. Review previous changes on this branch with \`git diff HEAD~1\`
@@ -237,12 +250,12 @@ fi
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
 
 # --- Run Claude Code ---
-react eyes
 if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
+  status "🔍 Investigating codebase..."
   set +e
   OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
@@ -297,6 +310,7 @@ if [ "$EVENT" = "issues" ]; then
 
   # Always build after the agent finishes (don't trust agent's build claim)
   echo "--- Building APK ---"
+  status "🔨 Building APK..."
   rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
   chmod +x gradlew 2>/dev/null || true
   # Convert CRLF to LF (Windows repo, Linux runner)
@@ -349,6 +363,7 @@ EOFCOMMENT
 Reply to this issue to continue. The agent will pick up from where it left off.
 EOFCOMMENT
 
+  status "✅ Complete — see summary below"
   post_comment "$(cat /tmp/summary-comment.md)"
 
   # Handle agent-requested actions
@@ -397,6 +412,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     register_session "$CONV_ID"
 
+    status "🔍 Continuing investigation..."
     set +e
     OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
@@ -480,6 +496,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
   # Always build after the agent finishes (don't trust agent's build claim)
   echo "--- Building APK ---"
+  status "🔨 Building APK..."
   rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
   chmod +x gradlew 2>/dev/null || true
   # Convert CRLF to LF (Windows repo, Linux runner)
@@ -531,6 +548,7 @@ EOFCOMMENT
 Reply to continue. The agent resumes its conversation and picks up where it left off.
 EOFCOMMENT
 
+  status "✅ Complete — see summary below"
   post_comment "$(cat /tmp/summary-comment.md)"
 
   # Handle agent-requested actions
