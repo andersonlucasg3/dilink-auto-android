@@ -235,14 +235,9 @@ if [ "$EVENT" = "issues" ]; then
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
-  # Stable symlink so conversations persist across runners
-  STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
-  rm -rf "$STABLE_WORK"
-  ln -sf "$(pwd -P)" "$STABLE_WORK"
-
   react eyes
   set +e
-  OUTPUT=$(cd "$STABLE_WORK" && timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+  OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
   set -e
   if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -273,7 +268,7 @@ if [ "$EVENT" = "issues" ]; then
     '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
     > "$STATE_FILE"
   echo "State saved to $STATE_FILE"
-  register_session "$CONV_ID" "$STABLE_WORK"
+  register_session "$CONV_ID"
 
   # Commit and push if changes were made
   CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
@@ -342,28 +337,25 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Resuming Claude Code conversation: $CONV_ID ---"
 
-    # Run from a stable symlink path so --resume finds the same project across runners
-    STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
-    rm -rf "$STABLE_WORK"
-    ln -sf "$(pwd -P)" "$STABLE_WORK"
-
-    # Migrate conversation to stable project
+    # Copy conversation to current project so --resume finds it
+    # (Claude resolves git root, so symlink tricks don't work across runners)
     OLD_CONV=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}.jsonl" -type f 2>/dev/null | head -1)
     if [ -n "$OLD_CONV" ]; then
       OLD_PROJ=$(dirname "$OLD_CONV")
-      STABLE_PROJ="${CLAUDE_PROJECTS_DIR}/tmp-issue-agent-${ISSUE_NUM}"
-      mkdir -p "$STABLE_PROJ"
-      if [ "$OLD_PROJ" != "$STABLE_PROJ" ]; then
-        ln -sf "$OLD_CONV" "$STABLE_PROJ/${CONV_ID}.jsonl" 2>/dev/null || true
-        [ -d "${OLD_PROJ}/${CONV_ID}" ] && ln -sfn "${OLD_PROJ}/${CONV_ID}" "$STABLE_PROJ/${CONV_ID}" 2>/dev/null || true
+      # Find the project Claude Code will actually use for this working directory
+      ACTUAL_PROJ=$(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -type d -name '--*' 2>/dev/null | head -1)
+      if [ -n "$ACTUAL_PROJ" ] && [ "$OLD_PROJ" != "$ACTUAL_PROJ" ]; then
+        cp -f "$OLD_CONV" "$ACTUAL_PROJ/${CONV_ID}.jsonl" 2>/dev/null || true
+        [ -d "${OLD_PROJ}/${CONV_ID}" ] && cp -rf "${OLD_PROJ}/${CONV_ID}" "$ACTUAL_PROJ/${CONV_ID}" 2>/dev/null || true
+        echo "[resume] Copied conversation to ${ACTUAL_PROJ}"
       fi
     fi
 
-    register_session "$CONV_ID" "$STABLE_WORK"
+    register_session "$CONV_ID"
 
     react eyes
     set +e
-    OUTPUT=$(cd "$STABLE_WORK" && timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -406,7 +398,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
       --arg title "$ISSUE_TITLE" \
       '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
       > "$STATE_FILE"
-      register_session "$CONV_ID" "$STABLE_WORK"
+      register_session "$CONV_ID"
   fi
 
   SUMMARY_JSON=$(extract_summary_json "$OUTPUT")
