@@ -195,18 +195,22 @@ write_resume_prompt() {
   local comment="$1"
 
   cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
-## Follow-Up Comment
+## User's New Request
 
 ${comment}
+
+## Critical Instructions
+- Focus ONLY on the user's new request above. Do NOT repeat, re-describe, or re-implement work from previous turns.
+- If asked for ideas/proposals/analysis, provide that — don't just describe what already exists.
+- If asked to change direction, change it — don't keep the old approach.
+- Review \`git diff HEAD~1\` to see what's already on this branch.
 
 CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, push, and issue close.
 
 ## After Finishing
-1. Review previous changes on this branch with \`git diff HEAD~1\`
-2. If you make code changes, build: \`./gradlew :app-client:assembleDebug\`
-3. If the build fails, fix and rebuild
-4. Output this JSON block as the VERY LAST thing.
-   The "summary" field must use markdown with clear sections.
+1. If you make code changes, build: \`./gradlew :app-client:assembleDebug\`
+2. If the build fails, fix and rebuild
+3. Output this JSON block as the VERY LAST thing. Summary must use markdown.
 
 \`\`\`json
 {"summary": "...", "changes_made": true, "build_success": true, "action": "none"}
