@@ -215,21 +215,47 @@ BRANCH=$(branch_name)
 # Set up branch — reuse if it exists (resume), create fresh if new
 git fetch origin develop "$BRANCH" 2>/dev/null || true
 
-# Discard all local changes before switching branches
+# Discard any leftover changes from previous runs
 git checkout -- . 2>/dev/null || true
 git clean -ffdx -e '.gradle' 2>/dev/null || true
 
-if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
-  echo "--- Reusing existing branch: $BRANCH ---"
+# Use a dedicated git worktree per issue for isolation and consistent paths
+ISSUE_WORKTREE="$AGENT_STATE_DIR/../worktrees/issue-${ISSUE_NUM}"
+git fetch origin develop "$BRANCH" 2>/dev/null || true
+
+if [ -d "$ISSUE_WORKTREE" ]; then
+  echo "--- Reusing worktree: $ISSUE_WORKTREE ---"
+  cd "$ISSUE_WORKTREE"
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
   git pull origin "$BRANCH" 2>/dev/null || true
 else
-  echo "--- Creating new branch: $BRANCH ---"
-  git checkout develop
-  git pull origin develop
-  git branch -D "$BRANCH" 2>/dev/null || true
-  git checkout -b "$BRANCH"
+  echo "--- Creating worktree: $ISSUE_WORKTREE ---"
+  if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+    git worktree add "$ISSUE_WORKTREE" "origin/$BRANCH" 2>/dev/null || {
+      # Worktree may already exist but be unregistered — force it
+      git worktree prune 2>/dev/null || true
+      mkdir -p "$ISSUE_WORKTREE"
+      cd "$ISSUE_WORKTREE"
+      git init
+      git remote add origin "https://github.com/${REPO}.git"
+      git fetch origin "$BRANCH"
+      git checkout -b "$BRANCH" "origin/$BRANCH"
+    }
+  else
+    git worktree add -b "$BRANCH" "$ISSUE_WORKTREE" origin/develop 2>/dev/null || {
+      git worktree prune 2>/dev/null || true
+      mkdir -p "$ISSUE_WORKTREE"
+      cd "$ISSUE_WORKTREE"
+      git init
+      git remote add origin "https://github.com/${REPO}.git"
+      git fetch origin develop
+      git checkout -b "$BRANCH" origin/develop
+    }
+  fi
+  cd "$ISSUE_WORKTREE"
 fi
+
+echo "Working in: $(pwd)"
 
 # Record which .jsonl files exist before the run (to detect the new one)
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
