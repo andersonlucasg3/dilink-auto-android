@@ -117,10 +117,19 @@ class VideoDecoder {
                 configFed = true
             }
 
-            // Catchup: when queue exceeds 100ms worth of frames, feed every other
-            // frame (skip 1, feed 1) so the image still moves but at 2x speed.
-            // This gradually drains the backlog without jumping or freezing.
-            val catchupThreshold = (100L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(3) // 6 at 60fps, 3 at 30fps
+            // Catchup: graduated speedup based on queue depth.
+            // When the queue is slightly behind, gentle 1.5x catchup.
+            // When severely backed up, aggressive 3x catchup to recover quickly.
+            // Always feeds keyframes — skipping them would prolong artifacts.
+            //
+            // Thresholds in frames (at 60fps each frame ≈ 16.7ms):
+            //   0-6   normal  (0-100ms latency)
+            //   7-12  gentle  (100-200ms) — skip 1 of 3 non-keyframes
+            //  13-20  medium  (200-333ms) — skip 1 of 2 non-keyframes
+            //  21+    aggressive (333ms+) — skip 2 of 3 non-keyframes
+            val catchupGentle = (100L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(3)  // 6 at 60fps
+            val catchupMedium = (200L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(6)  // 12 at 60fps
+            val catchupAggressive = (333L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(10) // 20 at 60fps
             var skipCount = 0L
 
             while (running.get()) {
@@ -143,14 +152,21 @@ class VideoDecoder {
                     val queueSize = frameQueue.size
                     val isKey = frame.isKeyFrame
 
-                    // Catchup mode: skip every other non-keyframe to speed up playback
-                    if (queueSize > catchupThreshold && !isKey && frameCount % 2 == 1L) {
-                        skipCount++
-                        if (skipCount <= 3 || skipCount % 100 == 0L) {
-                            log("Catchup: skip frame (queue=$queueSize threshold=$catchupThreshold total_skips=$skipCount)")
+                    // Graduated catchup: never skip keyframes
+                    if (!isKey && queueSize > catchupGentle) {
+                        val shouldSkip = when {
+                            queueSize > catchupAggressive -> frameCount % 3 != 0L // 3x: feed 1 of 3
+                            queueSize > catchupMedium    -> frameCount % 2 == 1L  // 2x: feed 1 of 2
+                            else                         -> frameCount % 3 == 2L  // 1.5x: feed 2 of 3
                         }
-                        frameCount++
-                        continue
+                        if (shouldSkip) {
+                            skipCount++
+                            if (skipCount <= 3 || skipCount % 100 == 0L) {
+                                log("Catchup: skip frame (queue=$queueSize gentle=$catchupGentle medium=$catchupMedium agg=$catchupAggressive total_skips=$skipCount)")
+                            }
+                            frameCount++
+                            continue
+                        }
                     }
 
                     if (isKey) {
@@ -242,6 +258,11 @@ class VideoDecoder {
      * Called from the network thread — must not block.
      *
      * CONFIG frames are always cached, even if the decoder hasn't started yet.
+     *
+     * Drop strategy: never evict CONFIG or keyframes. When the queue is full:
+     *  - P-frames: just drop the incoming frame (least harm)
+     *  - Keyframes/CONFIG: evict the oldest P-frame from the queue to make room.
+     *    Only drop a keyframe as absolute last resort (all queued frames are keyframes).
      */
     fun onFrameReceived(isConfig: Boolean, data: ByteArray) {
         receiveCount++
@@ -255,18 +276,54 @@ class VideoDecoder {
         }
         // Queue frames even before start() — the feed thread will drain them
         // once the decoder is ready.
-        if (!frameQueue.offer(FrameData(isConfig, isKey, data))) {
-            // Queue full — drop oldest to keep latency low
-            val dropped = frameQueue.poll()
-            frameQueue.offer(FrameData(isConfig, isKey, data))
+        val frame = FrameData(isConfig, isKey, data)
+        if (frameQueue.offer(frame)) return
+
+        // Queue full — apply smart drop strategy
+        if (!isConfig && !isKey) {
+            // Incoming is a disposable P-frame: drop it, don't evict anything
             dropCount++
-            // Check if we dropped a keyframe — this causes distortion
+            if (dropCount <= 5 || dropCount % 30 == 0L) {
+                logW("Queue full — dropped incoming P-frame #$dropCount (receive=$receiveCount)")
+            }
+            return
+        }
+
+        // Incoming is CONFIG or keyframe — try to evict a P-frame from the queue
+        val iter = frameQueue.iterator()
+        var evicted = false
+        while (iter.hasNext()) {
+            val f = iter.next()
+            if (!f.isConfig && !f.isKeyFrame) {
+                if (frameQueue.remove(f)) {
+                    evicted = true
+                    break
+                }
+            }
+        }
+
+        if (evicted) {
+            // Made room — add the important frame
+            if (frameQueue.offer(frame)) {
+                dropCount++
+                if (dropCount <= 5 || dropCount % 30 == 0L) {
+                    logW("Queue full — evicted P-frame to keep ${if (isConfig) "CONFIG" else "KEYFRAME"} #$dropCount")
+                }
+            } else {
+                dropCount++
+                logW("Queue still full after eviction — dropped incoming ${if (isConfig) "CONFIG" else "KEYFRAME"}")
+            }
+        } else {
+            // All queued frames are keyframes/CONFIG — drop oldest as last resort
+            val dropped = frameQueue.poll()
+            frameQueue.offer(frame)
+            dropCount++
             if (dropped != null && !dropped.isConfig && dropped.isKeyFrame) {
                 keyFramesDropped++
-                logW("DROPPED KEYFRAME #$keyFramesDropped (receive=$receiveCount queue=${frameQueue.size})")
+                logW("DROPPED KEYFRAME #$keyFramesDropped (last resort, all queued were keyframes)")
             }
             if (dropCount <= 5 || dropCount % 30 == 0L) {
-                logW("Queue full — dropped frame #$dropCount (receive=$receiveCount keys_recv=$keyFramesReceived keys_drop=$keyFramesDropped)")
+                logW("Queue full — dropped oldest as last resort #$dropCount")
             }
         }
     }

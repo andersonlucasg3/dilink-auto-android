@@ -60,6 +60,13 @@ class MainActivity : ComponentActivity() {
 
         showOnboarding.value = !onboardingCompleted
 
+        // Auto-start the service when the app is opened (e.g. by the car via USB ADB).
+        // Only if onboarding is done and the service isn't already running — calling
+        // startForegroundService on an already-running service is harmless but noisy.
+        if (onboardingCompleted && ConnectionService.serviceState.value == ConnectionService.State.IDLE) {
+            startConnectionService()
+        }
+
         setContent {
             DiLinkAutoTheme {
                 val installStatus by ConnectionService.installStatusFlow.collectAsState()

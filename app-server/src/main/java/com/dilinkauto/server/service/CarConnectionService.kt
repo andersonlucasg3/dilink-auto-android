@@ -475,8 +475,8 @@ class CarConnectionService : Service() {
             adb.shell("echo '$keyInfo' > /data/local/tmp/car-adb-key.log")
             carLogSend("ADB key: $keyInfo")
 
-            // Launch phone app if not already running
-            adb.shell("am start --activity-clear-task -n com.dilinkauto.client/.MainActivity")
+            // Launch phone app (don't clear task — if it's already open, just move on)
+            adb.shell("am start -n com.dilinkauto.client/.MainActivity")
             carLogSend("Phone app launched via USB ADB")
 
             usbConnecting = false
