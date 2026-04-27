@@ -47,6 +47,8 @@ STATE_FILE="$AGENT_STATE_DIR/issue-${ISSUE_NUM}.json"
 # --- Git identity ---
 git config user.email "agent@dilink-auto.local"
 git config user.name "DiLink-Auto Agent"
+# Prevent line-ending conversion (repo is Windows/CRLF, runner is Linux/LF)
+git config core.autocrlf false
 
 # --- Helpers ---
 
