@@ -242,6 +242,8 @@ if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
   echo "--- Reusing existing branch: $BRANCH ---"
   git checkout -f "$BRANCH" 2>/dev/null || git checkout -f -b "$BRANCH" "origin/$BRANCH"
   git pull origin "$BRANCH" 2>/dev/null || true
+  # Merge develop to get .gitattributes and prevent CRLF/LF churn
+  git merge origin/develop --no-edit 2>/dev/null || git checkout -f origin/develop -- .gitattributes 2>/dev/null || true
 else
   echo "--- Creating new branch: $BRANCH ---"
   git checkout -f develop
