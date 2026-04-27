@@ -354,7 +354,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     write_resume_prompt "$COMMENT_BODY"
 
-    echo "--- Resuming Claude Code conversation: $CONV_ID ---"
+    echo "--- Resuming Claude Code conversation: $CONV_ID (5m timeout) ---"
 
     # Copy conversation to all runner project dirs so --resume finds it
     # (Claude resolves git root for project hash; we can't predict which runner)
@@ -374,11 +374,30 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     react eyes
     set +e
-    OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 300 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
-      handle_error "Claude Code exited with code $CLAUDE_EXIT" "Conversation ID: $CONV_ID"
+      echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
+      rm -f "$STATE_FILE"
+      write_initial_prompt
+      react eyes
+      set +e
+      OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+      CLAUDE_EXIT=$?
+      set -e
+      if [ "$CLAUDE_EXIT" -ne 0 ]; then
+        handle_error "Claude Code exited with code $CLAUDE_EXIT"
+      fi
+      CONV_ID=$(capture_conversation_id "$OUTPUT")
+      jq -n \
+        --arg cid "$CONV_ID" \
+        --arg branch "$BRANCH" \
+        --arg issue "$ISSUE_NUM" \
+        --arg title "$ISSUE_TITLE" \
+        '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
+        > "$STATE_FILE"
+      register_session "$CONV_ID"
     fi
     echo "--- Claude Code finished ---"
   else
