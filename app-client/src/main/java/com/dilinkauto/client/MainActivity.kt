@@ -164,11 +164,17 @@ class MainActivity : ComponentActivity() {
             val zipFile = FileLog.zipLogs()
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 if (zipFile != null) {
-                    android.widget.Toast.makeText(
+                    val uri = androidx.core.content.FileProvider.getUriForFile(
                         this@MainActivity,
-                        getString(R.string.share_logs_zipped, zipFile.absolutePath),
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
+                        "${packageName}.fileprovider",
+                        zipFile
+                    )
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/zip"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(intent, getString(R.string.share_logs_title)))
                 } else {
                     android.widget.Toast.makeText(
                         this@MainActivity,
@@ -176,10 +182,6 @@ class MainActivity : ComponentActivity() {
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                 }
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(
-                    "https://github.com/andersonlucasg3/dilink-auto-android/issues/new"
-                ))
-                startActivity(intent)
             }
         }
     }
