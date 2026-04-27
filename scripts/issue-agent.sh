@@ -212,11 +212,6 @@ ENDPROMPT
 }
 
 # --- Main ---
-# Clean up any stale artifacts from previous runs on this workspace
-rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
-git clean -ffdx -e '.gradle' 2>/dev/null || true
-git reset --hard HEAD 2>/dev/null || true
-
 echo "=========================================="
 echo " DiLink-Auto Issue Agent"
 echo " Event:  $EVENT"
@@ -227,6 +222,11 @@ BRANCH=$(branch_name)
 
 # Set up branch — reuse if it exists (resume), create fresh if new
 git fetch origin develop "$BRANCH" 2>/dev/null || true
+
+# Discard all local changes before switching branches
+git checkout -- . 2>/dev/null || true
+git clean -ffdx -e '.gradle' 2>/dev/null || true
+
 if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
   echo "--- Reusing existing branch: $BRANCH ---"
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
