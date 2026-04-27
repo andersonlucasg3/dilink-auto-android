@@ -224,12 +224,19 @@ echo "=========================================="
 
 BRANCH=$(branch_name)
 
-# Set up branch
-git fetch origin develop
-git checkout develop
-git pull origin develop
-git branch -D "$BRANCH" 2>/dev/null || true
-git checkout -b "$BRANCH"
+# Set up branch — reuse if it exists (resume), create fresh if new
+git fetch origin develop "$BRANCH" 2>/dev/null || true
+if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+  echo "--- Reusing existing branch: $BRANCH ---"
+  git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
+  git pull origin "$BRANCH" 2>/dev/null || true
+else
+  echo "--- Creating new branch: $BRANCH ---"
+  git checkout develop
+  git pull origin develop
+  git branch -D "$BRANCH" 2>/dev/null || true
+  git checkout -b "$BRANCH"
+fi
 
 # Record which .jsonl files exist before the run (to detect the new one)
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
@@ -278,14 +285,12 @@ if [ "$EVENT" = "issues" ]; then
   # Commit and push if changes were made
   CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
   COMMIT_SHA=""
-  if [ "$CHANGES_MADE" = "true" ]; then
-    if ! git diff --quiet || ! git diff --cached --quiet; then
-      git add -A
-      git diff --cached --stat
-      git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent: \(.summary)"')" || true
-      git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
-      COMMIT_SHA=$(git rev-parse --short HEAD)
-    fi
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    git add -A
+    git diff --cached --stat
+    git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent: \(.summary)"')" || true
+    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+    COMMIT_SHA=$(git rev-parse --short HEAD)
   fi
 
   # Always build after the agent finishes (don't trust agent's build claim)
