@@ -58,6 +58,11 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
         run: |
           VERSION_NAME=$(grep 'app.versionName' gradle.properties | sed 's/.*=//')
+          # Only create prereleases for -dev versions
+          if ! echo "$VERSION_NAME" | grep -q '\-dev'; then
+            echo "Skipping prerelease: $VERSION_NAME is not a dev version"
+            exit 0
+          fi
           VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
           TAG="v${VERSION_NAME}"
 
