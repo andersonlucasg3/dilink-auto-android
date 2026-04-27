@@ -141,12 +141,13 @@ branch_name() {
 # Register a headless session so --resume can find it later
 register_session() {
   local cid="$1"
+  local cwd="${2:-$(pwd -P)}"
   local sessions_dir="$(dirname "$CLAUDE_PROJECTS_DIR")/sessions"
   mkdir -p "$sessions_dir"
   cat > "${sessions_dir}/${cid}.json" << SESSIONEOF
-{"pid":0,"sessionId":"${cid}","cwd":"$(pwd -P)","startedAt":$(date +%s)000,"version":"2.1.120","kind":"headless","entrypoint":"claude-cli"}
+{"pid":0,"sessionId":"${cid}","cwd":"${cwd}","startedAt":$(date +%s)000,"version":"2.1.120","kind":"headless","entrypoint":"claude-cli"}
 SESSIONEOF
-  echo "[session] Registered ${cid}"
+  echo "[session] Registered ${cid} (cwd: ${cwd})"
 }
 
 # --- Prompt builders ---
@@ -272,7 +273,7 @@ if [ "$EVENT" = "issues" ]; then
     '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
     > "$STATE_FILE"
   echo "State saved to $STATE_FILE"
-  register_session "$CONV_ID"
+  register_session "$CONV_ID" "$STABLE_WORK"
 
   # Commit and push if changes were made
   CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
@@ -358,7 +359,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
       fi
     fi
 
-    register_session "$CONV_ID"
+    register_session "$CONV_ID" "$STABLE_WORK"
 
     react eyes
     set +e
@@ -405,7 +406,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
       --arg title "$ISSUE_TITLE" \
       '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
       > "$STATE_FILE"
-      register_session "$CONV_ID"
+      register_session "$CONV_ID" "$STABLE_WORK"
   fi
 
   SUMMARY_JSON=$(extract_summary_json "$OUTPUT")
