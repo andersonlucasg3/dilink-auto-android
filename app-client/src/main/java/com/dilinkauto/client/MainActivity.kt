@@ -98,7 +98,8 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = { showSettings = true },
                             onCheckForUpdate = { UpdateManager.checkForUpdate(force = true) },
                             onDownloadUpdate = { UpdateManager.downloadUpdate() },
-                            onInstallUpdate = { UpdateManager.installUpdate(this) }
+                            onInstallUpdate = { UpdateManager.installUpdate(this) },
+                            onShareLogs = { shareLogs() }
                         )
                     }
                 }
@@ -159,6 +160,33 @@ class MainActivity : ComponentActivity() {
             try {
                 startActivity(Intent("com.android.settings.APPLICATION_DEVELOPMENT_SETTINGS"))
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun shareLogs() {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val zipFile = FileLog.zipLogs()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (zipFile != null) {
+                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                        this@MainActivity,
+                        "${packageName}.fileprovider",
+                        zipFile
+                    )
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/zip"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(intent, getString(R.string.share_logs_title)))
+                } else {
+                    android.widget.Toast.makeText(
+                        this@MainActivity,
+                        getString(R.string.share_logs_no_logs),
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
     }
 
@@ -619,7 +647,8 @@ fun MainScreen(
     onOpenSettings: () -> Unit,
     onCheckForUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit
+    onInstallUpdate: () -> Unit,
+    onShareLogs: () -> Unit
 ) {
     val serviceState by ConnectionService.serviceState.collectAsState()
     val installStatus by ConnectionService.installStatusFlow.collectAsState()
@@ -735,6 +764,37 @@ fun MainScreen(
             onInstallUpdate = onInstallUpdate,
             onInstallOnCar = onInstallOnCar
         )
+
+        // Share Logs
+        Spacer(Modifier.height(16.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.BugReport, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.share_logs_title), fontWeight = FontWeight.Medium, color = Color.White)
+                    Text(stringResource(R.string.share_logs_desc), fontSize = 12.sp, color = Color.Gray)
+                }
+                Button(
+                    onClick = onShareLogs,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2196F3)
+                    )
+                ) {
+                    Text(stringResource(R.string.share_logs_button), fontSize = 13.sp)
+                }
+            }
+        }
 
             Spacer(Modifier.height(32.dp))
         }

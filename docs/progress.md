@@ -1,7 +1,7 @@
 # Progress Tracker
 
 Current version: **v0.14.3-dev** (development)
-Last updated: 2026-04-26
+Last updated: 2026-04-27
 
 ## Milestones
 
@@ -9,6 +9,7 @@ Last updated: 2026-04-26
 
 - **Phone service auto-start**: `ConnectionService` now auto-starts when the phone app is opened (e.g. via car USB ADB), removing the need to manually press Start.
 - **Car no longer clears phone task**: Removed `--activity-clear-task` from car's USB ADB phone launch. If the phone app is already open, the car moves forward without disrupting it.
+- **Share Logs button**: New "Share Logs" button on the main screen zips all `*.log` files from `/sdcard/DiLinkAuto/` and opens a GitHub issue page for users to report problems with the logs. `FileLog.zipLogs()` creates a `dilinkauto-logs.zip` excluding the vd-server.jar.
 
 ### v0.14.0
 

@@ -119,6 +119,13 @@
     <string name="onboarding_skip_btn">Passer pour l\'instant</string>
     <string name="onboarding_granted_label">Accordé</string>
 
+    <!-- Partager les logs -->
+    <string name="share_logs_title">Partager les logs</string>
+    <string name="share_logs_desc">Compresser les logs et ouvrir un ticket GitHub pour signaler des problèmes</string>
+    <string name="share_logs_button">Partager</string>
+    <string name="share_logs_zipped">Logs compressés dans %s</string>
+    <string name="share_logs_no_logs">Aucun fichier log trouvé</string>
+
     <!-- Installer sur la voiture -->
     <string name="car_install_title">Installer sur la voiture</string>
     <string name="car_install_desc">Le débogage ADB de la voiture doit être activé (port 5555)</string>

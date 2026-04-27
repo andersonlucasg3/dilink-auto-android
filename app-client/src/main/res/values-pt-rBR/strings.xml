@@ -117,6 +117,13 @@
     <string name="onboarding_skip_btn">Pular por enquanto</string>
     <string name="onboarding_granted_label">Concedido</string>
 
+    <!-- Share Logs -->
+    <string name="share_logs_title">Compartilhar Logs</string>
+    <string name="share_logs_desc">Compactar logs e abrir uma issue no GitHub para relatar problemas</string>
+    <string name="share_logs_button">Compartilhar</string>
+    <string name="share_logs_zipped">Logs compactados em %s</string>
+    <string name="share_logs_no_logs">Nenhum arquivo de log encontrado</string>
+
     <!-- Install on Car (Settings) -->
     <string name="car_install_title">Instalar no Carro</string>
     <string name="car_install_desc">O ADB do carro deve estar ativado (porta 5555)</string>

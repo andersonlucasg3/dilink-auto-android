@@ -117,6 +117,13 @@
     <string name="onboarding_skip_btn">Әзірге өткізіп жіберу</string>
     <string name="onboarding_granted_label">Берілді</string>
 
+    <!-- Логтармен бөлісу -->
+    <string name="share_logs_title">Логтармен бөлісу</string>
+    <string name="share_logs_desc">Логтарды ZIP-ке орап, мәселелерді хабарлау үшін GitHub-та тапсырма ашу</string>
+    <string name="share_logs_button">Бөлісу</string>
+    <string name="share_logs_zipped">Логтар %s ішіне оралды</string>
+    <string name="share_logs_no_logs">Лог файлдары табылмады</string>
+
     <!-- Автокөлікке орнату (Баптаулар) -->
     <string name="car_install_title">Автокөлікке орнату</string>
     <string name="car_install_desc">Автокөлік ADB қосулы болуы керек (5555-порт)</string>

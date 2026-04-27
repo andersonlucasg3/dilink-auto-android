@@ -117,6 +117,13 @@
     <string name="onboarding_skip_btn">Поки пропустити</string>
     <string name="onboarding_granted_label">Надано</string>
 
+    <!-- Поділитися логами -->
+    <string name="share_logs_title">Поділитися логами</string>
+    <string name="share_logs_desc">Запакувати логи в ZIP і відкрити задачу на GitHub для звіту про проблеми</string>
+    <string name="share_logs_button">Поділитися</string>
+    <string name="share_logs_zipped">Логи запаковано в %s</string>
+    <string name="share_logs_no_logs">Файли логів не знайдено</string>
+
     <!-- Встановлення в авто (Налаштування) -->
     <string name="car_install_title">Встановлення в автомобіль</string>
     <string name="car_install_desc">ADB автомобіля має бути ввімкнено (порт 5555)</string>
