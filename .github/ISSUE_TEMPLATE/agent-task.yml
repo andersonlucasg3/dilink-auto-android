@@ -1,0 +1,44 @@
+name: Agent Task
+description: Submit a task for the DiLink-Auto development agent to investigate and implement
+labels: [agent]
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Task Type
+      options:
+        - Bug fix
+        - New feature
+        - Investigation
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: Describe what needs to be done. Be specific — the agent will use this as its prompt.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: '- [ ] The APK builds without errors'
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      placeholder: Logs, screenshots, file paths, or anything that helps the agent understand the problem.
+    validations:
+      required: false
+  - type: input
+    id: command
+    attributes:
+      label: Initial Command
+      placeholder: '/continue'
+      description: Optional — a slash command the agent should run first (e.g. /investigate, /continue)
+    validations:
+      required: false
