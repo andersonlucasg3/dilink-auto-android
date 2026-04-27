@@ -223,9 +223,14 @@ if [ "$EVENT" = "issues" ]; then
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
+  # Stable symlink so conversations persist across runners
+  STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
+  rm -rf "$STABLE_WORK"
+  ln -sf "$(pwd -P)" "$STABLE_WORK"
+
   react eyes
   set +e
-  OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+  OUTPUT=$(cd "$STABLE_WORK" && $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
   set -e
   if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -323,9 +328,15 @@ elif [ "$EVENT" = "issue_comment" ]; then
     write_resume_prompt "$COMMENT_BODY"
 
     echo "--- Resuming Claude Code conversation: $CONV_ID ---"
+
+    # Run from a stable symlink path so --resume finds the same project across runners
+    STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
+    rm -rf "$STABLE_WORK"
+    ln -sf "$(pwd -P)" "$STABLE_WORK"
+
     react eyes
     set +e
-    OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(cd "$STABLE_WORK" && $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -337,9 +348,14 @@ elif [ "$EVENT" = "issue_comment" ]; then
     write_initial_prompt
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
+
+    STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
+    rm -rf "$STABLE_WORK"
+    ln -sf "$(pwd -P)" "$STABLE_WORK"
+
     react eyes
     set +e
-    OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(cd "$STABLE_WORK" && $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
