@@ -337,18 +337,18 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Resuming Claude Code conversation: $CONV_ID ---"
 
-    # Copy conversation to current project so --resume finds it
-    # (Claude resolves git root, so symlink tricks don't work across runners)
+    # Copy conversation to all runner project dirs so --resume finds it
+    # (Claude resolves git root for project hash; we can't predict which runner)
     OLD_CONV=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}.jsonl" -type f 2>/dev/null | head -1)
     if [ -n "$OLD_CONV" ]; then
       OLD_PROJ=$(dirname "$OLD_CONV")
-      # Find the project Claude Code will actually use for this working directory
-      ACTUAL_PROJ=$(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -type d -name '--*' 2>/dev/null | head -1)
-      if [ -n "$ACTUAL_PROJ" ] && [ "$OLD_PROJ" != "$ACTUAL_PROJ" ]; then
-        cp -f "$OLD_CONV" "$ACTUAL_PROJ/${CONV_ID}.jsonl" 2>/dev/null || true
-        [ -d "${OLD_PROJ}/${CONV_ID}" ] && cp -rf "${OLD_PROJ}/${CONV_ID}" "$ACTUAL_PROJ/${CONV_ID}" 2>/dev/null || true
-        echo "[resume] Copied conversation to ${ACTUAL_PROJ}"
-      fi
+      for proj in $(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -type d -name '--*' 2>/dev/null); do
+        if [ "$proj" != "$OLD_PROJ" ]; then
+          cp -f "$OLD_CONV" "$proj/${CONV_ID}.jsonl" 2>/dev/null || true
+          [ -d "${OLD_PROJ}/${CONV_ID}" ] && cp -rf "${OLD_PROJ}/${CONV_ID}" "$proj/${CONV_ID}" 2>/dev/null || true
+        fi
+      done
+      echo "[resume] Copied conversation to all runner projects"
     fi
 
     register_session "$CONV_ID"
