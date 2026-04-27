@@ -129,7 +129,7 @@ extract_summary_json() {
   local json
   json=$(echo "$output" | sed -n '/```json/,/```/p' | sed '1d;$d' || true)
   if [ -z "$json" ]; then
-    json='{"summary":"Agent finished but no JSON summary block found in the output.","changes_made":false,"build_success":false}'
+    json='{"summary":"Agent finished but no JSON summary block found in the output.","changes_made":false,"build_success":false,"action":"none"}'
   fi
   echo "$json"
 }
@@ -163,8 +163,10 @@ ${ISSUE_BODY}
 3. Output this JSON block as the VERY LAST thing:
 
 \`\`\`json
-{"summary": "What was investigated, what was changed, and outcome. Mention what needs human testing.", "changes_made": true, "build_success": true}
+{"summary": "What was investigated, what was changed, and outcome. Mention what needs human testing.", "changes_made": true, "build_success": true, "action": "none"}
 \`\`\`
+
+Set "action" to "close" if the user asked to close the issue and the work is complete.
 ENDPROMPT
 }
 
@@ -185,8 +187,10 @@ CRITICAL: Do NOT use gh CLI or post comments via GitHub API. The script handles 
 4. Output this JSON block as the VERY LAST thing:
 
 \`\`\`json
-{"summary": "What was done in response to the follow-up", "changes_made": true, "build_success": true}
+{"summary": "What was done in response to the follow-up", "changes_made": true, "build_success": true, "action": "none"}
 \`\`\`
+
+Set "action" to "close" if the user asked to close the issue and the work is complete.
 ENDPROMPT
 }
 
@@ -295,6 +299,12 @@ EOFCOMMENT
   react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 
+  # Close the issue if the agent requested it
+  if [ "$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')" = "close" ]; then
+    echo "[action] Closing issue #$ISSUE_NUM per agent request"
+    GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+  fi
+
 elif [ "$EVENT" = "issue_comment" ]; then
   echo "--- Issue comment: resuming or starting conversation ---"
 
@@ -382,6 +392,12 @@ EOFCOMMENT
 
   react heart
   post_comment "$(cat /tmp/summary-comment.md)"
+
+  # Close the issue if the agent requested it
+  if [ "$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')" = "close" ]; then
+    echo "[action] Closing issue #$ISSUE_NUM per agent request"
+    GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+  fi
 fi
 
 echo "=========================================="
