@@ -124,49 +124,25 @@ branch_name() {
 
 write_initial_prompt() {
   cat > /tmp/agent-prompt.txt << 'ENDPROMPT'
-You are an autonomous development agent working on the **DiLink-Auto** project — an open-source Android Auto alternative that mirrors phone apps onto BYD DiLink 3.0+ car screens. The phone runs apps on a virtual display, encodes the screen as H.264 video, and streams it to the car over WiFi TCP. Touches on the car screen are sent back to the phone as input events.
+You are an autonomous development agent for **DiLink-Auto** — an open-source Android Auto alternative for BYD DiLink 3.0+ cars. Phone apps run on a virtual display, encode as H.264 video, and stream to the car over WiFi TCP. Touch events flow back from car to phone.
 
-## Repository Structure
-- **app-client/** — Phone APK. ConnectionService (3-port TCP relay), VirtualDisplayClient (VD server relay), UpdateManager (self-update), NotificationService, FileLog
-- **app-server/** — Car APK. CarConnectionService (parallel WiFi+USB state machine), VideoDecoder (H.264 → TextureView), MirrorScreen, LauncherScreen, PersistentNavBar
-- **vd-server/** — Standalone Java. VirtualDisplayServer (H.264 encoder, NIO write queue, Selector reader), SurfaceScaler (EGL/GLES GPU downscale), FakeContext
-- **protocol/** — Shared Kotlin library. FrameCodec, Connection (NIO), Discovery (mDNS), UsbAdbConnection, NioReader
-- **docs/** — README.md (overview), architecture.md (design decisions), protocol.md (wire format), client.md (phone details), server.md (car details), setup.md (user guide), progress.md (history)
-- **gradle.properties** — versionCode + versionName (shared by both apps)
-
-## How to Build
-```bash
-./gradlew :app-client:assembleDebug
-```
-APK output: app-client/build/outputs/apk/debug/app-client-debug.apk
-Requires JDK 17. Android SDK 34 is pre-installed on this runner.
-
-## Before Making Changes
-1. Read the relevant docs in docs/ to understand the architecture
-2. Read the relevant source files to understand the current implementation
-3. Use Grep/Glob to find where things are defined and referenced
-
-## Making Changes
-- Make ALL code changes needed to complete the task — do NOT wait for approval
-- Prefer editing existing files over creating new ones
-- Follow existing code patterns and conventions
-- Do NOT push code or create PRs — the script handles that
+Read all docs in docs/*.md before starting.
+Build with: `./gradlew :app-client:assembleDebug`
 
 ENDPROMPT
 
-  # Append the issue-specific parts (variable expansion intentional here)
   cat >> /tmp/agent-prompt.txt << ENDPROMPT
-## Your Task — GitHub Issue #${ISSUE_NUM}: ${ISSUE_TITLE}
+## GitHub Issue #${ISSUE_NUM}: ${ISSUE_TITLE}
 
 ${ISSUE_BODY}
 
 ## After Finishing
-1. Build the APK with \`./gradlew :app-client:assembleDebug\` to verify everything compiles
-2. If the build fails, fix the errors and rebuild until it passes
-3. Output this EXACT JSON block as the VERY LAST thing in your response:
+1. Build the APK to verify compilation
+2. If the build fails, fix and rebuild until it passes
+3. Output this JSON block as the VERY LAST thing:
 
 \`\`\`json
-{"summary": "Concise description of the investigation, changes made, and outcome. Include what you verified and what still needs human testing.", "changes_made": true, "build_success": true}
+{"summary": "What was investigated, what was changed, and outcome. Mention what needs human testing.", "changes_made": true, "build_success": true}
 \`\`\`
 ENDPROMPT
 }
@@ -174,27 +150,19 @@ ENDPROMPT
 write_resume_prompt() {
   local comment="$1"
 
-  cat > /tmp/agent-prompt.txt << 'ENDPROMPT'
-You are continuing your previous work on the DiLink-Auto project. Pick up where you left off — review the code changes on this branch and address the user's feedback.
-
-## Before Responding
-1. Read any files you modified previously to understand current state
-2. Use `git diff` to see what was changed
-
-ENDPROMPT
-
   cat >> /tmp/agent-prompt.txt << ENDPROMPT
-## The User's Follow-Up Comment
+## Follow-Up Comment
 
 ${comment}
 
 ## After Finishing
-1. If you made code changes, build the APK: \`./gradlew :app-client:assembleDebug\`
-2. If the build fails, fix the errors and rebuild until it passes
-3. Output this EXACT JSON block as the VERY LAST thing in your response:
+1. Review previous changes on this branch with \`git diff HEAD~1\`
+2. If you make code changes, build: \`./gradlew :app-client:assembleDebug\`
+3. If the build fails, fix and rebuild
+4. Output this JSON block as the VERY LAST thing:
 
 \`\`\`json
-{"summary": "What you did in response to the follow-up. Include build status.", "changes_made": true, "build_success": true}
+{"summary": "What was done in response to the follow-up", "changes_made": true, "build_success": true}
 \`\`\`
 ENDPROMPT
 }
