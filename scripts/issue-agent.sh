@@ -159,8 +159,9 @@ You are an autonomous development agent for **DiLink-Auto** — an open-source A
 
 Read all docs in docs/*.md before starting.
 Build with: `./gradlew :app-client:assembleDebug`
+This is a temporary GitHub Actions runner session. You must `git add -A && git commit` all changes before your final output.
 
-CRITICAL: You may use gh pr (create/view/diff/review) for pull requests. Do NOT use gh issue comment or GitHub issue API — the script handles comments, reactions, commits, push, and issue close.
+CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, reactions, push, and issue close.
 
 ENDPROMPT
 
@@ -193,7 +194,7 @@ write_resume_prompt() {
 
 ${comment}
 
-CRITICAL: You may use gh pr (create/view/diff/review) for pull requests. Do NOT use gh issue comment or GitHub issue API — the script handles comments, reactions, commits, push, and issue close.
+CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, reactions, push, and issue close.
 
 ## After Finishing
 1. Review previous changes on this branch with \`git diff HEAD~1\`
