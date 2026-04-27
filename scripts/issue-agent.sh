@@ -54,14 +54,25 @@ git config user.name "DiLink-Auto Agent"
 # Usage: react eyes | react rocket | react heart | react confused
 react() {
   local content="$1"
-  local target
+  local list_target delete_url
   if [ -n "${COMMENT_ID:-}" ]; then
-    target="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
+    list_target="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
+    delete_url="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
   else
-    target="repos/$REPO/issues/$ISSUE_NUM/reactions"
+    list_target="repos/$REPO/issues/$ISSUE_NUM/reactions"
+    delete_url="repos/$REPO/issues/$ISSUE_NUM/reactions"
   fi
-  echo "[reaction] Adding :${content}: to ${target}"
-  timeout 10 gh api "$target" -f content="$content" --silent 2>/dev/null || true
+
+  echo "[reaction] Setting :${content}: on ${list_target}"
+
+  # Remove any previous reaction by us before adding the new one
+  local prev_id
+  prev_id=$(timeout 10 gh api "$list_target" --jq '.[] | select(.user.login == "andersonlucasg3") | .id' 2>/dev/null | head -1)
+  if [ -n "$prev_id" ]; then
+    timeout 10 gh api "${delete_url}/${prev_id}" --method DELETE --silent 2>/dev/null || true
+  fi
+
+  timeout 10 gh api "$list_target" -f content="$content" --silent 2>/dev/null || true
 }
 
 post_comment() {
