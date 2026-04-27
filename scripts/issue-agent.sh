@@ -137,7 +137,7 @@ You are an autonomous development agent for **DiLink-Auto** — an open-source A
 Read all docs in docs/*.md before starting.
 Build with: `./gradlew :app-client:assembleDebug`
 
-CRITICAL: Do NOT use gh CLI, git push, or any GitHub API. The script handles all GitHub interaction automatically.
+CRITICAL: Do NOT use gh CLI or post comments via GitHub API. The script handles all GitHub interaction (comments, reactions, commits, push).
 
 ENDPROMPT
 
@@ -165,7 +165,7 @@ write_resume_prompt() {
 
 ${comment}
 
-CRITICAL: Do NOT use gh CLI, git push, or any GitHub API. The script handles all GitHub interaction.
+CRITICAL: Do NOT use gh CLI or post comments via GitHub API. The script handles all GitHub interaction (comments, reactions, commits, push).
 
 ## After Finishing
 1. Review previous changes on this branch with \`git diff HEAD~1\`
