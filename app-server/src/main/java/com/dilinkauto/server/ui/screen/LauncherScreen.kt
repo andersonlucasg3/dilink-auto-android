@@ -343,8 +343,7 @@ fun ConnectionStatus(
             modifier = Modifier.widthIn(max = 500.dp)
         ) {
             when (state) {
-                CarConnectionService.State.IDLE,
-                CarConnectionService.State.CONNECTING -> {
+                CarConnectionService.State.IDLE -> {
                     CircularProgressIndicator(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(48.dp)
