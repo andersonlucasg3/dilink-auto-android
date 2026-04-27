@@ -244,7 +244,7 @@ if [ "$EVENT" = "issues" ]; then
 
   echo "--- Starting Claude Code (new conversation) ---"
   set +e
-  OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+  OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
   set -e
   if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -379,7 +379,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     write_resume_prompt "$COMMENT_BODY"
 
-    echo "--- Resuming Claude Code conversation: $CONV_ID (5m timeout) ---"
+    echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
 
     # Copy conversation to all runner project dirs so --resume finds it
     # (Claude resolves git root for project hash; we can't predict which runner)
@@ -398,7 +398,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     register_session "$CONV_ID"
 
     set +e
-    OUTPUT=$(timeout 300 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -406,7 +406,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
       rm -f "$STATE_FILE"
       write_initial_prompt
       set +e
-      OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+      OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
       CLAUDE_EXIT=$?
       set -e
       if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -434,7 +434,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     ln -sf "$(pwd -P)" "$STABLE_WORK"
 
     set +e
-    OUTPUT=$(cd "$STABLE_WORK" && timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(cd "$STABLE_WORK" && timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
