@@ -230,7 +230,7 @@ if [ "$EVENT" = "issues" ]; then
 
   react eyes
   set +e
-  OUTPUT=$(cd "$STABLE_WORK" && $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+  OUTPUT=$(cd "$STABLE_WORK" && timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
   set -e
   if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -349,7 +349,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     react eyes
     set +e
-    OUTPUT=$(cd "$STABLE_WORK" && $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(cd "$STABLE_WORK" && timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
@@ -368,7 +368,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     react eyes
     set +e
-    OUTPUT=$(cd "$STABLE_WORK" && $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(cd "$STABLE_WORK" && timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
