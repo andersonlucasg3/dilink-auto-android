@@ -54,11 +54,14 @@ git config user.name "DiLink-Auto Agent"
 # Usage: react eyes | react rocket | react heart | react confused
 react() {
   local content="$1"
+  local target
   if [ -n "${COMMENT_ID:-}" ]; then
-    gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content="$content" --silent 2>/dev/null || true
+    target="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
   else
-    gh api "repos/$REPO/issues/$ISSUE_NUM/reactions" -f content="$content" --silent 2>/dev/null || true
+    target="repos/$REPO/issues/$ISSUE_NUM/reactions"
   fi
+  echo "[reaction] Adding :${content}: to ${target}"
+  gh api "$target" -f content="$content" --silent || true
 }
 
 post_comment() {
