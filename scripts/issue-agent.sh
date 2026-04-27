@@ -224,8 +224,12 @@ if [ "$EVENT" = "issues" ]; then
 
   echo "--- Starting Claude Code (new conversation) ---"
   react eyes
-  if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1); then
-    handle_error "Claude Code exited with code $?" "Prompt was written to /tmp/agent-prompt-${ISSUE_NUM}.txt"
+  set +e
+  OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+  CLAUDE_EXIT=$?
+  set -e
+  if [ "$CLAUDE_EXIT" -ne 0 ]; then
+    handle_error "Claude Code exited with code $CLAUDE_EXIT" "Prompt: /tmp/agent-prompt-${ISSUE_NUM}.txt"
   fi
   echo "--- Claude Code finished ---"
 
@@ -320,8 +324,12 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Resuming Claude Code conversation: $CONV_ID ---"
     react eyes
-    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "$(< /tmp/agent-prompt-${ISSUE_NUM}.txt)" 2>&1); then
-      handle_error "Claude Code exited with code $?" "Conversation ID: $CONV_ID"
+    set +e
+    OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    CLAUDE_EXIT=$?
+    set -e
+    if [ "$CLAUDE_EXIT" -ne 0 ]; then
+      handle_error "Claude Code exited with code $CLAUDE_EXIT" "Conversation ID: $CONV_ID"
     fi
     echo "--- Claude Code finished ---"
   else
@@ -330,8 +338,12 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
     react eyes
-    if ! OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1); then
-      handle_error "Claude Code exited with code $?"
+    set +e
+    OUTPUT=$($CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    CLAUDE_EXIT=$?
+    set -e
+    if [ "$CLAUDE_EXIT" -ne 0 ]; then
+      handle_error "Claude Code exited with code $CLAUDE_EXIT"
     fi
     echo "--- Claude Code finished ---"
 
