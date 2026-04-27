@@ -5,7 +5,12 @@ Last updated: 2026-04-26
 
 ## Milestones
 
-### v0.14.0 (in development)
+### v0.15.0 (in development)
+
+- **Phone service auto-start**: `ConnectionService` now auto-starts when the phone app is opened (e.g. via car USB ADB), removing the need to manually press Start.
+- **Car no longer clears phone task**: Removed `--activity-clear-task` from car's USB ADB phone launch. If the phone app is already open, the car moves forward without disrupting it.
+
+### v0.14.0
 
 - **Shared version source**: Version code/name now in gradle.properties — single edit for both apps.
 - **MAX_PAYLOAD_SIZE 2MB → 128MB**: App list with 136+ PNG icons exceeded 2MB causing ProtocolException and connection drops.
