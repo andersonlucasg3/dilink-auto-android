@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">Service Voiture DiLink Auto</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_searching">Recherche du téléphone…</string>
+    <string name="notification_connected">Connecté au téléphone</string>
+
+    <!-- Lanceur -->
+    <string name="search_hint">Rechercher des applis…</string>
+    <string name="not_connected">Non connecté</string>
+    <string name="plug_phone_usb">Branchez le téléphone à l\'USB de la voiture</string>
+    <string name="phone_ip_label">Adresse IP du téléphone</string>
+    <string name="connect_button">Connecter</string>
+
+    <!-- Barre de navigation -->
+    <string name="nav_launcher">Accueil</string>
+    <string name="nav_recent">Récent</string>
+    <string name="nav_notifications">Notifications</string>
+    <string name="nav_back">Retour</string>
+    <string name="nav_home">Maison</string>
+
+    <!-- Miroir -->
+    <string name="status_updating">Mise à jour de l\'appli voiture…</string>
+    <string name="status_please_wait">Veuillez patienter</string>
+</resources>

@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">Service DiLink Auto</string>
+    <string name="notification_channel_description">Maintient DiLink Auto en cours pour la connexion à la voiture</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_connected">Connecté à la voiture</string>
+    <string name="notification_waiting">En attente de la connexion…</string>
+    <string name="notification_streaming">Diffusion sur l\'écran de la voiture</string>
+    <string name="notification_channel_update">Mises à jour</string>
+    <string name="accessibility_description">DiLink Auto utilise les services d\'accessibilité pour transmettre les touches du véhicule vers le téléphone.</string>
+
+    <!-- Écran principal -->
+    <string name="main_title">DiLink Auto</string>
+    <string name="main_subtitle">Client Téléphone</string>
+    <string name="how_to_connect_title">Comment connecter</string>
+    <string name="how_to_step_1">1.  Activez le point d\'accès WiFi sur votre téléphone</string>
+    <string name="how_to_step_2">2.  Connectez la voiture au WiFi du téléphone</string>
+    <string name="how_to_step_3">3.  Branchez le téléphone au port USB de la voiture</string>
+    <string name="how_to_step_4">4.  Appuyez sur Démarrer le service ci-dessous</string>
+    <string name="how_to_footer">La voiture s\'installe automatiquement au premier usage et se connecte via WiFi.</string>
+    <string name="start_service">Démarrer le service</string>
+    <string name="stop_service">Arrêter le service</string>
+    <string name="manual_ip">IP manuelle</string>
+    <string name="install_btn">Installer</string>
+    <string name="auto_detect_install">Détection auto et installer</string>
+    <string name="install_on_car">Installer sur la voiture</string>
+    <string name="car_ip_hint">ex: 192.168.43.100</string>
+    <string name="car_ip_label">IP de la voiture</string>
+
+    <!-- Statut -->
+    <string name="status_stopped">Service arrêté</string>
+    <string name="status_stopped_desc">Appuyez sur Démarrer pour commencer</string>
+    <string name="status_waiting">En attente de la voiture</string>
+    <string name="status_waiting_desc">Branchez le téléphone à l\'USB de la voiture et connectez-vous via WiFi</string>
+    <string name="status_listening">Écoute sur : %1$s</string>
+    <string name="status_connected">Voiture connectée</string>
+    <string name="status_connected_desc">En attente de l\'affichage virtuel…</string>
+    <string name="status_streaming">Diffusion en cours</string>
+    <string name="status_streaming_desc">Affichage virtuel actif</string>
+
+    <!-- Mises à jour -->
+    <string name="updates_title">Mises à jour</string>
+    <string name="updates_check_phone">Vérifier la mise à jour du téléphone</string>
+    <string name="updates_checking">Vérification des mises à jour…</string>
+    <string name="updates_up_to_date">Téléphone : à jour (v%1$s)</string>
+    <string name="updates_available">Téléphone : v%1$s disponible</string>
+    <string name="updates_size_mb">%1$.1f Mo</string>
+    <string name="updates_download_btn">Télécharger la mise à jour</string>
+    <string name="updates_downloading">Téléchargement… %1$d%%</string>
+    <string name="updates_ready">Téléphone : v%1$s prête</string>
+    <string name="updates_install_btn">Installer la mise à jour</string>
+    <string name="updates_retry">Réessayer</string>
+    <string name="updates_car_title">Appli Voiture</string>
+    <string name="updates_car_desc">Installer ou mettre à jour l\'appli voiture via WiFi ADB</string>
+    <string name="updates_car_install">Installer</string>
+
+    <!-- Paramètres -->
+    <string name="settings_title">Paramètres</string>
+    <string name="settings_permissions">Permissions</string>
+    <string name="perm_all_files">Accès à tous les fichiers</string>
+    <string name="perm_all_files_granted">Nécessaire pour déployer le serveur d\'affichage virtuel</string>
+    <string name="perm_battery">Optimisation de la batterie</string>
+    <string name="perm_battery_granted">Maintient la diffusion même écran éteint</string>
+    <string name="perm_accessibility">Service d\'accessibilité</string>
+    <string name="perm_accessibility_granted">Permet le contrôle tactile depuis la voiture</string>
+    <string name="perm_notifications">Accès aux notifications</string>
+    <string name="perm_notifications_granted">Transmet les notifications sur l\'écran de la voiture</string>
+    <string name="perm_granted">Accordé</string>
+    <string name="perm_usb_debugging">Débogage USB</string>
+    <string name="perm_usb_desc">Requis sur le téléphone et la voiture</string>
+
+    <!-- Support -->
+    <string name="support_title">Soutenir</string>
+    <string name="support_heading">Aidez à maintenir DiLink-Auto</string>
+    <string name="support_sponsor_btn">Sponsoriser sur GitHub</string>
+    <string name="support_pix_btn">Payer avec Pix (Brésil)</string>
+
+    <!-- À propos -->
+    <string name="about_title">À propos</string>
+    <string name="about_version">DiLink-Auto v%1$s</string>
+    <string name="about_tagline">Alternative open-source à Android Auto</string>
+    <string name="about_libs_heading">Bibliothèques open source :</string>
+    <string name="about_lib_dadb">dadb — Apache 2.0</string>
+    <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
+    <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
+    <string name="about_lib_scrcpy">scrcpy (concepts FakeContext/SurfaceScaler) — Apache 2.0</string>
+    <string name="about_dev_credit">Développé avec ❤ par Anderson Lucas de Castro Ramos 🇧🇷</string>
+    <string name="about_dev_github">github.com/andersonlucasg3</string>
+
+    <!-- Intégration -->
+    <string name="onboarding_welcome_title">Bienvenue sur DiLink-Auto</string>
+    <string name="onboarding_welcome_desc">Utilisez vos applis sur l\'écran de la voiture. Configurons quelques permissions pour que tout fonctionne.</string>
+    <string name="onboarding_files_title">Accès à tous les fichiers</string>
+    <string name="onboarding_files_desc">Déploie le serveur d\'affichage virtuel dans le stockage. Sans cela, la voiture ne peut pas démarrer la diffusion.</string>
+    <string name="onboarding_battery_title">Optimisation de la batterie</string>
+    <string name="onboarding_battery_desc">Maintient la connexion quand l\'écran est éteint. Sans cela, la diffusion s\'arrête en veille.</string>
+    <string name="onboarding_accessibility_title">Service d\'accessibilité</string>
+    <string name="onboarding_accessibility_desc">Permet à l\'écran de la voiture de contrôler le téléphone. Sans cela, vous verrez l\'écran sans pouvoir toucher.</string>
+    <string name="onboarding_notification_title">Accès aux notifications</string>
+    <string name="onboarding_notification_desc">Affiche les notifications du téléphone sur l\'écran de la voiture. Sans cela, vous manquerez appels et messages.</string>
+    <string name="onboarding_done_title">Vous êtes prêt</string>
+    <string name="onboarding_done_desc">Tout est prêt. Branchez votre téléphone au port USB de la voiture pour commencer.</string>
+    <string name="onboarding_grant">Autoriser</string>
+    <string name="onboarding_skip">Passer</string>
+    <string name="onboarding_continue">Continuer</string>
+    <string name="onboarding_start">Commencer avec DiLink-Auto</string>
+    <string name="onboarding_skip_btn">Passer pour l\'instant</string>
+    <string name="onboarding_granted_label">Accordé</string>
+
+    <!-- Installer sur la voiture -->
+    <string name="car_install_title">Installer sur la voiture</string>
+    <string name="car_install_desc">Le débogage ADB de la voiture doit être activé (port 5555)</string>
+    <string name="car_install_ip_label">Adresse IP de la voiture</string>
+    <string name="car_install_ip_hint">Laisser vide pour détection automatique</string>
+    <string name="car_install_button">Installer sur la voiture</string>
+</resources>
