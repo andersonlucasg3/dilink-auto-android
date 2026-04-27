@@ -160,10 +160,13 @@ ${ISSUE_BODY}
 ## After Finishing
 1. Build the APK to verify compilation
 2. If the build fails, fix and rebuild until it passes
-3. Output this JSON block as the VERY LAST thing:
+3. Output this JSON block as the VERY LAST thing.
+   The "summary" field must use markdown with clear sections
+   (## What was done, ## What needs testing, ## Build).
 
 \`\`\`json
-{"summary": "What was investigated, what was changed, and outcome. Mention what needs human testing.", "changes_made": true, "build_success": true, "action": "none"}
+{"summary": "...", "changes_made": true, "build_success": true, "action": "none"}
+\`\`\`
 \`\`\`
 
 Set "action" to "close" if the user asked to close the issue and the work is complete.
@@ -184,10 +187,11 @@ CRITICAL: Do NOT use gh CLI or post comments via GitHub API. The script handles 
 1. Review previous changes on this branch with \`git diff HEAD~1\`
 2. If you make code changes, build: \`./gradlew :app-client:assembleDebug\`
 3. If the build fails, fix and rebuild
-4. Output this JSON block as the VERY LAST thing:
+4. Output this JSON block as the VERY LAST thing.
+   The "summary" field must use markdown with clear sections.
 
 \`\`\`json
-{"summary": "What was done in response to the follow-up", "changes_made": true, "build_success": true, "action": "none"}
+{"summary": "...", "changes_made": true, "build_success": true, "action": "none"}
 \`\`\`
 
 Set "action" to "close" if the user asked to close the issue and the work is complete.
