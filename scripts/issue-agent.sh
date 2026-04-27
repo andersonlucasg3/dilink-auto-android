@@ -334,6 +334,19 @@ elif [ "$EVENT" = "issue_comment" ]; then
     rm -rf "$STABLE_WORK"
     ln -sf "$(pwd -P)" "$STABLE_WORK"
 
+    # Migrate conversation from old project dir to the stable one
+    OLD_CONV=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}.jsonl" -type f 2>/dev/null | head -1)
+    if [ -n "$OLD_CONV" ]; then
+      OLD_PROJ=$(dirname "$OLD_CONV")
+      STABLE_PROJ="${CLAUDE_PROJECTS_DIR}/tmp-issue-agent-${ISSUE_NUM}"
+      mkdir -p "$STABLE_PROJ"
+      if [ "$OLD_PROJ" != "$STABLE_PROJ" ]; then
+        ln -sf "$OLD_CONV" "$STABLE_PROJ/${CONV_ID}.jsonl" 2>/dev/null || true
+        [ -d "${OLD_PROJ}/${CONV_ID}" ] && ln -sfn "${OLD_PROJ}/${CONV_ID}" "$STABLE_PROJ/${CONV_ID}" 2>/dev/null || true
+        echo "[resume] Linked conversation from ${OLD_PROJ} to ${STABLE_PROJ}"
+      fi
+    fi
+
     react eyes
     set +e
     OUTPUT=$(cd "$STABLE_WORK" && $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
