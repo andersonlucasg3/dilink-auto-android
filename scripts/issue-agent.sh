@@ -61,12 +61,12 @@ react() {
     target="repos/$REPO/issues/$ISSUE_NUM/reactions"
   fi
   echo "[reaction] Adding :${content}: to ${target}"
-  gh api "$target" -f content="$content" --silent || true
+  GH_TOKEN="$GITHUB_TOKEN" gh api "$target" -f content="$content" --silent || true
 }
 
 post_comment() {
   local body="$1"
-  echo "$body" | gh issue comment "$ISSUE_NUM" --body-file -
+  echo "$body" | GH_TOKEN="$GITHUB_TOKEN" gh issue comment "$ISSUE_NUM" --body-file -
 }
 
 handle_error() {
