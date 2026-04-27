@@ -288,6 +288,14 @@ if [ "$EVENT" = "issues" ]; then
   echo "--- Building APK ---"
   rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
   chmod +x gradlew 2>/dev/null || true
+  # Ensure JDK 17 from setup-java, not Windows JDK 25 from PATH
+  export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
+  export PATH="${JAVA_HOME}/bin:$PATH"
+  # Ensure Android SDK is available
+  export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
+  export ANDROID_SDK_ROOT="$ANDROID_HOME"
+  echo "JAVA_HOME=$JAVA_HOME"
+  echo "ANDROID_HOME=$ANDROID_HOME"
   APK_BUILT=false
   if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
     if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
@@ -462,6 +470,14 @@ elif [ "$EVENT" = "issue_comment" ]; then
   echo "--- Building APK ---"
   rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
   chmod +x gradlew 2>/dev/null || true
+  # Ensure JDK 17 from setup-java, not Windows JDK 25 from PATH
+  export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
+  export PATH="${JAVA_HOME}/bin:$PATH"
+  # Ensure Android SDK is available
+  export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
+  export ANDROID_SDK_ROOT="$ANDROID_HOME"
+  echo "JAVA_HOME=$JAVA_HOME"
+  echo "ANDROID_HOME=$ANDROID_HOME"
   APK_BUILT=false
   if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
     if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
