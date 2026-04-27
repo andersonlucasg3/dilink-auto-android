@@ -65,12 +65,10 @@ react() {
 
   echo "[reaction] Setting :${content}: on ${list_target}"
 
-  # Remove any previous reaction by us before adding the new one
-  local prev_id
-  prev_id=$(timeout 10 gh api "$list_target" --jq '.[] | select(.user.login == "andersonlucasg3") | .id' 2>/dev/null | head -1)
-  if [ -n "$prev_id" ]; then
-    timeout 10 gh api "${delete_url}/${prev_id}" --method DELETE --silent 2>/dev/null || true
-  fi
+  # Remove ALL previous reactions by us before adding the new one
+  timeout 10 gh api "$list_target" --jq '.[] | select(.user.login == "andersonlucasg3") | .id' 2>/dev/null | while read -r prev_id; do
+    [ -n "$prev_id" ] && timeout 10 gh api "${delete_url}/${prev_id}" --method DELETE --silent 2>/dev/null || true
+  done
 
   timeout 10 gh api "$list_target" -f content="$content" --silent 2>/dev/null || true
 }
