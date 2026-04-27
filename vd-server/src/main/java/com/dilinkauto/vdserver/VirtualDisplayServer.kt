@@ -51,6 +51,10 @@ class VirtualDisplayServer(
     private val writeQueue = ConcurrentLinkedQueue<ByteBuffer>()
     @Volatile private var writerThread: Thread? = null
 
+    // Approximate queue depth for encoder backpressure — avoids O(n) ConcurrentLinkedQueue.size()
+    @Volatile private var writeQueueDepth = 0
+    private val BACKPRESSURE_THRESHOLD = 6 // skip non-keyframes when queue exceeds 6 frames (~100ms at 60fps)
+
     private var scaler: SurfaceScaler? = null
     private var scalerThread: Thread? = null
     @Volatile private var running = true
@@ -258,6 +262,7 @@ class VirtualDisplayServer(
         buf.put(msgType)
         buf.flip()
         writeQueue.add(buf)
+        writeQueueDepth++
         val wt = writerThread
         if (wt != null) LockSupport.unpark(wt)
     }
@@ -271,10 +276,11 @@ class VirtualDisplayServer(
                 LockSupport.parkNanos(frameIntervalMs * 1_000_000L)
                 continue
             }
+            writeQueueDepth--
             FrameCodec.writeAll(ch, buf)
             writeCount++
             if (writeCount % 60 == 0L) {
-                log("Writer: wrote $writeCount messages, queue=${writeQueue.size}")
+                log("Writer: wrote $writeCount messages, queueDepth=$writeQueueDepth")
             }
         }
     }
@@ -312,6 +318,7 @@ class VirtualDisplayServer(
         var noOutputCount = 0L
         var lastFrameTime = System.currentTimeMillis()
         var lastKeyFrameAt = 0L
+        var skippedFrameCount = 0L
 
         while (running) {
             try {
@@ -343,6 +350,19 @@ class VirtualDisplayServer(
                         lastKeyFrameAt = now
                     }
 
+                    // Encoder backpressure: when the write queue is backed up (TCP send buffer
+                    // congested, WiFi dropped, etc.), skip non-keyframe, non-config frames at the
+                    // source. This prevents frame piling that causes catchup cascades downstream.
+                    // Keyframes and CONFIG always go through — they are essential for decoding.
+                    if (!isConfig && !isKeyFrame && writeQueueDepth > BACKPRESSURE_THRESHOLD) {
+                        enc.releaseOutputBuffer(outputIndex, false)
+                        skippedFrameCount++
+                        if (skippedFrameCount <= 3 || skippedFrameCount % 60 == 0L) {
+                            log("Encoder backpressure: skip P-frame (queueDepth=$writeQueueDepth threshold=$BACKPRESSURE_THRESHOLD skipped=$skippedFrameCount)")
+                        }
+                        continue
+                    }
+
                     // Single allocation: encode header + payload directly into ByteBuffer
                     val buf = ByteBuffer.allocate(1 + 4 + size)
                     buf.put(msgType)
@@ -351,6 +371,7 @@ class VirtualDisplayServer(
                     buf.position(buf.limit())  // advance position past payload
                     buf.flip()
                     writeQueue.add(buf)
+                    writeQueueDepth++
                     val wt = writerThread
                     if (wt != null) LockSupport.unpark(wt)
 

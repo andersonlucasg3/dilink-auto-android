@@ -65,7 +65,8 @@ The **phone** deploys and starts the VD server locally. The VD server connects b
 |  Phone auto-updates car app via dadb when version mismatch       |
 |  Car receives UPDATING_CAR message → shows status, stops reconnect|
 |                                                                   |
-|  UI: LauncherScreen → MirrorScreen                               |
+|  UI: CarLaunchScreen → (app icons arrive) → CarShell + NavBar    |
+|  Two modes: launch (connection-focused, no nav) and streaming    |
 |  Nav bar (76dp): Notifications (badge+progress), Home, Back      |
 |  40dp icons, 14sp text                                            |
 +-------------------------------------------------------------------+
@@ -117,12 +118,14 @@ Parallel connection model with WiFi (3 connections) and USB tracks.
 |-----------|------|---------|
 | CarConnectionService | `service/CarConnectionService.kt` | Parallel state machine, 3-connection WiFi + USB tracks, UPDATING_CAR handling |
 | VideoDecoder | `decoder/VideoDecoder.kt` | H.264 decode, 30-frame queue, early start on offscreen surface, logSink callback |
+| CarLaunchScreen | `ui/screen/CarLaunchScreen.kt` | Full-screen launch/connection screen (no nav), branding, instructions, manual IP |
 | MirrorScreen | `ui/screen/MirrorScreen.kt` | TextureView + touch forwarding, decoder restart on surface available |
-| LauncherScreen | `ui/screen/LauncherScreen.kt` | App grid (64dp icons, 160dp cells), search (imePadding), alphabetical sort |
+| HomeContent | `ui/screen/HomeScreen.kt` | App grid (64dp icons, 160dp cells) or connection status, shown in streaming mode |
+| LauncherScreen | `ui/screen/LauncherScreen.kt` | Legacy integrated screen with SideNavBar, CarStatusBar, AppGrid |
 | NotificationScreen | `ui/screen/NotificationScreen.kt` | Notification list with progress bars, tap-to-launch |
-| PersistentNavBar | `ui/nav/PersistentNavBar.kt` | 76dp nav bar (40dp icons, 14sp text), recent apps (pruned) |
+| PersistentNavBar | `ui/nav/PersistentNavBar.kt` | 76dp nav bar (40dp icons, 14sp text), recent apps (pruned), streaming mode only |
 | RecentAppsState | `ui/nav/RecentAppsState.kt` | Tracks recent apps, prunes unavailable |
-| MainActivity | `MainActivity.kt` | Fullscreen immersive, USB intent forwarding, screen routing |
+| MainActivity | `MainActivity.kt` | Fullscreen immersive, USB intent forwarding, two-mode screen routing (launch vs streaming) |
 
 ### vd-server (Shell-Privileged Process)
 
