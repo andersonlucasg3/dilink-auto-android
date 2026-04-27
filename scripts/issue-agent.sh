@@ -160,7 +160,7 @@ You are an autonomous development agent for **DiLink-Auto** — an open-source A
 Read all docs in docs/*.md before starting.
 Build with: `./gradlew :app-client:assembleDebug`
 
-CRITICAL: Do NOT use gh CLI or post comments via GitHub API. The script handles all GitHub interaction (comments, reactions, commits, push).
+CRITICAL: You may use gh pr (create/view/diff/review) for pull requests. Do NOT use gh issue comment or GitHub issue API — the script handles comments, reactions, commits, push, and issue close.
 
 ENDPROMPT
 
@@ -181,7 +181,7 @@ ${ISSUE_BODY}
 \`\`\`
 \`\`\`
 
-Set "action" to "close" if the user asked to close the issue and the work is complete.
+Set "action" to "close" to close the issue, "pr" to create a pull request to develop, or "none".
 ENDPROMPT
 }
 
@@ -193,7 +193,7 @@ write_resume_prompt() {
 
 ${comment}
 
-CRITICAL: Do NOT use gh CLI or post comments via GitHub API. The script handles all GitHub interaction (comments, reactions, commits, push).
+CRITICAL: You may use gh pr (create/view/diff/review) for pull requests. Do NOT use gh issue comment or GitHub issue API — the script handles comments, reactions, commits, push, and issue close.
 
 ## After Finishing
 1. Review previous changes on this branch with \`git diff HEAD~1\`
@@ -206,7 +206,7 @@ CRITICAL: Do NOT use gh CLI or post comments via GitHub API. The script handles 
 {"summary": "...", "changes_made": true, "build_success": true, "action": "none"}
 \`\`\`
 
-Set "action" to "close" if the user asked to close the issue and the work is complete.
+Set "action" to "close" to close the issue, "pr" to create a pull request to develop, or "none".
 ENDPROMPT
 }
 
@@ -299,7 +299,7 @@ if [ "$EVENT" = "issues" ]; then
   cat > /tmp/summary-comment.md << EOFCOMMENT
 ## 🤖 Agent Investigation — Issue #${ISSUE_NUM}
 
-**Branch:** [\`${BRANCH}\`](${SERVER_URL}/${REPO}/tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}
+**Branch:** [\`${BRANCH}\`](${SERVER_URL}/${REPO}/tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}${PR_URL:+  |  **PR:** [${PR_URL}](${PR_URL})}
 
 ${SUMMARY_TEXT}
 
@@ -327,10 +327,22 @@ EOFCOMMENT
   react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 
-  # Close the issue if the agent requested it
-  if [ "$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')" = "close" ]; then
+  # Handle agent-requested actions
+  ACTION=$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')
+  if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+  elif [ "$ACTION" = "pr" ]; then
+    echo "[action] Creating pull request for $BRANCH → develop"
+    PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
+      --base develop \
+      --head "$BRANCH" \
+      --title "${ISSUE_TITLE}" \
+      --body "Closes #${ISSUE_NUM}" \
+      2>/dev/null || true)
+    if [ -n "$PR_URL" ]; then
+      echo "PR created: $PR_URL"
+    fi
   fi
 
 elif [ "$EVENT" = "issue_comment" ]; then
@@ -440,7 +452,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
   cat > /tmp/summary-comment.md << EOFCOMMENT
 ## 🤖 Agent Update — Issue #${ISSUE_NUM}
 
-**Branch:** [\`${BRANCH}\`](${SERVER_URL}/${REPO}/tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}
+**Branch:** [\`${BRANCH}\`](${SERVER_URL}/${REPO}/tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}${PR_URL:+  |  **PR:** [${PR_URL}](${PR_URL})}
 
 ${SUMMARY_TEXT}
 
@@ -468,10 +480,22 @@ EOFCOMMENT
   react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 
-  # Close the issue if the agent requested it
-  if [ "$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')" = "close" ]; then
+  # Handle agent-requested actions
+  ACTION=$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')
+  if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+  elif [ "$ACTION" = "pr" ]; then
+    echo "[action] Creating pull request for $BRANCH → develop"
+    PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
+      --base develop \
+      --head "$BRANCH" \
+      --title "${ISSUE_TITLE}" \
+      --body "Closes #${ISSUE_NUM}" \
+      2>/dev/null || true)
+    if [ -n "$PR_URL" ]; then
+      echo "PR created: $PR_URL"
+    fi
   fi
 fi
 
