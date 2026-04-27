@@ -272,8 +272,6 @@ if [ "$EVENT" = "issues" ]; then
 
   # Commit and push if changes were made
   CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
-  BUILD_SUCCESS=$(echo "$SUMMARY_JSON" | jq -r '.build_success // false')
-
   COMMIT_SHA=""
   if [ "$CHANGES_MADE" = "true" ]; then
     if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -282,6 +280,15 @@ if [ "$EVENT" = "issues" ]; then
       git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent: \(.summary)"')" || true
       git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
       COMMIT_SHA=$(git rev-parse --short HEAD)
+    fi
+  fi
+
+  # Always build after the agent finishes (don't trust agent's build claim)
+  echo "--- Building APK ---"
+  APK_BUILT=false
+  if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
+    if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
+      APK_BUILT=true
     fi
   fi
 
@@ -297,14 +304,13 @@ ${SUMMARY_TEXT}
 
 EOFCOMMENT
 
-  # Add build status
-  if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
+  if [ "$APK_BUILT" = true ]; then
     cat >> /tmp/summary-comment.md << EOFCOMMENT
 ### Build
-✅ APK built successfully — [download](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
+✅ APK built — [download](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
 
 EOFCOMMENT
-  elif [ "$BUILD_SUCCESS" = "false" ]; then
+  else
     cat >> /tmp/summary-comment.md << EOFCOMMENT
 ### Build
 ❌ Build failed — check the [workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
@@ -418,6 +424,15 @@ elif [ "$EVENT" = "issue_comment" ]; then
     fi
   fi
 
+  # Always build after the agent finishes (don't trust agent's build claim)
+  echo "--- Building APK ---"
+  APK_BUILT=false
+  if ./gradlew :app-client:assembleDebug 2>&1 | tail -5; then
+    if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
+      APK_BUILT=true
+    fi
+  fi
+
   SUMMARY_TEXT=$(echo "$SUMMARY_JSON" | jq -r '.summary')
 
   cat > /tmp/summary-comment.md << EOFCOMMENT
@@ -429,10 +444,16 @@ ${SUMMARY_TEXT}
 
 EOFCOMMENT
 
-  if [ -f "app-client/build/outputs/apk/debug/app-client-debug.apk" ]; then
+  if [ "$APK_BUILT" = true ]; then
     cat >> /tmp/summary-comment.md << EOFCOMMENT
 ### Build
 ✅ APK built — [download](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
+
+EOFCOMMENT
+  else
+    cat >> /tmp/summary-comment.md << EOFCOMMENT
+### Build
+❌ Build failed — check the [workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
 
 EOFCOMMENT
   fi
