@@ -215,8 +215,8 @@ BRANCH=$(branch_name)
 # Set up branch — reuse if it exists (resume), create fresh if new
 git fetch origin develop "$BRANCH" 2>/dev/null || true
 
-# Discard leftover changes — each runner has its own isolated workspace
-git checkout -- . 2>/dev/null || true
+# Discard ALL leftover changes — even CRLF conversions from .gitattributes
+git reset --hard HEAD 2>/dev/null || true
 git clean -ffdx -e '.gradle' 2>/dev/null || true
 
 # Set up branch
