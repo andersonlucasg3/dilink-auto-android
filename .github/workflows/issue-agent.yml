@@ -68,10 +68,9 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         if: hashFiles('app-client/build/outputs/apk/debug/app-client-debug.apk') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: issue-${{ github.event.issue.number }}-debug
           path: app-client/build/outputs/apk/debug/app-client-debug.apk
-          if-no-files-found: ignore
+          archive: false

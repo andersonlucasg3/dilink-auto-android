@@ -56,22 +56,14 @@ git config core.autocrlf false
 # Usage: react eyes | react rocket | react heart | react confused
 react() {
   local content="$1"
-  local list_target delete_url
+  local list_target
   if [ -n "${COMMENT_ID:-}" ]; then
     list_target="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
-    delete_url="repos/$REPO/issues/comments/$COMMENT_ID/reactions"
   else
     list_target="repos/$REPO/issues/$ISSUE_NUM/reactions"
-    delete_url="repos/$REPO/issues/$ISSUE_NUM/reactions"
   fi
 
   echo "[reaction] Setting :${content}: on ${list_target}"
-
-  # Remove ALL previous reactions by us before adding the new one
-  timeout 10 gh api "$list_target" --jq '.[] | select(.user.login == "andersonlucasg3") | .id' 2>/dev/null | while read -r prev_id; do
-    [ -n "$prev_id" ] && timeout 10 gh api "${delete_url}/${prev_id}" --method DELETE --silent 2>/dev/null || true
-  done
-
   timeout 10 gh api "$list_target" -f content="$content" --silent 2>/dev/null || true
 }
 
@@ -212,11 +204,6 @@ ENDPROMPT
 }
 
 # --- Main ---
-# Clean up any stale artifacts from previous runs on this workspace
-rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
-git clean -ffdx -e '.gradle' 2>/dev/null || true
-git reset --hard HEAD 2>/dev/null || true
-
 echo "=========================================="
 echo " DiLink-Auto Issue Agent"
 echo " Event:  $EVENT"
@@ -227,28 +214,35 @@ BRANCH=$(branch_name)
 
 # Set up branch — reuse if it exists (resume), create fresh if new
 git fetch origin develop "$BRANCH" 2>/dev/null || true
+
+# Discard ALL leftover changes — even CRLF conversions from .gitattributes
+git reset --hard HEAD 2>/dev/null || true
+git clean -ffdx -e '.gradle' 2>/dev/null || true
+
+# Set up branch
+git fetch origin develop "$BRANCH" 2>/dev/null || true
 if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
   echo "--- Reusing existing branch: $BRANCH ---"
-  git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
+  git checkout -f "$BRANCH" 2>/dev/null || git checkout -f -b "$BRANCH" "origin/$BRANCH"
   git pull origin "$BRANCH" 2>/dev/null || true
 else
   echo "--- Creating new branch: $BRANCH ---"
-  git checkout develop
+  git checkout -f develop
   git pull origin develop
   git branch -D "$BRANCH" 2>/dev/null || true
-  git checkout -b "$BRANCH"
+  git checkout -f -b "$BRANCH"
 fi
 
 # Record which .jsonl files exist before the run (to detect the new one)
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
 
 # --- Run Claude Code ---
+react eyes
 if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
-  react eyes
   set +e
   OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
@@ -286,13 +280,20 @@ if [ "$EVENT" = "issues" ]; then
   # Commit and push if changes were made
   CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
   COMMIT_SHA=""
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    git add -A
+  git add -A
+  if ! git diff --quiet --cached; then
     git diff --cached --stat
     git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent: \(.summary)"')" || true
-    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
-    COMMIT_SHA=$(git rev-parse --short HEAD)
   fi
+  # Push if local differs from remote (agent may have committed without pushing)
+  if git rev-parse "origin/$BRANCH" >/dev/null 2>&1; then
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$BRANCH")" ]; then
+      git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+    fi
+  else
+    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+  fi
+  COMMIT_SHA=$(git rev-parse --short HEAD)
 
   # Always build after the agent finishes (don't trust agent's build claim)
   echo "--- Building APK ---"
@@ -348,7 +349,6 @@ EOFCOMMENT
 Reply to this issue to continue. The agent will pick up from where it left off.
 EOFCOMMENT
 
-  react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 
   # Handle agent-requested actions
@@ -356,6 +356,7 @@ EOFCOMMENT
   if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+    rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → develop"
     PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
@@ -396,7 +397,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     register_session "$CONV_ID"
 
-    react eyes
     set +e
     OUTPUT=$(timeout 300 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
@@ -405,7 +405,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
       echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
       rm -f "$STATE_FILE"
       write_initial_prompt
-      react eyes
       set +e
       OUTPUT=$(timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
       CLAUDE_EXIT=$?
@@ -434,7 +433,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
     rm -rf "$STABLE_WORK"
     ln -sf "$(pwd -P)" "$STABLE_WORK"
 
-    react eyes
     set +e
     OUTPUT=$(cd "$STABLE_WORK" && timeout 3600 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
@@ -533,7 +531,6 @@ EOFCOMMENT
 Reply to continue. The agent resumes its conversation and picks up where it left off.
 EOFCOMMENT
 
-  react heart
   post_comment "$(cat /tmp/summary-comment.md)"
 
   # Handle agent-requested actions
@@ -541,6 +538,7 @@ EOFCOMMENT
   if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+    rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → develop"
     PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
