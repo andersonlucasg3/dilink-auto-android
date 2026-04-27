@@ -6,10 +6,6 @@ on:
   issue_comment:
     types: [created]
 
-concurrency:
-  group: issue-agent-${{ github.event.issue.number }}
-  cancel-in-progress: true
-
 permissions:
   contents: write
   issues: write
@@ -72,10 +68,11 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload APK Artifact
+      - name: Upload APK to Release
         if: hashFiles('app-client/build/outputs/apk/debug/app-client-debug.apk') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-${{ github.event.issue.number }}-debug
-          path: app-client/build/outputs/apk/debug/app-client-debug.apk
-          if-no-files-found: ignore
+        run: |
+          TAG="issue-${{ github.event.issue.number }}-debug"
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" --prerelease --title "Issue #${{ github.event.issue.number }} Build" --notes "APK from [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)" app-client/build/outputs/apk/debug/app-client-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
