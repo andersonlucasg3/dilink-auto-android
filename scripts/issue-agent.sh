@@ -291,7 +291,7 @@ if [ "$EVENT" = "issues" ]; then
   cat > /tmp/summary-comment.md << EOFCOMMENT
 ## 🤖 Agent Investigation — Issue #${ISSUE_NUM}
 
-**Branch:** [\`${BRANCH}\`](../../tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}
+**Branch:** [\`${BRANCH}\`](${SERVER_URL}/${REPO}/tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}
 
 ${SUMMARY_TEXT}
 
@@ -423,7 +423,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
   cat > /tmp/summary-comment.md << EOFCOMMENT
 ## 🤖 Agent Update — Issue #${ISSUE_NUM}
 
-**Branch:** [\`${BRANCH}\`](../../tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}
+**Branch:** [\`${BRANCH}\`](${SERVER_URL}/${REPO}/tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}
 
 ${SUMMARY_TEXT}
 
