@@ -137,6 +137,8 @@ You are an autonomous development agent for **DiLink-Auto** — an open-source A
 Read all docs in docs/*.md before starting.
 Build with: `./gradlew :app-client:assembleDebug`
 
+CRITICAL: Do NOT use gh CLI, git push, or any GitHub API. The script handles all GitHub interaction automatically.
+
 ENDPROMPT
 
   cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
@@ -162,6 +164,8 @@ write_resume_prompt() {
 ## Follow-Up Comment
 
 ${comment}
+
+CRITICAL: Do NOT use gh CLI, git push, or any GitHub API. The script handles all GitHub interaction.
 
 ## After Finishing
 1. Review previous changes on this branch with \`git diff HEAD~1\`
