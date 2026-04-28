@@ -784,7 +784,7 @@ class CarConnectionService : Service() {
             try {
                 conn.sendInput(InputMsg.TOUCH_MOVE_BATCH, payload)
                 touchSendCount++
-                if (touchSendCount <= 5) {
+                if (touchSendCount <= 5 || touchSendCount % 100 == 0L) {
                     carLogSend("Touch batch #$touchSendCount (${pointers.size} pointers)")
                 }
             }
@@ -851,6 +851,8 @@ class CarConnectionService : Service() {
         _appList.value = emptyList()
         _videoReady.value = false
         videoFrameCount = 0
+        touchSendCount = 0
+        touchDropCount = 0
         wifiReady = false
         vdServerStarted = false
         // USB: keep usbReady/usbConnecting if device is physically connected.
