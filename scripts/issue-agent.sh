@@ -255,45 +255,13 @@ write_resume_prompt() {
 ${comment}
 
 ## Critical Instructions
-- Focus ONLY on the user's new request above. Do NOT repeat, re-describe, or re-implement work from previous turns.
-- If asked for ideas/proposals/analysis, provide that — don't just describe what already exists.
-- If asked to change direction, change it — don't keep the old approach.
+- Focus ONLY on the user's new request above. Do NOT repeat or re-implement previous work.
+- If asked for ideas/analysis, provide that — don't just describe what exists.
+- If asked to change direction, change it.
 - Review \`git diff HEAD~1\` to see what's already on this branch.
 
-CRITICAL: This is a temporary GitHub Actions runner session. Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
-
-ENDPROMPT
-
-  # Append status update instructions (bash expands variables directly)
-  _sid="${STATUS_COMMENT_ID:-unknown}"
-  _token="${GITHUB_TOKEN:-}"
-  _repo="${REPO}"
-  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDSTATUS
-
-## Status Updates
-To keep the user informed, run this to update the status comment on the issue:
-
-\`\`\`bash
-curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
-  -H "Accept: application/vnd.github+json" \\
-  "https://api.github.com/repos/${_repo}/issues/comments/${_sid}" \\
-  -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
-\`\`\`
-
-Update status: 📖 reading docs → 🔍 investigating → ✏️ implementing → 🔨 building → ✅ done.
-ENDSTATUS
-
-  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
-## After Finishing
-1. If you make code changes, build: \`./gradlew :app-client:assembleDebug\`
-2. If the build fails, fix and rebuild
-3. Output this JSON block as the VERY LAST thing. Summary must use markdown.
-
-\`\`\`json
-{"summary": "...", "changes_made": true, "build_success": true, "action": "none"}
-\`\`\`
-
-Set "action" to "close" to close the issue, "pr" to create a pull request to develop, or "none".
+CRITICAL: Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD.
+Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
 ENDPROMPT
 }
 
@@ -540,6 +508,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     fi
     echo "Found prior state — resuming conversation: $CONV_ID"
 
+    write_initial_prompt
     write_resume_prompt "$COMMENT_BODY"
 
     # Git worktree ensures all runners share the same working directory path,
