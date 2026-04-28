@@ -329,7 +329,9 @@ class ConnectionService : Service() {
         FileLog.i(TAG, "Car display: ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi fps=${request.targetFps}")
         targetFps = request.targetFps
 
-        val phoneDpi = resources.displayMetrics.densityDpi
+        // Use fixed 480dpi — must match the hardcoded value in CarConnectionService.deployVdServer().
+        // Using the phone's actual display density (e.g. 440dpi) would misalign touch coordinates.
+        val phoneDpi = 480
         val dpiScale = phoneDpi.toFloat() / 160f
         val targetSwDp = 600
         val minHeightPx = (targetSwDp * dpiScale).toInt()
