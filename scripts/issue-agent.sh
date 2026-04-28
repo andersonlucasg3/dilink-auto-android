@@ -167,7 +167,7 @@ RELEASE_TARGET="develop"
 
 branch_name() {
   # Check if this is a release issue
-  RELEASE_VERSION=$(echo "$ISSUE_BODY" | grep -oP '### Version\s*\n*\s*\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  RELEASE_VERSION=$(echo "$ISSUE_BODY" | awk '/### Version/{v=1; next} v && /^[0-9]+\.[0-9]+\.[0-9]+/{print $1; exit} /^[[:space:]]*$/{next} {v=0}' | head -1 || true)
   if [ -n "$RELEASE_VERSION" ]; then
     RELEASE_TARGET="main"
     echo "release/v${RELEASE_VERSION}"
