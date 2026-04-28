@@ -28,5 +28,3 @@ app-server/src/main/assets/vd-server.jar
 # Release signing (passwords in properties)
 signing.properties
 keystore.properties
-*.keystore
-*.jks
