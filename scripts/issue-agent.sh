@@ -195,7 +195,27 @@ This is a temporary GitHub Actions runner session. You must `git add -A && git c
 
 CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, push, and issue close.
 
+## Status Updates
+To keep the user informed of your progress, you can update the status comment on the issue
+by running this curl command (replace MESSAGE with your update — keep it short, one line):
+
+\`\`\`bash
+STATUS_COMMENT_ID="\${STATUS_COMMENT_ID}"
+curl -s -X PATCH -H "Authorization: Bearer \${GITHUB_TOKEN}" \\
+  -H "Accept: application/vnd.github+json" \\
+  "https://api.github.com/repos/\${GITHUB_REPOSITORY}/issues/comments/\${STATUS_COMMENT_ID}" \\
+  -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
+\`\`\`
+
+Update the status when you: start reading docs, start investigating code, start implementing,
+finish implementing, start building, or hit a blocker. This gives the user visibility into your progress.
+
 ENDPROMPT
+
+  # Pass the actual status comment ID (set by the status() call above)
+  sed -i "s|\${STATUS_COMMENT_ID}|${STATUS_COMMENT_ID}|g" /tmp/agent-prompt-${ISSUE_NUM}.txt
+  sed -i "s|\${GITHUB_TOKEN}|${GITHUB_TOKEN}|g" /tmp/agent-prompt-${ISSUE_NUM}.txt
+  sed -i "s|\${GITHUB_REPOSITORY}|${REPO}|g" /tmp/agent-prompt-${ISSUE_NUM}.txt
 
   cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
 ## GitHub Issue #${ISSUE_NUM}: ${ISSUE_TITLE}
@@ -234,6 +254,17 @@ ${comment}
 
 CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, push, and issue close.
 
+## Status Updates
+You can update the status comment with this command:
+
+\`\`\`bash
+STATUS_COMMENT_ID="\${STATUS_COMMENT_ID}"
+curl -s -X PATCH -H "Authorization: Bearer \${GITHUB_TOKEN}" \\
+  -H "Accept: application/vnd.github+json" \\
+  "https://api.github.com/repos/\${GITHUB_REPOSITORY}/issues/comments/\${STATUS_COMMENT_ID}" \\
+  -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
+\`\`\`
+
 ## After Finishing
 1. If you make code changes, build: \`./gradlew :app-client:assembleDebug\`
 2. If the build fails, fix and rebuild
@@ -245,6 +276,11 @@ CRITICAL: This is a temporary GitHub Actions runner session — git add -A && gi
 
 Set "action" to "close" to close the issue, "pr" to create a pull request to develop, or "none".
 ENDPROMPT
+
+  # Pass the actual status comment ID
+  sed -i "s|\${STATUS_COMMENT_ID}|${STATUS_COMMENT_ID}|g" /tmp/agent-prompt-${ISSUE_NUM}.txt
+  sed -i "s|\${GITHUB_TOKEN}|${GITHUB_TOKEN}|g" /tmp/agent-prompt-${ISSUE_NUM}.txt
+  sed -i "s|\${GITHUB_REPOSITORY}|${REPO}|g" /tmp/agent-prompt-${ISSUE_NUM}.txt
 }
 
 # --- Main ---
@@ -303,13 +339,16 @@ echo "[worktree] Working directory: $(pwd)"
 # Record which conversations exist before the run (to detect the new one)
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" \( -name '*.jsonl' -type f -o -type d \) 2>/dev/null | grep -v '/subagents$\|/\.' | sort || true)
 
+# Read status comment ID (set by status() calls above) for agent prompt
+STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+
 # --- Run Claude Code ---
 if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
+  status "Analyzing request..."
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
-  status "🔍 Investigating codebase..."
   set +e
   OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
@@ -455,7 +494,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     # so Claude Code's project hash is consistent — no need to copy or relocate.
 
     echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
-    status "🔍 Continuing investigation..."
+    status "🔄 Continuing investigation..."
     set +e
     OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
@@ -463,8 +502,9 @@ elif [ "$EVENT" = "issue_comment" ]; then
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
       echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
       rm -f "$STATE_FILE"
+      status "🔍 Analyzing request..."
+      STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
       write_initial_prompt
-      status "🔍 Investigating codebase..."
       set +e
       OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
       CLAUDE_EXIT=$?
@@ -476,10 +516,11 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
   if [ ! -f "$STATE_FILE" ]; then
     echo "No prior state — treating as new for issue #$ISSUE_NUM"
+    status "🔍 Analyzing request..."
+    STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
     write_initial_prompt
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
-    status "🔍 Investigating codebase..."
 
     STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
     rm -rf "$STABLE_WORK"
