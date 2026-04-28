@@ -504,15 +504,16 @@ elif [ "$EVENT" = "issue_comment" ]; then
   echo "--- Issue comment: resuming or starting conversation ---"
 
   if [ -f "$STATE_FILE" ]; then
-    SESSION_ID=$(jq -r '.session_id // ""' "$STATE_FILE")
+    SESSION_ID=$(jq -r '.session_id // .conversation_id // ""' "$STATE_FILE")
     if [ "$SESSION_ID" = "null" ] || [ "$SESSION_ID" = "." ] || [ "${#SESSION_ID}" -lt 20 ]; then
       echo "Invalid session_id in state ($SESSION_ID) — clearing state"
       rm -f "$STATE_FILE"
       SESSION_ID=""
     fi
-    echo "Found prior state — resuming: $SESSION_ID"
+    if [ -n "$SESSION_ID" ]; then
+      echo "Found prior state — resuming: $SESSION_ID"
 
-    write_initial_prompt
+      write_initial_prompt
     write_resume_prompt "$COMMENT_BODY"
 
     echo "--- Resuming Claude Code: $SESSION_ID (10m timeout) ---"
@@ -542,6 +543,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     else
       echo "--- Claude Code resumed ---"
     fi
+    fi  # end [ -n "$SESSION_ID" ]
   fi
 
   if [ ! -f "$STATE_FILE" ]; then
