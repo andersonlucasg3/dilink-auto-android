@@ -53,6 +53,11 @@
     <string name="updates_ready">Téléphone : v%1$s prête</string>
     <string name="updates_install_btn">Installer la mise à jour</string>
     <string name="updates_retry">Réessayer</string>
+    <string name="updates_available_title">Mise à jour disponible</string>
+    <string name="updates_update_btn">Mettre à jour</string>
+    <string name="updates_dismiss_btn">Ignorer</string>
+    <string name="updates_downloading_title">Téléchargement de la mise à jour v%1$s</string>
+    <string name="updates_ready_title">Prêt à installer</string>
     <string name="updates_car_title">Appli Voiture</string>
     <string name="updates_car_desc">Installer ou mettre à jour l\'appli voiture via WiFi ADB</string>
     <string name="updates_car_install">Installer</string>

@@ -53,6 +53,11 @@
     <string name="updates_ready">Telefon: v%1$s tayyor</string>
     <string name="updates_install_btn">Yangilanishni o\'rnatish</string>
     <string name="updates_retry">Qayta urinish</string>
+    <string name="updates_available_title">Yangilanish mavjud</string>
+    <string name="updates_update_btn">Yangilash</string>
+    <string name="updates_dismiss_btn">O‘tkazib yuborish</string>
+    <string name="updates_downloading_title">Yangilanish v%1$s yuklanmoqda</string>
+    <string name="updates_ready_title">O‘rnatishga tayyor</string>
     <string name="updates_car_title">Avtomobil ilovasi</string>
     <string name="updates_car_desc">Avtomobil ilovasini WiFi ADB orqali o\'rnating yoki yangilang</string>
     <string name="updates_car_install">O\'rnatish</string>

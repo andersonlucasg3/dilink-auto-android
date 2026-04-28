@@ -53,6 +53,11 @@
     <string name="updates_ready">Телефон: v%1$s дайын</string>
     <string name="updates_install_btn">Жаңартуды орнату</string>
     <string name="updates_retry">Қайталау</string>
+    <string name="updates_available_title">Жаңарту қолжетімді</string>
+    <string name="updates_update_btn">Жаңарту</string>
+    <string name="updates_dismiss_btn">Өткізу</string>
+    <string name="updates_downloading_title">Жаңарту v%1$s жүктелуде</string>
+    <string name="updates_ready_title">Орнатуға дайын</string>
     <string name="updates_car_title">Автокөлік қолданбасы</string>
     <string name="updates_car_desc">Автокөлік қолданбасын WiFi ADB арқылы орнату немесе жаңарту</string>
     <string name="updates_car_install">Орнату</string>
