@@ -340,9 +340,10 @@ fi
 FIXED_WORKSPACE="$AGENT_WORKSPACE_DIR/issue-${ISSUE_NUM}"
 if [ -d "$FIXED_WORKSPACE" ]; then
   echo "[workspace] Updating existing clone at $FIXED_WORKSPACE"
-  git -C "$FIXED_WORKSPACE" fetch origin 2>/dev/null || true
-  git -C "$FIXED_WORKSPACE" checkout -f "$BRANCH" 2>/dev/null || true
-  git -C "$FIXED_WORKSPACE" reset --hard "origin/$BRANCH" 2>/dev/null || true
+  git -C "$FIXED_WORKSPACE" fetch origin develop 2>/dev/null || true
+  git -C "$FIXED_WORKSPACE" checkout -f develop 2>/dev/null || true
+  git -C "$FIXED_WORKSPACE" reset --hard "origin/develop" 2>/dev/null || true
+  git -C "$FIXED_WORKSPACE" checkout -f -b "$BRANCH" 2>/dev/null || git -C "$FIXED_WORKSPACE" checkout -f "$BRANCH" 2>/dev/null || true
 else
   echo "[workspace] Creating new clone at $FIXED_WORKSPACE"
   mkdir -p "$AGENT_WORKSPACE_DIR"
