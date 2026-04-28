@@ -342,7 +342,7 @@ log_step "EVENT=$EVENT ISSUE=$ISSUE_NUM STATE_FILE=$STATE_FILE"
 # --- Run Claude Code ---
 if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
-  status "Analyzing request..."
+  status "🔍 Analyzing request..."
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
