@@ -202,9 +202,9 @@ CRITICAL: This is a temporary GitHub Actions runner session — git add -A && gi
 ENDPROMPT
 
   # Append status update instructions (bash expands variables directly, no sed)
-  local _sid="${STATUS_COMMENT_ID:-unknown}"
-  local _token="${GITHUB_TOKEN:-}"
-  local _repo="${REPO}"
+  _sid="${STATUS_COMMENT_ID:-unknown}"
+  _token="${GITHUB_TOKEN:-}"
+  _repo="${REPO}"
   cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDSTATUS
 
 ## Status Updates
@@ -260,9 +260,9 @@ CRITICAL: This is a temporary GitHub Actions runner session — git add -A && gi
 ENDPROMPT
 
   # Append status update instructions (bash expands variables directly)
-  local _sid="${STATUS_COMMENT_ID:-unknown}"
-  local _token="${GITHUB_TOKEN:-}"
-  local _repo="${REPO}"
+  _sid="${STATUS_COMMENT_ID:-unknown}"
+  _token="${GITHUB_TOKEN:-}"
+  _repo="${REPO}"
   cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDSTATUS
 
 ## Status Updates
