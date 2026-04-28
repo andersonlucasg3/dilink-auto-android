@@ -522,6 +522,10 @@ EOFCOMMENT
 	    log_step "Resuming session: $SESSION_ID"
 	    write_initial_prompt
 	    write_resume_prompt "$COMMENT_BODY"
+	    # Clear old status_comment_id so this run gets its own status comment
+	    if [ -f "$STATE_FILE" ]; then
+	      jq 'del(.status_comment_id)' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && mv "${STATE_FILE}.tmp" "$STATE_FILE" || true
+	    fi
 	    status "🔄 Continuing investigation..."
 	    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume \"$SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
 	    log_step "Claude: $_resume_cmd"
