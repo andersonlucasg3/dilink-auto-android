@@ -50,6 +50,11 @@ git config user.name "DiLink-Auto Agent"
 # Prevent line-ending conversion (repo is Windows/CRLF, runner is Linux/LF)
 git config core.autocrlf false
 
+# Configure git push authentication via GITHUB_TOKEN
+if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+fi
+
 # --- Helpers ---
 
 # Post or update a single status comment — first call creates, later calls edit
