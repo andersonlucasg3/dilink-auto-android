@@ -65,26 +65,30 @@ class InputInjectionService : AccessibilityService() {
 
         when (event.action) {
             InputMsg.TOUCH_DOWN -> {
-                activePaths[event.pointerId] = mutableListOf(
-                    PointRecord(pixelX, pixelY, 0)
-                )
+                activePtrPrev[event.pointerId] = Pair(pixelX, pixelY)
             }
             InputMsg.TOUCH_MOVE -> {
-                val points = activePaths[event.pointerId] ?: return
-                val elapsed = (points.size * 16L).coerceAtLeast(0) // ~16ms per sample at 60fps
-                points.add(PointRecord(pixelX, pixelY, elapsed))
+                val prev = activePtrPrev[event.pointerId] ?: return
+                // Dispatch incremental segment immediately so the VD gets real-time feedback.
+                // A 30ms stroke is short enough not to queue up at 60Hz input rate.
+                dispatchSegment(prev.first, prev.second, pixelX, pixelY)
+                activePtrPrev[event.pointerId] = Pair(pixelX, pixelY)
             }
             InputMsg.TOUCH_UP -> {
-                val points = activePaths.remove(event.pointerId) ?: run {
-                    dispatchTap(pixelX, pixelY)
-                    return
-                }
-                points.add(
-                    PointRecord(pixelX, pixelY, (points.size * 16L).coerceAtLeast(1))
-                )
-                dispatchSwipe(points)
+                activePtrPrev.remove(event.pointerId)
+                dispatchTap(pixelX, pixelY)
             }
         }
+    }
+
+    private fun dispatchSegment(fromX: Float, fromY: Float, toX: Float, toY: Float) {
+        val path = Path().apply {
+            moveTo(fromX, fromY)
+            lineTo(toX, toY)
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 30)
+        val gesture = buildGesture(stroke)
+        dispatchGesture(gesture, null, null)
     }
 
     private fun dispatchTap(x: Float, y: Float) {
@@ -95,25 +99,6 @@ class InputInjectionService : AccessibilityService() {
             lineTo(x + 1f, y)
         }
         val stroke = GestureDescription.StrokeDescription(path, 0, 80)
-        val gesture = buildGesture(stroke)
-        dispatchGesture(gesture, null, null)
-    }
-
-    private fun dispatchSwipe(points: List<PointRecord>) {
-        if (points.size < 2) {
-            dispatchTap(points.first().x, points.first().y)
-            return
-        }
-
-        val path = Path().apply {
-            moveTo(points.first().x, points.first().y)
-            for (i in 1 until points.size) {
-                lineTo(points[i].x, points[i].y)
-            }
-        }
-
-        val totalDuration = points.last().durationMs.coerceIn(1, 5000)
-        val stroke = GestureDescription.StrokeDescription(path, 0, totalDuration)
         val gesture = buildGesture(stroke)
         dispatchGesture(gesture, null, null)
     }
@@ -131,9 +116,7 @@ class InputInjectionService : AccessibilityService() {
         return builder.build()
     }
 
-    private data class PointRecord(val x: Float, val y: Float, val durationMs: Long)
-
-    private val activePaths = mutableMapOf<Int, MutableList<PointRecord>>()
+    private val activePtrPrev = mutableMapOf<Int, Pair<Float, Float>>()
 
     companion object {
         private const val TAG = "InputInjectionService"
