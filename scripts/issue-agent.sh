@@ -352,9 +352,14 @@ fi
 cd "$FIXED_WORKSPACE" || exit 1
 echo "[workspace] Working directory: $(pwd -P)"
 
-# Fix git remote — the clone may have local file:// origin from the runner workspace
-if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
-  git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+# Fix git remote — the clone may have a stale file:// origin or expired token
+GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+log_step "Setting git remote: GH_TOKEN=${#GH_TOKEN}chars"
+if [ -n "$GH_TOKEN" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" || log_err "remote set-url failed"
+  log_ok "git remote updated"
+else
+  log_err "GH_TOKEN is empty — push will fail"
 fi
 
 # Record which conversations exist before the run (to detect the new one)
@@ -440,7 +445,6 @@ if [ "$EVENT" = "issues" ]; then
   # Convert CRLF to LF (Windows repo, Linux runner)
   sed -i 's/\r$//' gradlew 2>/dev/null || true
   # Kill any stale Gradle daemon from previous runs
-  ./gradlew --stop 2>/dev/null || true
   # Ensure JDK 17 from setup-java, not Windows JDK 25 from PATH
   export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
   export PATH="${JAVA_HOME}/bin:$PATH"
@@ -634,7 +638,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
   # Convert CRLF to LF (Windows repo, Linux runner)
   sed -i 's/\r$//' gradlew 2>/dev/null || true
   # Kill any stale Gradle daemon from previous runs
-  ./gradlew --stop 2>/dev/null || true
   # Ensure JDK 17 from setup-java, not Windows JDK 25 from PATH
   export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
   export PATH="${JAVA_HOME}/bin:$PATH"
