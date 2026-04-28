@@ -7,6 +7,11 @@ set -euo pipefail
 # Triggered by .github/workflows/issue-agent.yml
 # ============================================================
 
+log_step() { echo "▶ $*"; }
+log_ok()   { echo "  ✓ $*"; }
+log_err()  { echo "  ✗ $*"; }
+trap 'log_err "CRASH at line $LINENO (exit=$?)"' ERR
+
 # --- Paths ---
 AGENT_STATE_DIR="$HOME/.claude-agent/issues"
 SHARED_GRADLE_HOME="$HOME/.gradle-agent"
@@ -60,16 +65,14 @@ fi
 
 # Post or update a single status comment — first call creates, later calls edit
 status() {
-  echo "[status] DEBUG: status() called"
+  log_step "status() posting comment"
   local body="$1"
-  # Write body to temp file to avoid shell escaping issues with multiline markdown
   local body_file="/tmp/agent-comment-body-${ISSUE_NUM}.json"
-  echo "[status] DEBUG: writing body to $body_file"
   echo "$body" | jq -R -s '{body: .}' > "$body_file" 2>/dev/null || {
-    echo "[status] WARNING: failed to build comment JSON (jq pipe)"
+    log_err "status: jq failed to build JSON"
     return
   }
-  echo "[status] DEBUG: body file written"
+  log_ok "body JSON written"
 
   local status_id=""
   [ -f "$STATE_FILE" ] && status_id=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || true)
@@ -356,8 +359,7 @@ BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null 
 # Read status comment ID (set by status() calls above) for agent prompt
 STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
 
-echo "[DEBUG] EVENT=$EVENT ISSUE_NUM=$ISSUE_NUM"
-echo "[DEBUG] STATE_FILE=$STATE_FILE exists=$(test -f "$STATE_FILE" && echo yes || echo no)"
+log_step "EVENT=$EVENT ISSUE=$ISSUE_NUM STATE_FILE=$STATE_FILE"
 
 # --- Run Claude Code ---
 if [ "$EVENT" = "issues" ]; then
@@ -539,14 +541,13 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
   if [ ! -f "$STATE_FILE" ]; then
     echo "No prior state — treating as new for issue #$ISSUE_NUM"
-    echo "[DEBUG] before status call"
+    log_step "fresh start: status → prompt → Claude"
     status "🔍 Analyzing request..."
-    echo "[DEBUG] after status call"
+    log_ok "status posted"
     STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
-    echo "[DEBUG] STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
-    echo "[DEBUG] before write_initial_prompt"
+    log_step "STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
     write_initial_prompt
-    echo "[DEBUG] after write_initial_prompt"
+    log_ok "prompt written"
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
 
