@@ -500,103 +500,78 @@ EOFCOMMENT
     fi
   fi
 
-elif [ "$EVENT" = "issue_comment" ]; then
-  echo "--- Issue comment: resuming or starting conversation ---"
+	elif [ "$EVENT" = "issue_comment" ]; then
+	  echo "--- Issue comment: resuming or starting conversation ---"
 
-  if [ -f "$STATE_FILE" ]; then
-    SESSION_ID=$(jq -r '.session_id // .conversation_id // ""' "$STATE_FILE")
-    if [ "$SESSION_ID" = "null" ] || [ "$SESSION_ID" = "." ] || [ "${#SESSION_ID}" -lt 20 ]; then
-      echo "Invalid session_id in state ($SESSION_ID) — clearing state"
-      rm -f "$STATE_FILE"
-      SESSION_ID=""
-    fi
-    if [ -n "$SESSION_ID" ]; then
-      echo "Found prior state — resuming: $SESSION_ID"
+	  # Determine if we can resume a prior session
+	  SESSION_ID=""
+	  if [ -f "$STATE_FILE" ]; then
+	    SESSION_ID=$(jq -r '.session_id // .conversation_id // ""' "$STATE_FILE")
+	    if [ "$SESSION_ID" = "null" ] || [ "$SESSION_ID" = "." ] || [ "${#SESSION_ID}" -lt 20 ]; then
+	      echo "Invalid session_id in state ($SESSION_ID) — clearing"
+	      rm -f "$STATE_FILE"
+	      SESSION_ID=""
+	    fi
+	  fi
 
-      write_initial_prompt
-    write_resume_prompt "$COMMENT_BODY"
+	  # Try resume if we have a valid session
+	  if [ -n "$SESSION_ID" ]; then
+	    log_step "Resuming session: $SESSION_ID"
+	    write_initial_prompt
+	    write_resume_prompt "$COMMENT_BODY"
+	    status "🔄 Continuing investigation..."
+	    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume \"$SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+	    log_step "Claude: $_resume_cmd"
+	    set +e
+	    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+	    CLAUDE_EXIT=$?
+	    set -e
+	    echo "--- Claude output (resume) ---"
+	    echo "$OUTPUT"
+	    if [ "$CLAUDE_EXIT" -ne 0 ]; then
+	      echo "--- Resume failed (exit $CLAUDE_EXIT), falling through to fresh start ---"
+	      rm -f "$STATE_FILE"
+	      SESSION_ID=""
+	    else
+	      echo "--- Claude Code resumed successfully ---"
+	    fi
+	  fi
 
-    echo "--- Resuming Claude Code: $SESSION_ID (10m timeout) ---"
-    status "🔄 Continuing investigation..."
-    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume \"$SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
-    log_step "Claude: $_resume_cmd"
-    set +e
-    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
-    CLAUDE_EXIT=$?
-    set -e
-    echo "--- Claude Code output (resume) ---"
-    echo "$OUTPUT"
-    echo "--- Claude Code finished (resume exit=$CLAUDE_EXIT) ---"
-    if [ "$CLAUDE_EXIT" -ne 0 ]; then
-      echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
-      rm -f "$STATE_FILE"
-      status "🔍 Analyzing request..."
-      STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
-      # Use resume prompt (includes user's comment), not initial prompt (only issue body)
-      write_resume_prompt "$COMMENT_BODY"
-      _cmd="$CLAUDE_BIN --dangerously-skip-permissions -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
-      log_step "Claude: $_cmd"
-      set +e
-      OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
-      CLAUDE_EXIT=$?
-      set -e
-    else
-      echo "--- Claude Code resumed ---"
-    fi
-    fi  # end [ -n "$SESSION_ID" ]
-  fi
+	  # Fresh start: no valid state, or resume failed
+	  if [ -z "$SESSION_ID" ]; then
+	    log_step "Fresh start for issue comment"
+	    jq -n --arg issue "$ISSUE_NUM" --arg title "$ISSUE_TITLE" '{issue_number: $issue, title: $title}' > "$STATE_FILE"
+	    status "🔍 Analyzing request..."
+	    STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+	    log_step "STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
+	    write_initial_prompt
+	    write_resume_prompt "$COMMENT_BODY"
 
-  if [ ! -f "$STATE_FILE" ]; then
-    echo "No prior state — treating as new for issue #$ISSUE_NUM"
-    log_step "fresh start: status → prompt → Claude"
-    # Initialize STATE_FILE so status() can update it with the comment ID
-    jq -n --arg issue "$ISSUE_NUM" --arg title "$ISSUE_TITLE" '{issue_number: $issue, title: $title}' > "$STATE_FILE"
-    status "🔍 Analyzing request..."
-    log_ok "status posted"
-    STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
-    log_step "STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
-    write_initial_prompt
-    write_resume_prompt "$COMMENT_BODY"
-    log_ok "prompt written"
+	    AGENT_SESSION_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "issue-${ISSUE_NUM}-$(date +%s)")
+	    _cmd="$CLAUDE_BIN --dangerously-skip-permissions --session-id \"$AGENT_SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+	    log_step "Claude: $_cmd"
+	    set +e
+	    OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions --session-id "$AGENT_SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+	    CLAUDE_EXIT=$?
+	    set -e
+	    echo "--- Claude output (fresh) ---"
+	    echo "$OUTPUT"
+	    if [ "$CLAUDE_EXIT" -ne 0 ]; then
+	      handle_error "Claude Code exited with code $CLAUDE_EXIT"
+	    fi
+	    echo "--- Claude Code finished ---"
 
-    echo "--- Starting Claude Code (new conversation, no prior state) ---"
-
-    _cmd="$CLAUDE_BIN --dangerously-skip-permissions -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
-    AGENT_SESSION_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "issue-${ISSUE_NUM}-$(date +%s)")
-    log_step "Claude: $_cmd (session=$AGENT_SESSION_ID)"
-    set +e
-    OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions --session-id "$AGENT_SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
-    CLAUDE_EXIT=$?
-    set -e
-    echo "[DEBUG] Claude exited with code $CLAUDE_EXIT"
-    echo "--- Claude output ---"
-    echo "$OUTPUT"
-    echo "--- end Claude output ---"
-    if [ "$CLAUDE_EXIT" -ne 0 ]; then
-      handle_error "Claude Code exited with code $CLAUDE_EXIT"
-    fi
-    echo "--- Claude Code finished ---"
-
-    CONV_ID=$(capture_conversation_id "$OUTPUT")
-    if [ -z "$CONV_ID" ]; then
-      AFTER_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
-      NEW_JSONL=$(comm -13 <(echo "$BEFORE_JSONLS") <(echo "$AFTER_JSONLS") | head -1 || true)
-      if [ -n "$NEW_JSONL" ]; then
-        CONV_ID=$(basename "$NEW_JSONL" .jsonl)
-      fi
-    fi
-
-    _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
-    jq -n \
-      --arg sid "${AGENT_SESSION_ID:-unknown}" \
-      --arg branch "$BRANCH" \
-      --arg issue "$ISSUE_NUM" \
-      --arg title "$ISSUE_TITLE" \
-      --arg csid "$_existing_sid" \
-      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid}' \
-      > "$STATE_FILE"
-      register_session "${AGENT_SESSION_ID:-unknown}"
-  fi
+	    _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+	    jq -n \
+	      --arg sid "${AGENT_SESSION_ID:-unknown}" \
+	      --arg branch "$BRANCH" \
+	      --arg issue "$ISSUE_NUM" \
+	      --arg title "$ISSUE_TITLE" \
+	      --arg csid "$_existing_sid" \
+	      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid}' \
+	      > "$STATE_FILE"
+	    register_session "${AGENT_SESSION_ID:-unknown}"
+	  fi
 
   SUMMARY_JSON=$(extract_summary_json "$OUTPUT")
   echo "Summary: $SUMMARY_JSON"
