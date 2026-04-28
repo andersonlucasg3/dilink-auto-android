@@ -166,13 +166,27 @@ RELEASE_VERSION=""
 RELEASE_TARGET="develop"
 
 branch_name() {
-  # Check if this is a release issue
-  RELEASE_VERSION=$(echo "$ISSUE_BODY" | grep -oP '### Version\s*\n*\s*\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
-  if [ -n "$RELEASE_VERSION" ]; then
-    RELEASE_TARGET="main"
-    echo "release/v${RELEASE_VERSION}"
+  # Release issues have a 'release' label plus ### Version field
+  if echo "${ISSUE_LABELS:-}" | jq -e 'index("release")' >/dev/null 2>&1; then
+    RELEASE_VERSION=$(echo "$ISSUE_BODY" | awk '/### Version/{v=1; next} v && /^[0-9]+\.[0-9]+\.[0-9]+/{print $1; exit} /^[[:space:]]*$/{next} {v=0}' | head -1 || true)
+    if [ -n "$RELEASE_VERSION" ]; then
+      RELEASE_TARGET="main"
+      echo "release/v${RELEASE_VERSION}"
+      return
+    fi
+  fi
+
+  # Map label to branch prefix
+  RELEASE_TARGET="develop"
+  if echo "${ISSUE_LABELS:-}" | jq -e 'index("bug")' >/dev/null 2>&1; then
+    echo "fix/${ISSUE_NUM}-agent"
+  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("feature")' >/dev/null 2>&1; then
+    echo "feature/${ISSUE_NUM}-agent"
+  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("investigation")' >/dev/null 2>&1; then
+    echo "investigate/${ISSUE_NUM}-agent"
+  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("documentation")' >/dev/null 2>&1; then
+    echo "docs/${ISSUE_NUM}-agent"
   else
-    RELEASE_TARGET="develop"
     echo "issue/${ISSUE_NUM}-agent"
   fi
 }
@@ -522,6 +536,10 @@ EOFCOMMENT
 	    log_step "Resuming session: $SESSION_ID"
 	    write_initial_prompt
 	    write_resume_prompt "$COMMENT_BODY"
+	    # Clear old status_comment_id so this run gets its own status comment
+	    if [ -f "$STATE_FILE" ]; then
+	      jq 'del(.status_comment_id)' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && mv "${STATE_FILE}.tmp" "$STATE_FILE" || true
+	    fi
 	    status "🔄 Continuing investigation..."
 	    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume \"$SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
 	    log_step "Claude: $_resume_cmd"

@@ -13,8 +13,8 @@ body:
   - type: textarea
     id: description
     attributes:
-      label: Release Notes
-      placeholder: What's included in this release?
+      label: Description
+      placeholder: What needs to be done for this release? Release notes will be auto-generated.
     validations:
       required: true
   - type: textarea
