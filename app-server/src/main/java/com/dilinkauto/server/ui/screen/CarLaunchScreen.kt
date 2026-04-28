@@ -28,64 +28,109 @@ fun CarLaunchScreen(service: CarConnectionService) {
     val state by service.state.collectAsState()
     val phoneName by service.phoneName.collectAsState()
     val statusMessage by service.statusMessage.collectAsState()
+    val isDebug = (service.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D1117)),
-        contentAlignment = Alignment.Center
+            .background(Color(0xFF0D1117))
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .widthIn(max = 560.dp)
-                .padding(32.dp)
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize().padding(40.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Spacer(Modifier.weight(0.3f))
+            val isWide = maxWidth > 700.dp
 
-            // App icon / branding
-            Icon(
-                Icons.Default.PhoneAndroid,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(72.dp)
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "DiLink Auto",
-                style = MaterialTheme.typography.headlineLarge,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Use your phone apps on your car's screen",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.Gray,
-                textAlign = TextAlign.Center
-            )
+            if (isWide) {
+                // Two-column layout for wide screens (car display)
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(48.dp)
+                ) {
+                    // Left: branding + instructions
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        BrandingSection()
 
-            Spacer(Modifier.height(40.dp))
+                        if (state != CarConnectionService.State.STREAMING &&
+                            state != CarConnectionService.State.CONNECTED) {
+                            Spacer(Modifier.height(48.dp))
+                            HowToConnect()
+                        }
+                    }
 
-            // Connection status
-            ConnectionStatusCard(state, phoneName, statusMessage)
+                    // Right: status + action
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        ConnectionStatusCard(state, phoneName, statusMessage)
 
-            Spacer(Modifier.height(24.dp))
+                        if (state != CarConnectionService.State.STREAMING &&
+                            state != CarConnectionService.State.CONNECTED) {
+                            Spacer(Modifier.height(24.dp))
+                            ManualConnectBox(onConnect = { ip -> service.connectManual(ip) })
 
-            // Instructions (only shown when not yet connected)
-            if (state != CarConnectionService.State.STREAMING &&
-                state != CarConnectionService.State.CONNECTED) {
-                HowToConnect()
+                            if (isDebug) {
+                                Spacer(Modifier.height(16.dp))
+                                DevModeToggle(service = service)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Single-column layout for narrow screens
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.widthIn(max = 560.dp)
+                ) {
+                    BrandingSection()
+                    Spacer(Modifier.height(32.dp))
+                    ConnectionStatusCard(state, phoneName, statusMessage)
+
+                    if (state != CarConnectionService.State.STREAMING &&
+                        state != CarConnectionService.State.CONNECTED) {
+                        Spacer(Modifier.height(20.dp))
+                        HowToConnect()
+
+                        if (isDebug) {
+                            Spacer(Modifier.height(12.dp))
+                            DevModeToggle(service = service)
+                        }
+
+                        Spacer(Modifier.height(20.dp))
+                        ManualConnectBox(onConnect = { ip -> service.connectManual(ip) })
+                    }
+                }
             }
-
-            Spacer(Modifier.height(24.dp))
-
-            // Manual IP entry
-            ManualConnectBox(onConnect = { ip -> service.connectManual(ip) })
-
-            Spacer(Modifier.weight(0.7f))
         }
     }
+}
+
+@Composable
+private fun BrandingSection() {
+    Icon(
+        Icons.Default.PhoneAndroid,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.size(64.dp)
+    )
+    Spacer(Modifier.height(16.dp))
+    Text(
+        "DiLink Auto",
+        style = MaterialTheme.typography.headlineLarge,
+        color = Color.White,
+        fontWeight = FontWeight.Bold
+    )
+    Spacer(Modifier.height(8.dp))
+    Text(
+        "Use your phone apps on your car's screen",
+        style = MaterialTheme.typography.bodyMedium,
+        color = Color.Gray
+    )
 }
 
 @Composable
@@ -203,5 +248,47 @@ private fun ConnectStep(number: String, text: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = Color(0xFFBBBBBB)
         )
+    }
+}
+
+@Composable
+private fun DevModeToggle(service: CarConnectionService) {
+    var checked by remember { mutableStateOf(service.devMode) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Development Mode",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    if (checked) "TCP ADB instead of USB (emulator testing)"
+                    else "Use USB ADB (car connection)",
+                    color = if (checked) Color(0xFFFFA726) else Color.Gray,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = { newValue ->
+                    checked = newValue
+                    service.devMode = newValue
+                },
+                colors = SwitchDefaults.colors(
+                    checkedTrackColor = Color(0xFFFFA726)
+                )
+            )
+        }
     }
 }
