@@ -533,20 +533,32 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
   if [ ! -f "$STATE_FILE" ]; then
     echo "No prior state — treating as new for issue #$ISSUE_NUM"
+    echo "[DEBUG] before status call"
     status "🔍 Analyzing request..."
+    echo "[DEBUG] after status call"
     STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+    echo "[DEBUG] STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
+    echo "[DEBUG] before write_initial_prompt"
     write_initial_prompt
+    echo "[DEBUG] after write_initial_prompt"
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
 
     STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
     rm -rf "$STABLE_WORK"
+    echo "[DEBUG] ln -sf $(pwd -P) -> $STABLE_WORK"
     ln -sf "$(pwd -P)" "$STABLE_WORK"
+    echo "[DEBUG] symlink created"
 
+    echo "[DEBUG] invoking Claude: $CLAUDE_BIN"
     set +e
     OUTPUT=$(cd "$STABLE_WORK" && timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
+    echo "[DEBUG] Claude exited with code $CLAUDE_EXIT"
+    echo "--- Claude output ---"
+    echo "$OUTPUT"
+    echo "--- end Claude output ---"
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
       handle_error "Claude Code exited with code $CLAUDE_EXIT"
     fi
