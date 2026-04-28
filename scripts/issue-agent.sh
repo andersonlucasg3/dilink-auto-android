@@ -504,7 +504,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
   echo "--- Issue comment: resuming or starting conversation ---"
 
   if [ -f "$STATE_FILE" ]; then
-    SESSION_ID=$(jq -r '.session_id // ""' "$STATE_FILE")
+    SESSION_ID=$(jq -r '.session_id // .conversation_id // ""' "$STATE_FILE")
     if [ "$SESSION_ID" = "null" ] || [ "$SESSION_ID" = "." ] || [ "${#SESSION_ID}" -lt 20 ]; then
       echo "Invalid session_id in state ($SESSION_ID) — clearing state"
       rm -f "$STATE_FILE"
