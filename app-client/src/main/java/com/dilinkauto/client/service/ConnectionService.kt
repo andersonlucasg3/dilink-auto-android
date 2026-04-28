@@ -41,6 +41,7 @@ class ConnectionService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var connectionLoopJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var networkChangeDebounce: Job? = null
     private var autoUpdateAttempted = false
 
     enum class State { IDLE, WAITING, CONNECTED, STREAMING }
@@ -111,6 +112,7 @@ class ConnectionService : Service() {
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 FileLog.i(TAG, "Network available: $network")
+                networkChangeDebounce?.cancel()
                 val state = _serviceState.value
                 if (state == State.WAITING) {
                     FileLog.i(TAG, "New network while WAITING — restarting listen loop")
@@ -126,14 +128,23 @@ class ConnectionService : Service() {
                 if (conn != null && conn.isConnected) {
                     val cm2 = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
                     val activeNet = cm2.activeNetwork
-                    // If the active network is still up, our connection is fine
+                    // If another network is still active and our connection has it, ignore
                     if (activeNet != null && activeNet != network) {
                         FileLog.i(TAG, "Network lost: $network (not our active network $activeNet — ignoring)")
                         return
                     }
                 }
-                FileLog.i(TAG, "Network lost: $network — affects our connection")
-                resetConnectionForNetworkChange()
+                FileLog.i(TAG, "Network lost: $network — debouncing before reacting")
+                // Debounce: delay 3s before reacting to transient network flaps.
+                // 4G changes can cause brief hotspot resets that recover immediately.
+                networkChangeDebounce?.cancel()
+                networkChangeDebounce = serviceScope.launch {
+                    delay(3000)
+                    if (controlConnection?.isConnected != true) {
+                        FileLog.i(TAG, "Network lost confirmed — resetting connection")
+                    }
+                    resetConnectionForNetworkChange()
+                }
             }
         }
         cm.registerNetworkCallback(request, callback)

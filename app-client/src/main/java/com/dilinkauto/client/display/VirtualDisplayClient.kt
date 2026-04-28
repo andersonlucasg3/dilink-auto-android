@@ -285,22 +285,25 @@ class VirtualDisplayClient(
         try { channel?.close() } catch (_: Exception) {}
 
         // Restore physical display — VD server cleanup may not run if process was killed.
-        // SurfaceControl.setDisplayPowerMode operates below the Android framework level,
-        // so cmd/svc commands can't reliably override it. Use PowerManager wake locks
-        // with ACQUIRE_CAUSES_WAKEUP to force the display on at the framework level.
+        // SCREEN_BRIGHT_WAKE_LOCK + ON_AFTER_RELEASE forces the screen on at the
+        // framework level, which works even when SurfaceControl is held by shell UID.
+        // cmd display power-on is a stronger fallback that operates below SurfaceFlinger.
         scope.launch(Dispatchers.IO) {
             try {
                 FileLog.i(TAG, "Restoring physical display after VD disconnect")
                 val pm = appContext.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-                val wl = pm.newWakeLock(
-                    android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                    "DiLink:display:restore"
-                )
-                wl.acquire(2000)
+                // Force screen on — ACQUIRE_CAUSES_WAKEUP turns on, ON_AFTER_RELEASE keeps it on
+                @Suppress("DEPRECATION")
+                val flags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    android.os.PowerManager.ON_AFTER_RELEASE
+                val wl = pm.newWakeLock(flags, "DiLink:display:restore")
+                wl.acquire(3000)
                 wl.release()
-                // Also try shell commands as fallback
-                Runtime.getRuntime().exec(arrayOf("sh", "-c", "input keyevent 224")).waitFor()
+                // Fallback: cmd-level power-on (bypasses SurfaceControl restrictions)
+                try {
+                    Runtime.getRuntime().exec(arrayOf("sh", "-c", "cmd display power-on 2>/dev/null; input keyevent 224 2>/dev/null")).waitFor()
+                } catch (_: Exception) {}
             } catch (e: Exception) {
                 FileLog.w(TAG, "Display restore failed: ${e.message}")
             }
