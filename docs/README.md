@@ -113,19 +113,32 @@ This project is developed independently and relies on community support. Every c
 
 PRs welcome. See [Architecture](./architecture.md) and [Protocol](./protocol.md) for technical context. Build with `./gradlew :app-client:assembleDebug` (JDK 17+, Android SDK 34).
 
-### Branching Model (Git-Flow)
+### Branching Model (Git-Flow + Issue Types)
 
-| Branch | Purpose | CI |
-|--------|---------|----|
-| `main` | Stable releases | Builds signed release APK, auto-creates release on version tag |
-| `develop` | Active development | Builds debug APK, updates prerelease for in-app dev updates |
-| `feature/*` | New features | Merge to `develop` via PR |
-| `fix/*` | Bug fixes | Merge to `develop` via PR |
-| `release/*` | Release preparation | Merge to `main` → triggers release |
+Branches are created automatically by the issue agent based on the **issue template** used:
 
-**Release process:** Create a `release/vX.Y.Z` branch from `develop`, bump version, merge into `main`. Push a `vX.Y.Z` tag and CI creates a signed GitHub Release. Then merge `main` back into `develop` to sync the release version and any hotfixes.
+| Template | Label | Branch Pattern | Purpose |
+|----------|-------|---------------|---------|
+| Bug Fix | `bug` | `fix/N-agent` | Bug fixes |
+| New Feature | `feature` | `feature/N-agent` | New features |
+| Investigation | `investigation` | `investigate/N-agent` | Codebase investigation |
+| Documentation | `documentation` | `docs/N-agent` | Documentation updates |
+| Release | `release` | `release/vX.Y.Z` | Release preparation |
+| Agent Task (generic) | — | `issue/N-agent` | Catch-all |
 
-**Debug build updates:** Debug builds check for the latest prerelease from `develop`. To push a dev update, merge your changes to `develop` — CI creates a prerelease that debug builds detect as an update.
+All branches merge to `develop` via PR, except `release/*` which targets `main`.
+
+| Branch | CI |
+|--------|-----|
+| `main` | Builds signed release APK, creates GitHub Release on `vX.Y.Z` tag |
+| `develop`, `release/*` | Builds debug APK, creates pre-release on `vX.Y.Z-dev*` tags |
+| `feature/*`, `fix/*`, etc. | No CI (PR-only) |
+
+**Release process:** Create a Release issue from the template. The agent creates `release/vX.Y.Z`, prepares changes, tags `vX.Y.Z-dev-NN` for pre-release builds. Merge to `main` → push `vX.Y.Z` tag → CI creates a signed GitHub Release with auto-generated changelog.
+
+**Pre-release updates:** Users on the Pre-release channel receive `-dev` builds. Users on the Release channel receive stable builds only. The channel is configurable in Settings.
+
+All CI runs on **self-hosted WSL runners**.
 
 ## License
 
