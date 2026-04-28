@@ -1,18 +1,29 @@
 # Progress Tracker
 
-Current version: **v0.14.3-dev** (development)
-Last updated: 2026-04-27
+Current version: **v0.15.0** (stable)
+Last updated: 2026-04-28
 
 ## Milestones
 
-### v0.15.0 (in development)
+### v0.15.0 (2026-04-28)
 
 - **Phone service auto-start**: `ConnectionService` auto-starts when the phone app is opened (e.g. via car USB ADB), removing the need to manually press Start. ✅ Done
 - **Car no longer clears phone task**: Removed `--activity-clear-task` from car's USB ADB phone launch. If the phone app is already open, the car moves forward without disrupting it. ✅ Done
-- **Share Logs button**: "Share Logs" button on the main screen zips all `*.log` files from `/sdcard/DiLinkAuto/` and opens a GitHub issue page. `FileLog.zipLogs()` creates a `dilinkauto-logs.zip`. ✅ Done
+- **Share Logs button**: "Share Logs" button on the main screen zips all `*.log` files from `/sdcard/DiLinkAuto/` and shares via Android share sheet. `FileLog.zipLogs()` creates a `dilinkauto-logs.zip`. ✅ Done
 - **Encoder configuration**: Adjusted to 8Mbps CBR Main profile for broader device compatibility. Added backpressure (drops non-keyframes when write queue exceeds 6 frames). ✅ Done
 - **VideoDecoder catchup**: Four graduated speedup zones (normal, gentle 1.5x, medium 2x, aggressive 3x) for smoother latency recovery. ✅ Done
-- **French translation**: Added French (fr) to the existing 6 languages. ✅ Done
+- **French translation**: Added French (fr) to the existing 7 languages (now 8 total). ✅ Done
+- **Update check on app open**: Self-update check runs immediately when the app opens, with update notification and re-check button. ✅ Done
+- **Distribution channel selector**: Settings card to choose between stable releases and dev prereleases for self-update. ✅ Done
+- **CarLaunchScreen redesign**: Two-column layout optimized for wide car displays. ✅ Done
+- **Phone app UI refactor**: Reorganized main screen, fixed install flow bugs. ✅ Done
+- **Onboarding improvements**: Car setup prerequisites, enhanced install progress UI, improved How to Connect card. ✅ Done
+- **Car UI two-mode separation**: Launch screen (full-screen, connection-focused) and streaming mode (nav bar + content). Smooth transition when app list arrives. ✅ Done
+- **Video artifact fixes**: Smart decoder drops + graduated catchup + encoder backpressure eliminate visual artifacts. ✅ Done
+- **Touch input fixes**: Correct coordinate mapping at fixed 480dpi VD server DPI, incremental touch dispatch on MOVE, tap gesture and manual IP fixes. ✅ Done
+- **Screen restore and network stability**: Display restore after USB disconnect, network callback improvements. ✅ Done
+- **Internationalization**: All new UI strings translated to 8 languages (en, pt-BR, ru, be, fr, kk, uk, uz). ✅ Done
+- **CI/CD automation**: Autonomous issue-agent workflow with auto-build, status comments, and PR creation. ✅ Done
 
 ### v0.14.0
 
