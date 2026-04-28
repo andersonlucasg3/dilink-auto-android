@@ -132,4 +132,24 @@
     <string name="car_install_button">Установить в автомобиль</string>
     <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
     <string name="about_dev_github">github.com/andersonlucasg3</string>
+
+    <!-- Car App -->
+    <string name="car_app_title">Приложение авто</string>
+    <string name="car_app_desc">Установить или обновить приложение авто по WiFi ADB</string>
+    <string name="car_app_install">Установить</string>
+    <string name="car_app_retry">Повторить</string>
+    <string name="car_app_installed">Приложение авто установлено</string>
+
+    <!-- Donation -->
+    <string name="donation_title">Поддержать разработку</string>
+    <string name="donation_desc">Помогите поддерживать DiLink-Auto. Важен каждый вклад!</string>
+    <string name="donation_github">Спонсор GitHub</string>
+    <string name="donation_pix">Pix (Бразилия)</string>
+
+    <!-- Distribution Channel -->
+    <string name="channel_title">Канал распространения</string>
+    <string name="channel_release">Релиз</string>
+    <string name="channel_prerelease">Пре-релиз</string>
+    <string name="channel_release_desc">Стабильные релизы — рекомендованы для ежедневного использования</string>
+    <string name="channel_prerelease_desc">Сборки для разработчиков — новейшие функции, могут быть нестабильны</string>
 </resources>

@@ -28,4 +28,17 @@
 
     <!-- Orientation note -->
     <string name="landscape_app_note">Apps control their own orientation. Portrait-only apps may appear letterboxed.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">How to connect</string>
+
+    <!-- Development Mode -->
+    <string name="dev_mode_title">Development Mode</string>
+    <string name="dev_mode_desc_on">TCP ADB instead of USB (emulator testing)</string>
+    <string name="dev_mode_desc_off">Use USB ADB (car connection)</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Or connect manually by IP</string>
+    <string name="manual_connect_ip_label">Phone IP address</string>
+    <string name="manual_connect_button">Connect</string>
 </resources>

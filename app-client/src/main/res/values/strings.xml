@@ -134,4 +134,24 @@
     <string name="car_install_ip_label">Car IP address</string>
     <string name="car_install_ip_hint">Leave empty to auto-detect</string>
     <string name="car_install_button">Install on Car</string>
+
+    <!-- Car App -->
+    <string name="car_app_title">Car App</string>
+    <string name="car_app_desc">Install or update the car app over WiFi ADB</string>
+    <string name="car_app_install">Install</string>
+    <string name="car_app_retry">Retry</string>
+    <string name="car_app_installed">Car App Installed</string>
+
+    <!-- Donation -->
+    <string name="donation_title">Support Development</string>
+    <string name="donation_desc">Help keep DiLink-Auto going. Every contribution helps!</string>
+    <string name="donation_github">GitHub Sponsor</string>
+    <string name="donation_pix">Pix (Brazil)</string>
+
+    <!-- Distribution Channel -->
+    <string name="channel_title">Distribution Channel</string>
+    <string name="channel_release">Release</string>
+    <string name="channel_prerelease">Pre-release</string>
+    <string name="channel_release_desc">Stable releases — recommended for daily use</string>
+    <string name="channel_prerelease_desc">Development builds — latest features, may be unstable</string>
 </resources>

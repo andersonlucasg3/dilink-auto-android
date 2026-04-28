@@ -436,7 +436,7 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
-                "Or connect manually by IP",
+                stringResource(R.string.manual_connect_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = Color.Gray
             )
@@ -445,7 +445,7 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
                 OutlinedTextField(
                     value = ipAddress,
                     onValueChange = { ipAddress = it },
-                    label = { Text("Phone IP address") },
+                    label = { Text(stringResource(R.string.manual_connect_ip_label)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -467,7 +467,7 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
                     modifier = Modifier.height(56.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Connect")
+                    Text(stringResource(R.string.manual_connect_button))
                 }
             }
         }

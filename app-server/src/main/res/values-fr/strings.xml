@@ -28,4 +28,17 @@
 
     <!-- Orientation -->
     <string name="landscape_app_note">Les applis contrôlent leur propre orientation. Les applis en mode portrait uniquement peuvent apparaître avec des bandes.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Comment se connecter</string>
+
+    <!-- Development Mode -->
+    <string name="dev_mode_title">Mode Développement</string>
+    <string name="dev_mode_desc_on">TCP ADB au lieu d\'USB (test émulateur)</string>
+    <string name="dev_mode_desc_off">Utiliser USB ADB (connexion voiture)</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Ou connectez-vous manuellement par IP</string>
+    <string name="manual_connect_ip_label">Adresse IP du téléphone</string>
+    <string name="manual_connect_button">Connecter</string>
 </resources>

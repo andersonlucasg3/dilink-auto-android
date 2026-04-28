@@ -1113,9 +1113,9 @@ fun CarInstallCard(installStatus: String, onInstallOnCar: (String?) -> Unit) {
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Car App", fontWeight = FontWeight.Medium, color = Color.White)
+                    Text(stringResource(R.string.car_app_title), fontWeight = FontWeight.Medium, color = Color.White)
                     Text(
-                        if (installStatus.isEmpty()) "Install or update the car app over WiFi ADB" else installStatus,
+                        if (installStatus.isEmpty()) stringResource(R.string.car_app_desc) else installStatus,
                         fontSize = 12.sp,
                         color = when {
                             isDone -> Color(0xFF4CAF50)
@@ -1140,7 +1140,7 @@ fun CarInstallCard(installStatus: String, onInstallOnCar: (String?) -> Unit) {
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                     ) {
-                        Text(if (isError) "Retry" else "Install", fontSize = 13.sp)
+                        Text(if (isError) stringResource(R.string.car_app_retry) else stringResource(R.string.car_app_install), fontSize = 13.sp)
                     }
                 }
             }
@@ -1158,9 +1158,9 @@ fun DonationCard() {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Support Development", fontWeight = FontWeight.Medium, color = Color.White)
+            Text(stringResource(R.string.donation_title), fontWeight = FontWeight.Medium, color = Color.White)
             Text(
-                "Help keep DiLink-Auto going. Every contribution helps!",
+                stringResource(R.string.donation_desc),
                 fontSize = 12.sp,
                 color = Color.Gray,
                 modifier = Modifier.padding(top = 4.dp)
@@ -1177,7 +1177,7 @@ fun DonationCard() {
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6E40C9))
                 ) {
-                    Text("GitHub Sponsor", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.donation_github), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
 
                 Button(
@@ -1189,7 +1189,7 @@ fun DonationCard() {
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C2A0))
                 ) {
-                    Text("Pix (Brazil)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.donation_pix), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -1207,11 +1207,11 @@ fun ChannelSelectorCard() {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Distribution Channel", fontWeight = FontWeight.Medium, color = Color.White)
+            Text(stringResource(R.string.channel_title), fontWeight = FontWeight.Medium, color = Color.White)
             Text(
                 when (selected) {
-                    DistributionChannel.RELEASE -> "Stable releases — recommended for daily use"
-                    DistributionChannel.PRE_RELEASE -> "Development builds — latest features, may be unstable"
+                    DistributionChannel.RELEASE -> stringResource(R.string.channel_release_desc)
+                    DistributionChannel.PRE_RELEASE -> stringResource(R.string.channel_prerelease_desc)
                 },
                 fontSize = 12.sp,
                 color = Color.Gray,
@@ -1225,7 +1225,7 @@ fun ChannelSelectorCard() {
                         selected = DistributionChannel.RELEASE
                         UpdateManager.channel = DistributionChannel.RELEASE
                     },
-                    label = { Text("Release") },
+                    label = { Text(stringResource(R.string.channel_release)) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Color(0xFF1A73E8)
                     )
@@ -1236,7 +1236,7 @@ fun ChannelSelectorCard() {
                         selected = DistributionChannel.PRE_RELEASE
                         UpdateManager.channel = DistributionChannel.PRE_RELEASE
                     },
-                    label = { Text("Pre-release") },
+                    label = { Text(stringResource(R.string.channel_prerelease)) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Color(0xFFFFA726)
                     )

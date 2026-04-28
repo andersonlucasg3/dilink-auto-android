@@ -28,4 +28,17 @@
 
     <!-- Бағдар -->
     <string name="landscape_app_note">Қолданбалар өз бағдарын өздері басқарады. Тек портреттік қолданбалар жолақтармен көрсетілуі мүмкін.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Қалай қосылуға болады</string>
+
+    <!-- Development Mode -->
+    <string name="dev_mode_title">Әзірлеу режимі</string>
+    <string name="dev_mode_desc_on">USB орнына TCP ADB (эмулятор тестілеу)</string>
+    <string name="dev_mode_desc_off">USB ADB пайдалану (автокөлік қосылымы)</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Немесе IP арқылы қолмен қосылыңыз</string>
+    <string name="manual_connect_ip_label">Телефон IP мекенжайы</string>
+    <string name="manual_connect_button">Қосу</string>
 </resources>

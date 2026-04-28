@@ -28,4 +28,17 @@
 
     <!-- Орієнтація -->
     <string name="landscape_app_note">Застосунки самі керують орієнтацією. Застосунки лише з портретним режимом можуть відображатися зі смугами.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Як підключитися</string>
+
+    <!-- Development Mode -->
+    <string name="dev_mode_title">Режим розробника</string>
+    <string name="dev_mode_desc_on">TCP ADB замість USB (тестування емулятора)</string>
+    <string name="dev_mode_desc_off">Використовувати USB ADB (підключення до авто)</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Або підключитися вручну за IP</string>
+    <string name="manual_connect_ip_label">IP-адреса телефона</string>
+    <string name="manual_connect_button">Підключити</string>
 </resources>

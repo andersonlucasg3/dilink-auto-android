@@ -12,8 +12,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 
 /**
@@ -207,7 +209,7 @@ private fun HowToConnect() {
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
-                "How to connect",
+                stringResource(R.string.how_to_connect_title),
                 style = MaterialTheme.typography.titleMedium,
                 color = Color.White
             )
@@ -268,13 +270,13 @@ private fun DevModeToggle(service: CarConnectionService) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Development Mode",
+                    stringResource(R.string.dev_mode_title),
                     color = Color.White,
                     style = MaterialTheme.typography.titleSmall
                 )
                 Text(
-                    if (checked) "TCP ADB instead of USB (emulator testing)"
-                    else "Use USB ADB (car connection)",
+                    if (checked) stringResource(R.string.dev_mode_desc_on)
+                    else stringResource(R.string.dev_mode_desc_off),
                     color = if (checked) Color(0xFFFFA726) else Color.Gray,
                     style = MaterialTheme.typography.bodySmall
                 )

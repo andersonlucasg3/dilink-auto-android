@@ -28,4 +28,17 @@
 
     <!-- Yo\'nalish -->
     <string name="landscape_app_note">Ilovalar o\'z yo\'nalishini o\'zi boshqaradi. Faqat portret ilovalar chiziqlar bilan ko\'rsatilishi mumkin.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Qanday ulanish kerak</string>
+
+    <!-- Development Mode -->
+    <string name="dev_mode_title">Ishlab chiqish rejimi</string>
+    <string name="dev_mode_desc_on">USB o\'rniga TCP ADB (emulyator sinovi)</string>
+    <string name="dev_mode_desc_off">USB ADB ishlatish (avtomobil ulanishi)</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Yoki IP orqali qo\'lda ulaning</string>
+    <string name="manual_connect_ip_label">Telefon IP manzili</string>
+    <string name="manual_connect_button">Ulanish</string>
 </resources>

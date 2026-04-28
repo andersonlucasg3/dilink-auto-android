@@ -132,4 +132,24 @@
     <string name="car_install_button">Автокөлікке орнату</string>
     <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
     <string name="about_dev_github">github.com/andersonlucasg3</string>
+
+    <!-- Car App -->
+    <string name="car_app_title">Автокөлік қолданбасы</string>
+    <string name="car_app_desc">Автокөлік қолданбасын WiFi ADB арқылы орнату немесе жаңарту</string>
+    <string name="car_app_install">Орнату</string>
+    <string name="car_app_retry">Қайталау</string>
+    <string name="car_app_installed">Автокөлік қолданбасы орнатылды</string>
+
+    <!-- Donation -->
+    <string name="donation_title">Дамуды қолдау</string>
+    <string name="donation_desc">DiLink-Auto жұмысын қолдаңыз. Әрбір үлес маңызды!</string>
+    <string name="donation_github">GitHub демеушісі</string>
+    <string name="donation_pix">Pix (Бразилия)</string>
+
+    <!-- Distribution Channel -->
+    <string name="channel_title">Тарату арнасы</string>
+    <string name="channel_release">Релиз</string>
+    <string name="channel_prerelease">Пре-релиз</string>
+    <string name="channel_release_desc">Тұрақты релиздер — күнделікті пайдалануға ұсынылады</string>
+    <string name="channel_prerelease_desc">Әзірлеу құрастырылымдары — соңғы мүмкіндіктер, тұрақсыз болуы мүмкін</string>
 </resources>

@@ -132,4 +132,24 @@
     <string name="car_install_button">Avtomobilga o\'rnatish</string>
     <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
     <string name="about_dev_github">github.com/andersonlucasg3</string>
+
+    <!-- Car App -->
+    <string name="car_app_title">Avtomobil ilovasi</string>
+    <string name="car_app_desc">Avtomobil ilovasini WiFi ADB orqali o\'rnating yoki yangilang</string>
+    <string name="car_app_install">O\'rnatish</string>
+    <string name="car_app_retry">Qayta urinish</string>
+    <string name="car_app_installed">Avtomobil ilovasi o\'rnatildi</string>
+
+    <!-- Donation -->
+    <string name="donation_title">Rivojlantirishni qo\'llab-quvvatlash</string>
+    <string name="donation_desc">DiLink-Auto faoliyatini qo\'llab-quvvatlang. Har bir hissa muhim!</string>
+    <string name="donation_github">GitHub homiysi</string>
+    <string name="donation_pix">Pix (Braziliya)</string>
+
+    <!-- Distribution Channel -->
+    <string name="channel_title">Tarqatish kanali</string>
+    <string name="channel_release">Reliz</string>
+    <string name="channel_prerelease">Oldindan reliz</string>
+    <string name="channel_release_desc">Barqaror relizlar — kundalik foydalanish uchun tavsiya etiladi</string>
+    <string name="channel_prerelease_desc">Ishlab chiqish yig\'imi — eng so\'nggi xususiyatlar, beqaror bo\'lishi mumkin</string>
 </resources>

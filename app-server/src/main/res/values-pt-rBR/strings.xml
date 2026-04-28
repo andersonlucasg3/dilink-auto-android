@@ -28,4 +28,17 @@
 
     <!-- Orientação -->
     <string name="landscape_app_note">Os apps controlam sua própria orientação. Apps só retrato podem aparecer com faixas.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Como Conectar</string>
+
+    <!-- Development Mode -->
+    <string name="dev_mode_title">Modo de Desenvolvimento</string>
+    <string name="dev_mode_desc_on">TCP ADB em vez de USB (teste com emulador)</string>
+    <string name="dev_mode_desc_off">Usar USB ADB (conexão com o carro)</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Ou conecte manualmente por IP</string>
+    <string name="manual_connect_ip_label">Endereço IP do telefone</string>
+    <string name="manual_connect_button">Conectar</string>
 </resources>
