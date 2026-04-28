@@ -59,12 +59,25 @@ class ConnectionService : Service() {
         UpdateManager.checkForUpdate(force = false)
     }
 
+    @Volatile
+    private var assetsReady = false
+
     private fun deployAssets() {
         serviceScope.launch(Dispatchers.IO) {
             val dir = java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
             dir.mkdirs()
             extractAsset("vd-server.jar", java.io.File(dir, "vd-server.jar"))
             extractAsset("app-server.apk", java.io.File(filesDir, "app-server.apk"))
+            assetsReady = true
+        }
+    }
+
+    private suspend fun ensureAssetsReady() {
+        if (assetsReady) return
+        val apkFile = java.io.File(filesDir, "app-server.apk")
+        repeat(50) {
+            if (apkFile.exists()) return
+            delay(100)
         }
     }
 
@@ -457,6 +470,7 @@ class ConnectionService : Service() {
     private fun autoUpdateCarApp(@Suppress("UNUSED_PARAMETER") conn: Connection) {
         serviceScope.launch(Dispatchers.IO) {
             try {
+                ensureAssetsReady()
                 val apkFile = java.io.File(filesDir, "app-server.apk")
                 if (!apkFile.exists()) {
                     FileLog.w(TAG, "Auto-update: car APK not found")
@@ -567,6 +581,7 @@ class ConnectionService : Service() {
     fun installCarApp(explicitIp: String? = null) {
         serviceScope.launch(Dispatchers.IO) {
             try {
+                ensureAssetsReady()
                 val apkFile = java.io.File(filesDir, "app-server.apk")
                 if (!apkFile.exists()) {
                     _installStatus.value = "Car APK not found"
@@ -636,6 +651,9 @@ class ConnectionService : Service() {
             } catch (e: Exception) {
                 _installStatus.value = "Error: ${e.message}"
                 FileLog.e(TAG, "Car app install failed", e)
+            } finally {
+                delay(5000)
+                _installStatus.value = ""
             }
         }
     }
@@ -686,7 +704,7 @@ class ConnectionService : Service() {
         for (prefix in prefixes) {
             FileLog.i(TAG, "Scanning $prefix.0/24 for ADB...")
             val startMs = System.currentTimeMillis()
-            val result = probeSubnetConcurrent(prefix, ownIp = "", maxConcurrent = 32)
+            val result = probeSubnetConcurrent(prefix, ownIps = subnetIps, maxConcurrent = 32)
             val elapsed = System.currentTimeMillis() - startMs
             if (result != null) {
                 FileLog.i(TAG, "Found car ADB at $result ($prefix.0/24, ${elapsed}ms)")
@@ -734,10 +752,11 @@ class ConnectionService : Service() {
      * This finds the car reliably regardless of its DHCP-assigned IP.
      */
     private suspend fun probeSubnetConcurrent(
-        prefix: String, ownIp: String, maxConcurrent: Int = 32
+        prefix: String, ownIps: List<String>, maxConcurrent: Int = 32
     ): String? = coroutineScope {
-        // Skip .0 (network) and .255 (broadcast)
-        val ips = (1..254).map { "$prefix.$it" }.filter { it != ownIp }
+        // Skip .0 (network) and .255 (broadcast), and own IPs
+        val ownIpSet = ownIps.toSet()
+        val ips = (1..254).map { "$prefix.$it" }.filter { it !in ownIpSet }
         ips.chunked(maxConcurrent).forEach { batch ->
             val results = batch.map { ip ->
                 async(Dispatchers.IO) { if (probePortRaw(ip, 5555)) ip else null }
