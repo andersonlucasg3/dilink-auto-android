@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.client.service.ConnectionService
 import kotlinx.coroutines.launch
+import com.dilinkauto.client.service.DistributionChannel
 import com.dilinkauto.client.service.UpdateManager
 import com.dilinkauto.client.service.UpdateState
 
@@ -869,6 +870,14 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(32.dp))
 
+        // Distribution Channel
+        Text("Distribution", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+            modifier = Modifier.padding(bottom = 12.dp))
+
+        ChannelSelectorCard()
+
+        Spacer(Modifier.height(32.dp))
+
         // Updates
         Text("Updates", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
             modifier = Modifier.padding(bottom = 12.dp))
@@ -1073,8 +1082,6 @@ fun UpdatesCard(
 
 @Composable
 fun CarInstallCard(installStatus: String, onInstallOnCar: (String?) -> Unit) {
-    val context = LocalContext.current
-
     val isInstalling = installStatus.isNotEmpty() &&
         !installStatus.contains("Success", ignoreCase = true) &&
         !installStatus.contains("installed", ignoreCase = true) &&
@@ -1184,6 +1191,56 @@ fun DonationCard() {
                 ) {
                     Text("Pix (Brazil)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChannelSelectorCard() {
+    val currentChannel by remember { mutableStateOf(UpdateManager.channel) }
+    var selected by remember { mutableStateOf(currentChannel) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Distribution Channel", fontWeight = FontWeight.Medium, color = Color.White)
+            Text(
+                when (selected) {
+                    DistributionChannel.RELEASE -> "Stable releases — recommended for daily use"
+                    DistributionChannel.PRE_RELEASE -> "Development builds — latest features, may be unstable"
+                },
+                fontSize = 12.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = selected == DistributionChannel.RELEASE,
+                    onClick = {
+                        selected = DistributionChannel.RELEASE
+                        UpdateManager.channel = DistributionChannel.RELEASE
+                    },
+                    label = { Text("Release") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF1A73E8)
+                    )
+                )
+                FilterChip(
+                    selected = selected == DistributionChannel.PRE_RELEASE,
+                    onClick = {
+                        selected = DistributionChannel.PRE_RELEASE
+                        UpdateManager.channel = DistributionChannel.PRE_RELEASE
+                    },
+                    label = { Text("Pre-release") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFFFFA726)
+                    )
+                )
             }
         }
     }
