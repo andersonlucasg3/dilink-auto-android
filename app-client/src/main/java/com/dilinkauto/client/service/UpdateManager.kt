@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.dilinkauto.client.FileLog
+import com.dilinkauto.client.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -92,14 +93,14 @@ object UpdateManager {
         scope.launch(Dispatchers.IO) {
             try {
                 val release = fetchLatestRelease() ?: run {
-                    _updateState.value = UpdateState.Error("No release found")
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_no_release))
                     return@launch
                 }
 
                 val currentVersion = readCurrentVersion()
                 if (currentVersion == null) {
                     FileLog.w(TAG, "Could not read current version")
-                    _updateState.value = UpdateState.Error("Could not determine current version")
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_no_version))
                     return@launch
                 }
 
@@ -144,7 +145,7 @@ object UpdateManager {
                 conn.connect()
 
                 if (conn.responseCode != HttpURLConnection.HTTP_OK) {
-                    _updateState.value = UpdateState.Error("Download failed: HTTP ${conn.responseCode}")
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_download_http_error, conn.responseCode))
                     return@launch
                 }
 
@@ -180,7 +181,7 @@ object UpdateManager {
                 )
                 if (pkgInfo == null || pkgInfo.packageName != appContext.packageName) {
                     tmpFile.delete()
-                    _updateState.value = UpdateState.Error("Downloaded APK is invalid")
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_invalid_apk))
                     return@launch
                 }
 
@@ -197,7 +198,7 @@ object UpdateManager {
             } catch (e: Exception) {
                 FileLog.e(TAG, "Download failed", e)
                 tmpFile.delete()
-                _updateState.value = UpdateState.Error("Download failed: ${e.message}")
+                _updateState.value = UpdateState.Error(appContext.getString(R.string.update_download_failed, e.message ?: "unknown"))
             } finally {
                 isDownloading.set(false)
             }
@@ -207,7 +208,7 @@ object UpdateManager {
     fun installUpdate(context: Context) {
         val apkFile = downloadedFile
         if (apkFile == null || !apkFile.exists()) {
-            _updateState.value = UpdateState.Error("Update file not found")
+            _updateState.value = UpdateState.Error(appContext.getString(R.string.update_file_not_found))
             return
         }
 
@@ -224,7 +225,7 @@ object UpdateManager {
             context.startActivity(intent)
         } catch (e: Exception) {
             FileLog.e(TAG, "Install intent failed", e)
-            _updateState.value = UpdateState.Error("Could not open installer: ${e.message}")
+            _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
         }
     }
 
@@ -255,7 +256,7 @@ object UpdateManager {
 
         if (conn.responseCode == 403 || conn.responseCode == 429) {
             FileLog.w(TAG, "GitHub API rate limited (HTTP ${conn.responseCode})")
-            _updateState.value = UpdateState.Error("GitHub rate limit reached. Try again later.")
+            _updateState.value = UpdateState.Error(appContext.getString(R.string.update_rate_limit))
             return null
         }
 

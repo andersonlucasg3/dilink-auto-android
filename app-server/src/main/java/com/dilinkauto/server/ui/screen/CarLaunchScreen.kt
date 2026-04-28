@@ -122,14 +122,14 @@ private fun BrandingSection() {
     )
     Spacer(Modifier.height(16.dp))
     Text(
-        "DiLink Auto",
+        stringResource(R.string.branding_title),
         style = MaterialTheme.typography.headlineLarge,
         color = Color.White,
         fontWeight = FontWeight.Bold
     )
     Spacer(Modifier.height(8.dp))
     Text(
-        "Use your phone apps on your car's screen",
+        stringResource(R.string.branding_tagline),
         style = MaterialTheme.typography.bodyMedium,
         color = Color.Gray
     )
@@ -170,10 +170,10 @@ private fun ConnectionStatusCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     when (state) {
-                        CarConnectionService.State.IDLE -> "Ready to connect"
-                        CarConnectionService.State.CONNECTING -> "Connecting..."
-                        CarConnectionService.State.CONNECTED -> "Connected"
-                        CarConnectionService.State.STREAMING -> "Streaming"
+                        CarConnectionService.State.IDLE -> stringResource(R.string.status_ready_to_connect)
+                        CarConnectionService.State.CONNECTING -> stringResource(R.string.status_connecting)
+                        CarConnectionService.State.CONNECTED -> stringResource(R.string.status_connected)
+                        CarConnectionService.State.STREAMING -> stringResource(R.string.status_streaming)
                     },
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White
@@ -214,13 +214,13 @@ private fun HowToConnect() {
                 color = Color.White
             )
             Spacer(Modifier.height(16.dp))
-            ConnectStep("1", "Enable your phone's WiFi hotspot")
+            ConnectStep("1", stringResource(R.string.how_to_step_1))
             Spacer(Modifier.height(12.dp))
-            ConnectStep("2", "Plug your phone into the car's USB port")
+            ConnectStep("2", stringResource(R.string.how_to_step_2))
             Spacer(Modifier.height(12.dp))
-            ConnectStep("3", "Open the DiLink Auto app on your phone")
+            ConnectStep("3", stringResource(R.string.how_to_step_3))
             Spacer(Modifier.height(12.dp))
-            ConnectStep("4", "Wait for the car to connect automatically")
+            ConnectStep("4", stringResource(R.string.how_to_step_4))
         }
     }
 }

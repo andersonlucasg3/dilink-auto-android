@@ -152,4 +152,48 @@
     <string name="channel_prerelease">Pré-lançamento</string>
     <string name="channel_release_desc">Lançamentos estáveis — recomendado para uso diário</string>
     <string name="channel_prerelease_desc">Compilações de desenvolvimento — recursos mais recentes, podem ser instáveis</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_distribution">Distribuição</string>
+
+    <!-- Install on Car Status -->
+    <string name="car_install_status_searching">Procurando carro</string>
+    <string name="car_install_status_connecting">Conectando ao carro</string>
+    <string name="car_install_status_checking_version">Verificando versão</string>
+    <string name="car_install_status_pushing">Enviando APK</string>
+    <string name="car_install_status_installing_stage">Instalando</string>
+    <string name="car_install_status_launching">Iniciando</string>
+    <string name="car_install_title_installed">App do Carro Instalado</string>
+    <string name="car_install_title_failed">Falha na Instalação</string>
+    <string name="car_install_title_installing">Instalando no Carro</string>
+    <string name="car_install_status_connecting_to">Conectando a %s…</string>
+    <string name="car_install_status_not_reachable">%s não está acessível na porta 5555</string>
+    <string name="car_install_status_car_not_found">Carro não encontrado. Conecte via USB ou verifique o WiFi ADB.</string>
+    <string name="car_install_status_already_up_to_date">Já está atualizado (v%s)</string>
+    <string name="car_install_status_pushing_apk">Enviando APK (%dMB)…</string>
+    <string name="car_install_status_installing_version">Instalando v%s…</string>
+    <string name="car_install_status_launching_car_app">Iniciando app do carro…</string>
+    <string name="car_install_status_car_installed">App do carro v%s instalado!</string>
+    <string name="car_install_status_failed">Falhou: %s</string>
+    <string name="car_install_status_error">Erro: %s</string>
+    <string name="car_install_status_car_apk_not_found">APK do carro não encontrado</string>
+
+    <!-- Auto-Update Status -->
+    <string name="status_auto_update">Atualizando app do carro (v%1$s → v%2$s)…</string>
+    <string name="status_auto_update_complete">App do carro atualizado! Reiniciando…</string>
+    <string name="status_update_failed">Falha na atualização: %s</string>
+    <string name="status_auto_update_failed">Falha na atualização automática: %s</string>
+
+    <!-- Notification Actions -->
+    <string name="notification_action_stop">Parar</string>
+
+    <!-- Update Manager Errors -->
+    <string name="update_no_release">Nenhum release encontrado</string>
+    <string name="update_no_version">Não foi possível determinar a versão atual</string>
+    <string name="update_download_http_error">Falha no download: HTTP %d</string>
+    <string name="update_invalid_apk">APK baixado é inválido</string>
+    <string name="update_download_failed">Falha no download: %s</string>
+    <string name="update_file_not_found">Arquivo de atualização não encontrado</string>
+    <string name="update_installer_error">Não foi possível abrir o instalador: %s</string>
+    <string name="update_rate_limit">Limite de taxa do GitHub atingido. Tente novamente mais tarde.</string>
 </resources>

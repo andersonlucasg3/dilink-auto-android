@@ -152,4 +152,48 @@
     <string name="channel_prerelease">Пре-релиз</string>
     <string name="channel_release_desc">Стабильные релизы — рекомендованы для ежедневного использования</string>
     <string name="channel_prerelease_desc">Сборки для разработчиков — новейшие функции, могут быть нестабильны</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_distribution">Распространение</string>
+
+    <!-- Install on Car Status -->
+    <string name="car_install_status_searching">Поиск автомобиля</string>
+    <string name="car_install_status_connecting">Подключение к автомобилю</string>
+    <string name="car_install_status_checking_version">Проверка версии</string>
+    <string name="car_install_status_pushing">Отправка APK</string>
+    <string name="car_install_status_installing_stage">Установка</string>
+    <string name="car_install_status_launching">Запуск</string>
+    <string name="car_install_title_installed">Приложение авто установлено</string>
+    <string name="car_install_title_failed">Установка не удалась</string>
+    <string name="car_install_title_installing">Установка в автомобиль</string>
+    <string name="car_install_status_connecting_to">Подключение к %s…</string>
+    <string name="car_install_status_not_reachable">%s недоступен на порту 5555</string>
+    <string name="car_install_status_car_not_found">Автомобиль не найден. Подключите через USB или проверьте WiFi ADB.</string>
+    <string name="car_install_status_already_up_to_date">Уже актуально (v%s)</string>
+    <string name="car_install_status_pushing_apk">Отправка APK (%d МБ)…</string>
+    <string name="car_install_status_installing_version">Установка v%s…</string>
+    <string name="car_install_status_launching_car_app">Запуск приложения авто…</string>
+    <string name="car_install_status_car_installed">Приложение авто v%s установлено!</string>
+    <string name="car_install_status_failed">Не удалось: %s</string>
+    <string name="car_install_status_error">Ошибка: %s</string>
+    <string name="car_install_status_car_apk_not_found">APK автомобиля не найден</string>
+
+    <!-- Auto-Update Status -->
+    <string name="status_auto_update">Обновление приложения авто (v%1$s → v%2$s)…</string>
+    <string name="status_auto_update_complete">Приложение авто обновлено! Перезапуск…</string>
+    <string name="status_update_failed">Ошибка обновления: %s</string>
+    <string name="status_auto_update_failed">Ошибка авто-обновления: %s</string>
+
+    <!-- Notification Actions -->
+    <string name="notification_action_stop">Стоп</string>
+
+    <!-- Update Manager Errors -->
+    <string name="update_no_release">Релиз не найден</string>
+    <string name="update_no_version">Не удалось определить текущую версию</string>
+    <string name="update_download_http_error">Ошибка загрузки: HTTP %d</string>
+    <string name="update_invalid_apk">Загруженный APK недействителен</string>
+    <string name="update_download_failed">Ошибка загрузки: %s</string>
+    <string name="update_file_not_found">Файл обновления не найден</string>
+    <string name="update_installer_error">Не удалось открыть установщик: %s</string>
+    <string name="update_rate_limit">Достигнут лимит запросов GitHub. Попробуйте позже.</string>
 </resources>

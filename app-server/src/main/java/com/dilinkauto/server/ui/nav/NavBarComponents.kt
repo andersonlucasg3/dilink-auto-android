@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.AppCategory
 import com.dilinkauto.protocol.AppInfo
+import com.dilinkauto.server.R
 import com.dilinkauto.server.ui.theme.*
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -63,7 +65,7 @@ fun NetworkInfo(isConnected: Boolean) {
             modifier = Modifier.size(24.dp)
         )
         Text(
-            text = if (isConnected) "Connected" else "Offline",
+            text = if (isConnected) stringResource(R.string.network_connected) else stringResource(R.string.network_offline),
             fontSize = 11.sp,
             color = Color(0xFF888888),
             textAlign = TextAlign.Center
@@ -139,7 +141,7 @@ fun RecentAppIcon(
                 )
             }
             Text(
-                text = app?.appName ?: "App",
+                text = app?.appName ?: stringResource(R.string.recent_app_fallback),
                 fontSize = 14.sp,
                 color = if (isActive) Color.White else Color(0xFF888888),
                 textAlign = TextAlign.Center,

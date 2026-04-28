@@ -9,8 +9,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dilinkauto.protocol.AppInfo
+import com.dilinkauto.server.R
 
 /**
  * Persistent left-side navigation bar — always visible on all screens.
@@ -63,7 +65,7 @@ fun PersistentNavBar(
         if (isPhoneConnected) {
             NavActionButton(
                 icon = Icons.Default.LinkOff,
-                label = "Eject",
+                label = stringResource(R.string.nav_eject),
                 onClick = onDisconnect,
                 tint = Color(0xFFFF5252)
             )
@@ -77,7 +79,7 @@ fun PersistentNavBar(
         Box {
             NavActionButton(
                 icon = Icons.Default.Notifications,
-                label = "Alerts",
+                label = stringResource(R.string.nav_alerts),
                 onClick = onNotifications
             )
             if (notificationCount > 0) {
@@ -120,7 +122,7 @@ fun PersistentNavBar(
         // Home button
         NavActionButton(
             icon = Icons.Default.Home,
-            label = "Home",
+            label = stringResource(R.string.nav_home),
             onClick = onHome
         )
 
@@ -129,7 +131,7 @@ fun PersistentNavBar(
         // Back button
         NavActionButton(
             icon = Icons.Default.ArrowBack,
-            label = "Back",
+            label = stringResource(R.string.nav_back),
             onClick = onBack
         )
     }
