@@ -143,10 +143,11 @@ class SurfaceScaler(
             } else {
                 idleSkipCount++
                 if (idleSkipCount <= 3 || idleSkipCount % 30 == 0L) {
-                    println("[SurfaceScaler] idle skip #$idleSkipCount newFrames=$newFrameCount swaps=$swapCount")
+                    println("[SurfaceScaler] idle re-draw #$idleSkipCount newFrames=$newFrameCount swaps=$swapCount")
                 }
-                // Skip full GL render on idle — encoder handles static content via repeat-previous-frame-after
-                continue
+                // Still render the existing texture — repeat-previous-frame-after
+                // is unreliable on some chipsets (e.g. MediaTek). Always feeding
+                // the encoder prevents multi-second frame gaps on static content.
             }
             swapCount++
             if (swapCount <= 3 || swapCount % 30 == 0L) {
