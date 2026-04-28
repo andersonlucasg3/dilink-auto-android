@@ -5,12 +5,21 @@ set -euo pipefail
 # DiLink-Auto Issue Agent
 # Orchestrates Claude Code to work on GitHub issues autonomously.
 # Triggered by .github/workflows/issue-agent.yml
+#
+# Library modules are in scripts/lib/:
+#   logging.sh    — log_step, log_ok, log_err, error trap
+#   github-api.sh — status(), handle_error()
+#   branch.sh     — branch_name(), RELEASE_VERSION, RELEASE_TARGET
+#   prompts.sh    — write_initial_prompt(), write_resume_prompt(),
+#                   capture_conversation_id(), extract_summary_json(),
+#                   register_session()
 # ============================================================
 
-log_step() { echo "▶ $*"; }
-log_ok()   { echo "  ✓ $*"; }
-log_err()  { echo "  ✗ $*"; }
-trap 'if [ "${-//[^e]/}" = "e" ]; then log_err "CRASH at line $LINENO (exit=$?)"; fi' ERR
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/logging.sh"
+source "$SCRIPT_DIR/lib/github-api.sh"
+source "$SCRIPT_DIR/lib/branch.sh"
+source "$SCRIPT_DIR/lib/prompts.sh"
 
 # --- Paths ---
 AGENT_STATE_DIR="$HOME/.claude-agent/issues"
@@ -55,255 +64,6 @@ git config user.email "agent@dilink-auto.local"
 git config user.name "DiLink-Auto Agent"
 # Prevent line-ending conversion (repo is Windows/CRLF, runner is Linux/LF)
 git config core.autocrlf false
-
-# Configure git push authentication via GITHUB_TOKEN (runs before cd)
-
-# --- Helpers ---
-
-# Post or update a single status comment — first call creates, later calls edit
-status() {
-  log_step "status() posting comment"
-  _status_body="$1"
-  _status_body_file="/tmp/agent-comment-body-${ISSUE_NUM}.json"
-  echo "$_status_body" | jq -R -s '{body: .}' > "$_status_body_file" 2>/dev/null || {
-    log_err "status: jq failed to build JSON"
-    return
-  }
-  log_ok "body JSON written"
-
-  _status_id=""
-  [ -f "$STATE_FILE" ] && _status_id=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || true)
-
-  _status_http_code=""
-  if [ -n "$_status_id" ] && [ "$_status_id" != "null" ]; then
-    _status_http_code=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-      -H "Accept: application/vnd.github+json" \
-      -H "Content-Type: application/json" \
-      "https://api.github.com/repos/${REPO}/issues/comments/${_status_id}" \
-      -d "@${_status_body_file}" 2>/dev/null || echo "000")
-    if [ "$_status_http_code" != "200" ]; then
-      echo "[status] WARNING: PATCH returned HTTP $_status_http_code — creating new comment"
-      _status_id=""
-    fi
-  fi
-
-  if [ -z "$_status_id" ] || [ "$_status_id" = "null" ]; then
-    _status_resp=$(curl -s -w "\n%{http_code}" -X POST \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-      -H "Accept: application/vnd.github+json" \
-      -H "Content-Type: application/json" \
-      "https://api.github.com/repos/${REPO}/issues/${ISSUE_NUM}/comments" \
-      -d "@${_status_body_file}" 2>/dev/null)
-    _status_http_code=$(echo "$_status_resp" | tail -1)
-    _new_id=$(echo "$_status_resp" | sed '$d' | jq -r '.id // ""')
-    if [ "$_status_http_code" = "201" ] && [ -n "$_new_id" ] && [ "$_new_id" != "null" ]; then
-      if [ -f "$STATE_FILE" ]; then
-        jq --arg sid "$_new_id" '. + {status_comment_id: $sid}' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && \
-          mv "${STATE_FILE}.tmp" "$STATE_FILE" || true
-      fi
-      echo "[status] Comment posted (id=$_new_id)"
-    else
-      echo "[status] ERROR: POST returned HTTP $_status_http_code — body saved to $_status_body_file"
-    fi
-  else
-    echo "[status] Comment updated (id=$_status_id)"
-  fi
-}
-
-handle_error() {
-  local err_msg="${1:-Unknown error}"
-  local details="${2:-}"
-  cat > /tmp/error-comment.txt << EOF
-## 🤖 Agent Error
-
-\`\`\`
-${err_msg}
-\`\`\`
-
-${details}
-
-[Workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
-EOF
-  status "$(cat /tmp/error-comment.txt)"
-  exit 1
-}
-
-# Find the conversation ID from Claude Code's output or filesystem
-capture_conversation_id() {
-  local output="$1"
-  local cid
-
-  # Try parsing from stdout
-  cid=$(echo "$output" | grep -oiP 'conversation[_-]?\s*(id)?:\s*\K[a-f0-9-]{20,}' | head -1 || true)
-
-  # Fallback: newest .jsonl conversation across ALL project dirs
-  if [ -z "$cid" ] && [ -d "$CLAUDE_PROJECTS_DIR" ]; then
-    cid=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null \
-      | grep -v '/subagents/' \
-      | xargs ls -t 2>/dev/null | head -1 | xargs basename | sed 's/\.jsonl$//' || true)
-  fi
-  # Reject invalid IDs (e.g. "." from corrupted detection)
-  if [ "$cid" = "." ] || [ "${#cid}" -lt 20 ]; then
-    cid=""
-  fi
-
-  echo "$cid"
-}
-
-# Extract the summary JSON block from Claude Code's response
-extract_summary_json() {
-  local output="$1"
-  local json
-  json=$(echo "$output" | sed -n '/```json/,/```/p' | sed '1d;$d' || true)
-  if [ -z "$json" ]; then
-    json='{"summary":"Agent finished but no JSON summary block found in the output.","changes_made":false,"build_success":false,"action":"none"}'
-  fi
-  echo "$json"
-}
-
-RELEASE_VERSION=""
-RELEASE_TARGET="develop"
-
-branch_name() {
-  # Release issues have a 'release' label plus ### Version field
-  if echo "${ISSUE_LABELS:-}" | jq -e 'index("release")' >/dev/null 2>&1; then
-    RELEASE_VERSION=$(echo "$ISSUE_BODY" | awk '/### Version/{v=1; next} v && /^[0-9]+\.[0-9]+\.[0-9]+/{print $1; exit} /^[[:space:]]*$/{next} {v=0}' | head -1 || true)
-    if [ -n "$RELEASE_VERSION" ]; then
-      RELEASE_TARGET="main"
-      echo "release/v${RELEASE_VERSION}"
-      return
-    fi
-  fi
-
-  # Map label to branch prefix
-  RELEASE_TARGET="develop"
-  if echo "${ISSUE_LABELS:-}" | jq -e 'index("bug")' >/dev/null 2>&1; then
-    echo "fix/${ISSUE_NUM}-agent"
-  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("feature")' >/dev/null 2>&1; then
-    echo "feature/${ISSUE_NUM}-agent"
-  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("investigation")' >/dev/null 2>&1; then
-    echo "investigate/${ISSUE_NUM}-agent"
-  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("documentation")' >/dev/null 2>&1; then
-    echo "docs/${ISSUE_NUM}-agent"
-  else
-    # --- FALLBACK: detect issue type from body when no label matched ---
-
-    # Release template: body contains ### Version field
-    RELEASE_VERSION=$(echo "$ISSUE_BODY" | awk '/### Version/{v=1; next} v && /^[0-9]+\.[0-9]+\.[0-9]+/{print $1; exit} /^[[:space:]]*$/{next} {v=0}' | head -1 || true)
-    if [ -n "$RELEASE_VERSION" ]; then
-      RELEASE_TARGET="main"
-      echo "release/v${RELEASE_VERSION}"
-      return
-    fi
-
-    # Agent Task template: body contains ### Task Type dropdown
-    TASK_TYPE=$(echo "$ISSUE_BODY" | awk '/### Task Type/{v=1; next} v && /^- /{gsub(/^- /,""); print; exit} /^[[:space:]]*$/{next} {v=0}' | head -1 || true)
-    case "$TASK_TYPE" in
-      "Bug fix")       echo "fix/${ISSUE_NUM}-agent"; return ;;
-      "New feature")   echo "feature/${ISSUE_NUM}-agent"; return ;;
-      "Investigation") echo "investigate/${ISSUE_NUM}-agent"; return ;;
-      "Documentation") echo "docs/${ISSUE_NUM}-agent"; return ;;
-    esac
-
-    # Title-based fallback: "Release ..." without ### Version field
-    # RELEASE_TARGET stays "develop" — can't target main without a version
-    if echo "${ISSUE_TITLE:-}" | grep -qi '^release'; then
-      echo "release/${ISSUE_NUM}-agent"
-      return
-    fi
-
-    # True catch-all
-    echo "issue/${ISSUE_NUM}-agent"
-  fi
-}
-
-# Register a headless session so --resume can find it later
-register_session() {
-  local cid="$1"
-  local cwd="${2:-$(pwd -P)}"
-  local sessions_dir="$(dirname "$CLAUDE_PROJECTS_DIR")/sessions"
-  mkdir -p "$sessions_dir"
-  cat > "${sessions_dir}/${cid}.json" << SESSIONEOF
-{"pid":0,"sessionId":"${cid}","cwd":"${cwd}","startedAt":$(date +%s)000,"version":"2.1.121","kind":"headless","entrypoint":"claude-cli"}
-SESSIONEOF
-  echo "[session] Registered ${cid} (cwd: ${cwd})"
-}
-
-# --- Prompt builders ---
-# Each writes to /tmp/agent-prompt-${ISSUE_NUM}.txt to avoid shell escaping issues
-
-write_initial_prompt() {
-  cat > /tmp/agent-prompt-${ISSUE_NUM}.txt << 'ENDPROMPT'
-You are an autonomous development agent for **DiLink-Auto** — an open-source Android Auto alternative for BYD DiLink 3.0+ cars. Phone apps run on a virtual display, encode as H.264 video, and stream to the car over WiFi TCP. Touch events flow back from car to phone.
-
-Read all docs in docs/*.md before starting.
-Build with: `./gradlew :app-client:assembleDebug`
-You are already on the correct branch for this issue — do NOT create a new branch.
-You must: (1) `git add -A && git commit` (2) `git push origin HEAD` before finishing.
-
-CRITICAL: This is a temporary GitHub Actions runner session. Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
-
-ENDPROMPT
-
-  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
-## GitHub Issue #${ISSUE_NUM}: ${ISSUE_TITLE}
-
-${ISSUE_BODY}
-
-## After Finishing
-1. Build the APK to verify compilation
-2. If the build fails, fix and rebuild until it passes
-3. Output this JSON block as the VERY LAST thing.
-   The "summary" field must use markdown with clear sections
-   (## What was done, ## What needs testing, ## Build).
-
-\`\`\`json
-{"summary": "...", "changes_made": true, "build_success": true, "action": "none"}
-\`\`\`
-\`\`\`
-
-Set "action" to "close" to close the issue, "pr" to create a pull request to develop, or "none".
-ENDPROMPT
-
-  # Status update instructions at the bottom (tools, not the main focus)
-  _sid="${STATUS_COMMENT_ID:-unknown}"
-  _token="${GITHUB_TOKEN:-}"
-  _repo="${REPO}"
-  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDSTATUS
-
-## Status Updates
-Keep the user informed by running this:
-
-\`\`\`bash
-curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
-  -H "Accept: application/vnd.github+json" \\
-  "https://api.github.com/repos/${_repo}/issues/comments/${_sid}" \\
-  -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
-\`\`\`
-
-📖 reading docs → 🔍 investigating → ✏️ implementing → 🔨 building → ✅ done
-ENDSTATUS
-}
-
-write_resume_prompt() {
-  local comment="$1"
-
-  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
-## User's New Request
-
-${comment}
-
-## Critical Instructions
-- Focus ONLY on the user's new request above. Do NOT repeat or re-implement previous work.
-- If asked for ideas/analysis, provide that — don't just describe what exists.
-- If asked to change direction, change it.
-- Review \`git diff HEAD~1\` to see what's already on this branch.
-
-CRITICAL: Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD.
-Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
-ENDPROMPT
-}
 
 # --- Main ---
 echo "=========================================="
@@ -391,8 +151,7 @@ if [ "$EVENT" = "issues" ]; then
 
   echo "--- Starting Claude Code (new conversation) ---"
   AGENT_SESSION_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "issue-${ISSUE_NUM}-$(date +%s)")
-  _cmd="$CLAUDE_BIN --dangerously-skip-permissions --session-id \"$AGENT_SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
-  log_step "Claude: $_cmd"
+  log_step "Claude: $CLAUDE_BIN --session-id $AGENT_SESSION_ID"
   set +e
   OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions --session-id "$AGENT_SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
@@ -403,11 +162,9 @@ if [ "$EVENT" = "issues" ]; then
   if [ "$CLAUDE_EXIT" -ne 0 ]; then
     handle_error "Claude Code exited with code $CLAUDE_EXIT" "Prompt: /tmp/agent-prompt-${ISSUE_NUM}.txt"
   fi
-  echo "--- Claude Code finished ---"
 
   CONV_ID=$(capture_conversation_id "$OUTPUT")
   if [ -z "$CONV_ID" ]; then
-    # Try detecting new conversation (directory or .jsonl)
     AFTER_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | grep -v '/subagents/' | sort || true)
     NEW_JSONL=$(comm -13 <(echo "$BEFORE_JSONLS") <(echo "$AFTER_JSONLS") | head -1 || true)
     if [ -n "$NEW_JSONL" ]; then
@@ -437,7 +194,6 @@ if [ "$EVENT" = "issues" ]; then
   fi
 
   # Commit and push if changes were made
-  CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
   COMMIT_SHA=""
   git add -A
   if ! git diff --quiet --cached; then
@@ -460,13 +216,9 @@ if [ "$EVENT" = "issues" ]; then
   status "🔨 Building APK..."
   rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
   chmod +x gradlew 2>/dev/null || true
-  # Convert CRLF to LF (Windows repo, Linux runner)
   sed -i 's/\r$//' gradlew 2>/dev/null || true
-  # Kill any stale Gradle daemon from previous runs
-  # Ensure JDK 17 from setup-java, not Windows JDK 25 from PATH
   export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
   export PATH="${JAVA_HOME}/bin:$PATH"
-  # Ensure Android SDK is available
   export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
   export ANDROID_SDK_ROOT="$ANDROID_HOME"
   echo "JAVA_HOME=$JAVA_HOME"
@@ -532,7 +284,7 @@ EOFCOMMENT
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
     rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
-    echo "[action] Creating pull request for $BRANCH → develop"
+    echo "[action] Creating pull request for $BRANCH → $RELEASE_TARGET"
     PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
       --base "$RELEASE_TARGET" \
       --head "$BRANCH" \
@@ -544,109 +296,105 @@ EOFCOMMENT
     fi
   fi
 
-	elif [ "$EVENT" = "issue_comment" ]; then
-	  echo "--- Issue comment: resuming or starting conversation ---"
+elif [ "$EVENT" = "issue_comment" ]; then
+  echo "--- Issue comment: resuming or starting conversation ---"
 
-	  # Determine if we can resume a prior session
-	  SESSION_ID=""
-	  if [ -f "$STATE_FILE" ]; then
-	    SESSION_ID=$(jq -r '.session_id // .conversation_id // ""' "$STATE_FILE")
-	    if [ "$SESSION_ID" = "null" ] || [ "$SESSION_ID" = "." ] || [ "${#SESSION_ID}" -lt 20 ]; then
-	      echo "Invalid session_id in state ($SESSION_ID) — clearing"
-	      rm -f "$STATE_FILE"
-	      SESSION_ID=""
-	    fi
-	  fi
+  # Determine if we can resume a prior session
+  SESSION_ID=""
+  if [ -f "$STATE_FILE" ]; then
+    SESSION_ID=$(jq -r '.session_id // .conversation_id // ""' "$STATE_FILE")
+    if [ "$SESSION_ID" = "null" ] || [ "$SESSION_ID" = "." ] || [ "${#SESSION_ID}" -lt 20 ]; then
+      echo "Invalid session_id in state ($SESSION_ID) — clearing"
+      rm -f "$STATE_FILE"
+      SESSION_ID=""
+    fi
+  fi
 
-	  # Try resume if we have a valid session
-	  if [ -n "$SESSION_ID" ]; then
-	    log_step "Resuming session: $SESSION_ID"
-	    # Clear old status_comment_id so this run gets its own status comment.
-	    # If jq fails, remove the state file — a corrupt state is worse than a fresh start.
-	    if [ -f "$STATE_FILE" ]; then
-	      if ! jq 'del(.status_comment_id)' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null; then
-	        echo "WARNING: jq del(.status_comment_id) failed — removing corrupt state file"
-	        rm -f "$STATE_FILE"
-	      else
-	        mv "${STATE_FILE}.tmp" "$STATE_FILE"
-	      fi
-	    fi
+  # Try resume if we have a valid session
+  if [ -n "$SESSION_ID" ]; then
+    log_step "Resuming session: $SESSION_ID"
 
-	    # Create this run's unique status comment BEFORE writing prompts so
-	    # STATUS_COMMENT_ID in the agent prompt points to the correct comment.
-	    status "🔄 Continuing..."
-	    STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+    # Clear old status_comment_id so this run gets its own status comment.
+    # If jq fails, remove the state file — a corrupt state is worse than a fresh start.
+    if [ -f "$STATE_FILE" ]; then
+      if ! jq 'del(.status_comment_id)' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null; then
+        echo "WARNING: jq del(.status_comment_id) failed — removing corrupt state file"
+        rm -f "$STATE_FILE"
+      else
+        mv "${STATE_FILE}.tmp" "$STATE_FILE"
+      fi
+    fi
 
-	    write_initial_prompt
-	    write_resume_prompt "$COMMENT_BODY"
-	    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume \"$SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
-	    log_step "Claude: $_resume_cmd"
-	    set +e
-	    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
-	    CLAUDE_EXIT=$?
-	    set -e
-	    echo "--- Claude output (resume) ---"
-	    echo "$OUTPUT"
-	    if [ "$CLAUDE_EXIT" -ne 0 ]; then
-	      echo "--- Resume failed (exit $CLAUDE_EXIT), falling through to fresh start ---"
-	      rm -f "$STATE_FILE"
-	      SESSION_ID=""
-	    else
-	      echo "--- Claude Code resumed successfully ---"
-	    fi
-	  fi
+    # Create this run's unique status comment BEFORE writing prompts so
+    # STATUS_COMMENT_ID in the agent prompt points to the correct comment.
+    status "🔄 Continuing..."
+    STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
 
-	  # Fresh start: no valid state, or resume failed
-	  if [ -z "$SESSION_ID" ]; then
-	    log_step "Fresh start for issue comment"
-	    jq -n --arg issue "$ISSUE_NUM" --arg title "$ISSUE_TITLE" '{issue_number: $issue, title: $title}' > "$STATE_FILE"
-	    status "🔍 Analyzing request..."
-	    STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
-	    log_step "STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
-	    write_initial_prompt
-	    write_resume_prompt "$COMMENT_BODY"
+    write_initial_prompt
+    write_resume_prompt "$COMMENT_BODY"
 
-	    AGENT_SESSION_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "issue-${ISSUE_NUM}-$(date +%s)")
-	    _cmd="$CLAUDE_BIN --dangerously-skip-permissions --session-id \"$AGENT_SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
-	    log_step "Claude: $_cmd"
-	    set +e
-	    OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions --session-id "$AGENT_SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
-	    CLAUDE_EXIT=$?
-	    set -e
-	    echo "--- Claude output (fresh) ---"
-	    echo "$OUTPUT"
-	    if [ "$CLAUDE_EXIT" -ne 0 ]; then
-	      handle_error "Claude Code exited with code $CLAUDE_EXIT"
-	    fi
-	    echo "--- Claude Code finished ---"
+    log_step "Claude: $CLAUDE_BIN --resume $SESSION_ID"
+    set +e
+    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    CLAUDE_EXIT=$?
+    set -e
+    echo "--- Claude output (resume) ---"
+    echo "$OUTPUT"
+    if [ "$CLAUDE_EXIT" -ne 0 ]; then
+      echo "--- Resume failed (exit $CLAUDE_EXIT), falling through to fresh start ---"
+      rm -f "$STATE_FILE"
+      SESSION_ID=""
+    else
+      echo "--- Claude Code resumed successfully ---"
+    fi
+  fi
 
-	    _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
-	    jq -n \
-	      --arg sid "${AGENT_SESSION_ID:-unknown}" \
-	      --arg branch "$BRANCH" \
-	      --arg issue "$ISSUE_NUM" \
-	      --arg title "$ISSUE_TITLE" \
-	      --arg csid "$_existing_sid" \
-	      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid}' \
-	      > "$STATE_FILE"
-	    register_session "${AGENT_SESSION_ID:-unknown}"
-	  fi
+  # Fresh start: no valid state, or resume failed
+  if [ -z "$SESSION_ID" ]; then
+    log_step "Fresh start for issue comment"
+    jq -n --arg issue "$ISSUE_NUM" --arg title "$ISSUE_TITLE" '{issue_number: $issue, title: $title}' > "$STATE_FILE"
+    status "🔍 Analyzing request..."
+    STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+    log_step "STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
+    write_initial_prompt
+    write_resume_prompt "$COMMENT_BODY"
+
+    AGENT_SESSION_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "issue-${ISSUE_NUM}-$(date +%s)")
+    log_step "Claude: $CLAUDE_BIN --session-id $AGENT_SESSION_ID"
+    set +e
+    OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions --session-id "$AGENT_SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    CLAUDE_EXIT=$?
+    set -e
+    echo "--- Claude output (fresh) ---"
+    echo "$OUTPUT"
+    if [ "$CLAUDE_EXIT" -ne 0 ]; then
+      handle_error "Claude Code exited with code $CLAUDE_EXIT"
+    fi
+    echo "--- Claude Code finished ---"
+
+    _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+    jq -n \
+      --arg sid "${AGENT_SESSION_ID:-unknown}" \
+      --arg branch "$BRANCH" \
+      --arg issue "$ISSUE_NUM" \
+      --arg title "$ISSUE_TITLE" \
+      --arg csid "$_existing_sid" \
+      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid}' \
+      > "$STATE_FILE"
+    register_session "${AGENT_SESSION_ID:-unknown}"
+  fi
 
   SUMMARY_JSON=$(extract_summary_json "$OUTPUT")
   echo "Summary: $SUMMARY_JSON"
 
   # Commit if changes
-  CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
-
   COMMIT_SHA=""
-  if [ "$CHANGES_MADE" = "true" ]; then
-    if ! git diff --quiet || ! git diff --cached --quiet; then
-      git add -A
-      git diff --cached --stat
-      git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent follow-up: \(.summary)"')" || true
-      git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
-      COMMIT_SHA=$(git rev-parse --short HEAD)
-    fi
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    git add -A
+    git diff --cached --stat
+    git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent follow-up: \(.summary)"')" || true
+    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+    COMMIT_SHA=$(git rev-parse --short HEAD)
   fi
 
   # Always build after the agent finishes (don't trust agent's build claim)
@@ -654,13 +402,9 @@ EOFCOMMENT
   status "🔨 Building APK..."
   rm -f app-client/build/outputs/apk/debug/app-client-debug.apk
   chmod +x gradlew 2>/dev/null || true
-  # Convert CRLF to LF (Windows repo, Linux runner)
   sed -i 's/\r$//' gradlew 2>/dev/null || true
-  # Kill any stale Gradle daemon from previous runs
-  # Ensure JDK 17 from setup-java, not Windows JDK 25 from PATH
   export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
   export PATH="${JAVA_HOME}/bin:$PATH"
-  # Ensure Android SDK is available
   export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
   export ANDROID_SDK_ROOT="$ANDROID_HOME"
   echo "JAVA_HOME=$JAVA_HOME"
@@ -711,7 +455,7 @@ EOFCOMMENT
     GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
     rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
-    echo "[action] Creating pull request for $BRANCH → develop"
+    echo "[action] Creating pull request for $BRANCH → $RELEASE_TARGET"
     PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
       --base "$RELEASE_TARGET" \
       --head "$BRANCH" \
