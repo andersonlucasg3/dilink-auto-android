@@ -284,6 +284,9 @@ git fetch origin develop "$BRANCH" 2>/dev/null || true
 git reset --hard HEAD 2>/dev/null || true
 git clean -ffdx -e '.gradle' 2>/dev/null || true
 
+# Prune remote-deleted tags so stale local tags don't get pushed
+git fetch origin --prune --prune-tags 2>/dev/null || true
+
 # Set up branch
 git fetch origin develop "$BRANCH" 2>/dev/null || true
 if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
