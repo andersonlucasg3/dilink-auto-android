@@ -422,11 +422,11 @@ EOFCOMMENT
   fi
 
 elif [ "$EVENT" = "issue_comment" ]; then
-  echo "--- Issue comment: resuming or starting conversation ---"
+  echo "--- Issue comment: starting fresh (resume disabled) ---"
+  rm -f "$STATE_FILE" 2>/dev/null || true
+  echo "State cleared: starting fresh"
 
-  if [ -f "$STATE_FILE" ]; then
-    CONV_ID=$(jq -r '.conversation_id' "$STATE_FILE")
-    echo "Found prior state — resuming conversation: $CONV_ID"
+  if false; then
 
     write_resume_prompt "$COMMENT_BODY"
 
