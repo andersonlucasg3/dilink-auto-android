@@ -559,6 +559,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
       status "🔍 Analyzing request..."
       STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
       write_initial_prompt
+      _cmd="$CLAUDE_BIN --dangerously-skip-permissions -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+      log_step "Claude: $_cmd"
       set +e
       OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
       CLAUDE_EXIT=$?
@@ -580,7 +582,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
 
-    log_step "Claude: $CLAUDE_BIN --dangerously-skip-permissions -p ...agent-prompt-${ISSUE_NUM}.txt"
+    log_step 'Claude: $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading..."'"'"
     set +e
     OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
