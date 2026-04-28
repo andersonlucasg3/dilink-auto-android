@@ -422,11 +422,59 @@ EOFCOMMENT
   fi
 
 elif [ "$EVENT" = "issue_comment" ]; then
-  echo "--- Issue comment: starting fresh (resume disabled) ---"
-  rm -f "$STATE_FILE" 2>/dev/null || true
-  echo "State cleared: starting fresh"
+  echo "--- Issue comment: resuming or starting conversation ---"
 
-  if false; then
+  if [ -f "$STATE_FILE" ]; then
+    CONV_ID=$(jq -r '.conversation_id' "$STATE_FILE")
+    echo "Found prior state — resuming conversation: $CONV_ID"
+
+    write_resume_prompt "$COMMENT_BODY"
+
+    # Claude Code scopes conversations to the exact working directory.
+    # Since runners have different workspace paths, update the session
+    # metadata to point to the current runner's cwd before resume.
+    local_cwd=$(pwd)
+    local_cwd="${local_cwd:-/home/anderson}"
+    SESSIONS_DIR="$(dirname "$CLAUDE_PROJECTS_DIR")/sessions"
+    mkdir -p "$SESSIONS_DIR"
+    cat > "${SESSIONS_DIR}/${CONV_ID}.json" << SESSIONEOF
+{"pid":0,"sessionId":"${CONV_ID}","cwd":"${local_cwd}","startedAt":$(date +%s)000,"version":"2.1.121","kind":"headless","entrypoint":"claude-cli"}
+SESSIONEOF
+    echo "[resume] Session cwd updated to: $local_cwd"
+
+    # Copy conversation to current runner's project dir
+    OLD_CONV=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}.jsonl" -type f 2>/dev/null | head -1)
+    OLD_CONV_DIR=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}" -type d 2>/dev/null | grep -v '/subagents$' | head -1)
+    # Determine current project dir (Claude Code hashes the git root or cwd)
+    PROJ_DIRS=$(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -type d -name '--*' 2>/dev/null | tr '\n' ' ')
+    if [ -n "$OLD_CONV" ] || [ -n "$OLD_CONV_DIR" ]; then
+      for proj in $PROJ_DIRS; do
+        [ -n "$OLD_CONV" ] && cp -f "$OLD_CONV" "$proj/${CONV_ID}.jsonl" 2>/dev/null || true
+        [ -n "$OLD_CONV_DIR" ] && cp -rf "$OLD_CONV_DIR" "$proj/" 2>/dev/null || true
+      done
+      echo "[resume] Copied conversation to all runner project dirs"
+    fi
+
+    echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
+    status "🔍 Continuing investigation..."
+    set +e
+    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    CLAUDE_EXIT=$?
+    set -e
+    if [ "$CLAUDE_EXIT" -ne 0 ]; then
+      echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
+      rm -f "$STATE_FILE"
+      write_initial_prompt
+      set +e
+      OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+      CLAUDE_EXIT=$?
+      set -e
+    else
+      echo "--- Claude Code resumed ---"
+    fi
+  fi
+
+  if [ ! -f "$STATE_FILE" ]; then
 
     write_resume_prompt "$COMMENT_BODY"
 
