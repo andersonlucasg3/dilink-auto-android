@@ -447,30 +447,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     write_resume_prompt "$COMMENT_BODY"
 
-    # Claude Code scopes conversations to the exact working directory.
-    # Since runners have different workspace paths, update the session
-    # metadata to point to the current runner's cwd before resume.
-    local_cwd=$(pwd)
-    local_cwd="${local_cwd:-/home/anderson}"
-    SESSIONS_DIR="$(dirname "$CLAUDE_PROJECTS_DIR")/sessions"
-    mkdir -p "$SESSIONS_DIR"
-    cat > "${SESSIONS_DIR}/${CONV_ID}.json" << SESSIONEOF
-{"pid":0,"sessionId":"${CONV_ID}","cwd":"${local_cwd}","startedAt":$(date +%s)000,"version":"2.1.121","kind":"headless","entrypoint":"claude-cli"}
-SESSIONEOF
-    echo "[resume] Session cwd updated to: $local_cwd"
-
-    # Copy conversation to current runner's project dir
-    OLD_CONV=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}.jsonl" -type f 2>/dev/null | head -1)
-    OLD_CONV_DIR=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}" -type d 2>/dev/null | grep -v '/subagents$' | head -1)
-    # Determine current project dir (Claude Code hashes the git root or cwd)
-    PROJ_DIRS=$(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -type d -name '--*' 2>/dev/null | tr '\n' ' ')
-    if [ -n "$OLD_CONV" ] || [ -n "$OLD_CONV_DIR" ]; then
-      for proj in $PROJ_DIRS; do
-        [ -n "$OLD_CONV" ] && cp -f "$OLD_CONV" "$proj/${CONV_ID}.jsonl" 2>/dev/null || true
-        [ -n "$OLD_CONV_DIR" ] && cp -rf "$OLD_CONV_DIR" "$proj/" 2>/dev/null || true
-      done
-      echo "[resume] Copied conversation to all runner project dirs"
-    fi
+    # Git worktree ensures all runners share the same working directory path,
+    # so Claude Code's project hash is consistent — no need to copy or relocate.
 
     echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
     status "🔍 Continuing investigation..."
