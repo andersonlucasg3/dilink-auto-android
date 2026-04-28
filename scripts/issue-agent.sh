@@ -464,6 +464,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
       echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
       rm -f "$STATE_FILE"
       write_initial_prompt
+      status "🔍 Investigating codebase..."
       set +e
       OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
       CLAUDE_EXIT=$?
@@ -478,6 +479,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     write_initial_prompt
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
+    status "🔍 Investigating codebase..."
 
     STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
     rm -rf "$STABLE_WORK"
