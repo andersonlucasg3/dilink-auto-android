@@ -542,35 +542,42 @@ class ConnectionService : Service() {
             FileLog.i(TAG, "handleInputFrame #$inputFrameCount type=0x${frame.messageType.toString(16)} vdClient=${client != null} connected=${client?.isConnected}")
         }
 
-        // Batched MOVE: all pointers in one message
-        if (frame.messageType == InputMsg.TOUCH_MOVE_BATCH) {
+        try {
+            // Batched MOVE: all pointers in one message
+            if (frame.messageType == InputMsg.TOUCH_MOVE_BATCH) {
+                if (client != null && client.isConnected) {
+                    val batch = TouchMoveBatch.decode(frame.payload)
+                    val w = vdWidth
+                    val h = vdHeight
+                    if (inputFrameCount <= 10) {
+                        FileLog.d(TAG, "Touch batch ${batch.pointers.size} pointers w=$w h=$h")
+                    }
+                    for (p in batch.pointers) {
+                        client.touch(1, p.pointerId, (p.x * w).toInt(), (p.y * h).toInt(), p.pressure)
+                    }
+                }
+                return
+            }
+
+            val event = TouchEvent.decode(frame.payload)
             if (client != null && client.isConnected) {
-                val batch = TouchMoveBatch.decode(frame.payload)
                 val w = vdWidth
                 val h = vdHeight
-                for (p in batch.pointers) {
-                    client.touch(1, p.pointerId, (p.x * w).toInt(), (p.y * h).toInt(), p.pressure)
+                val pixelX = (event.x * w).toInt()
+                val pixelY = (event.y * h).toInt()
+
+                val action = when (event.action) {
+                    InputMsg.TOUCH_DOWN -> 0
+                    InputMsg.TOUCH_MOVE -> 1
+                    InputMsg.TOUCH_UP -> 2
+                    else -> return
                 }
+                client.touch(action, event.pointerId, pixelX, pixelY, event.pressure)
+            } else {
+                InputInjectionService.instance?.injectTouch(event)
             }
-            return
-        }
-
-        val event = TouchEvent.decode(frame.payload)
-        if (client != null && client.isConnected) {
-            val w = vdWidth
-            val h = vdHeight
-            val pixelX = (event.x * w).toInt()
-            val pixelY = (event.y * h).toInt()
-
-            val action = when (event.action) {
-                InputMsg.TOUCH_DOWN -> 0
-                InputMsg.TOUCH_MOVE -> 1
-                InputMsg.TOUCH_UP -> 2
-                else -> return
-            }
-            client.touch(action, event.pointerId, pixelX, pixelY, event.pressure)
-        } else {
-            InputInjectionService.instance?.injectTouch(event)
+        } catch (e: Exception) {
+            FileLog.e(TAG, "handleInputFrame error type=0x${frame.messageType.toString(16)}: ${e.message}", e)
         }
     }
 
