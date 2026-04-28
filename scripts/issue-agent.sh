@@ -403,8 +403,8 @@ if [ "$EVENT" = "issues" ]; then
   SUMMARY_JSON=$(extract_summary_json "$OUTPUT")
   echo "Summary: $SUMMARY_JSON"
 
-  # Save state (skip if CONV_ID is invalid — e.g. "." or empty from corrupted capture)
-  if [ -n "$CONV_ID" ] && [ "$CONV_ID" != "." ] && [ "${#CONV_ID}" -ge 20 ]; then
+  # Save state (skip if CONV_ID is invalid — e.g. "." "null" or empty)
+  if [ -n "$CONV_ID" ] && [ "$CONV_ID" != "." ] && [ "$CONV_ID" != "null" ] && [ "${#CONV_ID}" -ge 20 ]; then
     jq -n \
       --arg cid "$CONV_ID" \
       --arg branch "$BRANCH" \
@@ -531,6 +531,11 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
   if [ -f "$STATE_FILE" ]; then
     CONV_ID=$(jq -r '.conversation_id' "$STATE_FILE")
+    if [ "$CONV_ID" = "null" ] || [ "$CONV_ID" = "." ] || [ "${#CONV_ID}" -lt 20 ]; then
+      echo "Invalid CONV_ID in state ($CONV_ID) — clearing state"
+      rm -f "$STATE_FILE"
+      CONV_ID=""
+    fi
     echo "Found prior state — resuming conversation: $CONV_ID"
 
     write_resume_prompt "$COMMENT_BODY"
