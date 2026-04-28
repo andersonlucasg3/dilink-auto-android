@@ -438,7 +438,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     OLD_CONV=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}.jsonl" -type f 2>/dev/null | head -1)
     OLD_CONV_DIR=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}" -type d 2>/dev/null | head -1)
     if [ -n "$OLD_CONV" ] || [ -n "$OLD_CONV_DIR" ]; then
-      local src_proj
+      src_proj=""
       if [ -n "$OLD_CONV" ]; then
         src_proj=$(dirname "$OLD_CONV")
       else
