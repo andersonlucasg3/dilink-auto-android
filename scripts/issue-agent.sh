@@ -10,7 +10,7 @@ set -euo pipefail
 log_step() { echo "▶ $*"; }
 log_ok()   { echo "  ✓ $*"; }
 log_err()  { echo "  ✗ $*"; }
-trap 'log_err "CRASH at line $LINENO (exit=$?)"' ERR
+trap 'if [ "${-//[^e]/}" = "e" ]; then log_err "CRASH at line $LINENO (exit=$?)"; fi' ERR
 
 # --- Paths ---
 AGENT_STATE_DIR="$HOME/.claude-agent/issues"
