@@ -88,8 +88,13 @@ class InputInjectionService : AccessibilityService() {
     }
 
     private fun dispatchTap(x: Float, y: Float) {
-        val path = Path().apply { moveTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 50)
+        // Accessibility gestures require a non-zero-length path.
+        // A 1px micro-swipe is indistinguishable from a tap at car-display scale.
+        val path = Path().apply {
+            moveTo(x, y)
+            lineTo(x + 1f, y)
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 80)
         val gesture = buildGesture(stroke)
         dispatchGesture(gesture, null, null)
     }

@@ -208,6 +208,7 @@ class CarConnectionService : Service() {
         userDisconnected = false
         _state.value = State.CONNECTING
         connectToPhone(host, port)
+        startUsbTrack()  // dev mode TCP ADB or USB ADB
     }
 
     // ─── State Machine Core ───
