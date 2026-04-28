@@ -101,8 +101,6 @@ status() {
       if [ -f "$STATE_FILE" ]; then
         jq --arg sid "$_new_id" '. + {status_comment_id: $sid}' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && \
           mv "${STATE_FILE}.tmp" "$STATE_FILE" || true
-      else
-        jq -n --arg sid "$_new_id" '{status_comment_id: $sid}' > "$STATE_FILE" 2>/dev/null || true
       fi
       echo "[status] Comment posted (id=$_new_id)"
     else
