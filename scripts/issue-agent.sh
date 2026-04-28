@@ -361,9 +361,12 @@ if [ "$EVENT" = "issues" ]; then
 
   echo "--- Starting Claude Code (new conversation) ---"
   set +e
-  OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1 | tee /dev/stderr)
+  OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
   set -e
+  echo "--- Claude Code output ---"
+  echo "$OUTPUT"
+  echo "--- Claude Code finished (exit=$CLAUDE_EXIT) ---"
   if [ "$CLAUDE_EXIT" -ne 0 ]; then
     handle_error "Claude Code exited with code $CLAUDE_EXIT" "Prompt: /tmp/agent-prompt-${ISSUE_NUM}.txt"
   fi
@@ -507,9 +510,12 @@ elif [ "$EVENT" = "issue_comment" ]; then
     echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
     status "🔄 Continuing investigation..."
     set +e
-    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1 | tee /dev/stderr)
+    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
+    echo "--- Claude Code output (resume) ---"
+    echo "$OUTPUT"
+    echo "--- Claude Code finished (resume exit=$CLAUDE_EXIT) ---"
     if [ "$CLAUDE_EXIT" -ne 0 ]; then
       echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
       rm -f "$STATE_FILE"
@@ -517,7 +523,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
       STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
       write_initial_prompt
       set +e
-      OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1 | tee /dev/stderr)
+      OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
       CLAUDE_EXIT=$?
       set -e
     else
