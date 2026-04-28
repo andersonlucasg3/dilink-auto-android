@@ -35,6 +35,7 @@ class VirtualDisplayClient(
 
     @Volatile
     var displayId: Int = -1
+    var hasDirectInjection: Boolean = false
         private set
 
     @Volatile
@@ -95,8 +96,10 @@ class VirtualDisplayClient(
                 val msgType = rdr.readByte()
                 if (msgType == MSG_DISPLAY_READY) {
                     displayId = rdr.readInt()
+                    val flags = rdr.readByte()
+                    hasDirectInjection = (flags.toInt() and 1) != 0
                     isConnected = true
-                    FileLog.i(TAG, "VD server connected, displayId=$displayId")
+                    FileLog.i(TAG, "VD server connected, displayId=$displayId directInjection=$hasDirectInjection")
                     startVideoRelay()
                     true
                 } else {

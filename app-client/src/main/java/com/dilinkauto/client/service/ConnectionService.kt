@@ -545,24 +545,50 @@ class ConnectionService : Service() {
             FileLog.i(TAG, "handleInputFrame #$inputFrameCount type=0x${frame.messageType.toString(16)} vdClient=${client != null} connected=${client?.isConnected}")
         }
 
+        // Use VD server direct injection if IInputManager is available (low latency),
+        // otherwise fall back to accessibility gestures (guaranteed to work).
+        val useDirect = client != null && client.isConnected && client.hasDirectInjection
+        val cl = if (useDirect) client!! else null
+
         try {
-            // Batched MOVE: all pointers in one message
             if (frame.messageType == InputMsg.TOUCH_MOVE_BATCH) {
                 val batch = TouchMoveBatch.decode(frame.payload)
-                for (p in batch.pointers) {
-                    InputInjectionService.instance?.injectTouch(TouchEvent(
-                        action = InputMsg.TOUCH_MOVE,
-                        pointerId = p.pointerId,
-                        x = p.x, y = p.y,
-                        pressure = p.pressure,
-                        timestamp = p.timestamp
-                    ))
+                if (cl != null) {
+                    val w = vdWidth
+                    val h = vdHeight
+                    for (p in batch.pointers) {
+                        cl.touch(1, p.pointerId, (p.x * w).toInt(), (p.y * h).toInt(), p.pressure)
+                    }
+                } else {
+                    for (p in batch.pointers) {
+                        InputInjectionService.instance?.injectTouch(TouchEvent(
+                            action = InputMsg.TOUCH_MOVE,
+                            pointerId = p.pointerId,
+                            x = p.x, y = p.y,
+                            pressure = p.pressure,
+                            timestamp = p.timestamp
+                        ))
+                    }
                 }
                 return
             }
 
             val event = TouchEvent.decode(frame.payload)
-            InputInjectionService.instance?.injectTouch(event)
+            if (cl != null) {
+                val w = vdWidth
+                val h = vdHeight
+                val pixelX = (event.x * w).toInt()
+                val pixelY = (event.y * h).toInt()
+                val action = when (event.action) {
+                    InputMsg.TOUCH_DOWN -> 0
+                    InputMsg.TOUCH_MOVE -> 1
+                    InputMsg.TOUCH_UP -> 2
+                    else -> return
+                }
+                cl.touch(action, event.pointerId, pixelX, pixelY, event.pressure)
+            } else {
+                InputInjectionService.instance?.injectTouch(event)
+            }
         } catch (e: Exception) {
             FileLog.e(TAG, "handleInputFrame error type=0x${frame.messageType.toString(16)}: ${e.message}", e)
         }

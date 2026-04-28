@@ -204,13 +204,17 @@ class VirtualDisplayServer(
             ch.socket().sendBufferSize = 262144
             ch.socket().receiveBufferSize = 262144
 
-            // Tell client the display is ready (direct write before threads start)
-            val readyBuf = ByteBuffer.allocate(5)
+            // Tell client the display is ready (direct write before threads start).
+            // Format: MSG_DISPLAY_READY (1) + displayId (4) + flags (1)
+            // flags bit 0 = inputManager available (IInputManager.injectInputEvent works)
+            val flags: Byte = if (inputManager != null && injectInputEventMethod != null) 1 else 0
+            val readyBuf = ByteBuffer.allocate(6)
             readyBuf.put(MSG_DISPLAY_READY)
             readyBuf.putInt(displayId)
+            readyBuf.put(flags)
             readyBuf.flip()
             writeAllBlocking(ch, readyBuf)
-            log("Display ready: id=$displayId ${width}x${height}@${dpi}")
+            log("Display ready: id=$displayId ${width}x${height}@${dpi} injectInput=${flags.toInt() == 1}")
 
             // Launch home activity on VD so the encoder has content
             execShell("am start --display $displayId -a android.intent.action.MAIN -c android.intent.category.HOME")
