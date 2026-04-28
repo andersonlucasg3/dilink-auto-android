@@ -340,7 +340,9 @@ log_step "EVENT=$EVENT ISSUE=$ISSUE_NUM STATE_FILE=$STATE_FILE"
 # --- Run Claude Code ---
 if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
+  jq -n --arg issue "$ISSUE_NUM" --arg title "$ISSUE_TITLE" '{issue_number: $issue, title: $title}' > "$STATE_FILE"
   status "🔍 Analyzing request..."
+  STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
@@ -547,6 +549,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
   if [ ! -f "$STATE_FILE" ]; then
     echo "No prior state — treating as new for issue #$ISSUE_NUM"
     log_step "fresh start: status → prompt → Claude"
+    # Initialize STATE_FILE so status() can update it with the comment ID
+    jq -n --arg issue "$ISSUE_NUM" --arg title "$ISSUE_TITLE" '{issue_number: $issue, title: $title}' > "$STATE_FILE"
     status "🔍 Analyzing request..."
     log_ok "status posted"
     STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
