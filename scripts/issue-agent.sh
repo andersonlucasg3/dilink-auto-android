@@ -561,13 +561,24 @@ EOFCOMMENT
 	  # Try resume if we have a valid session
 	  if [ -n "$SESSION_ID" ]; then
 	    log_step "Resuming session: $SESSION_ID"
+	    # Clear old status_comment_id so this run gets its own status comment.
+	    # If jq fails, remove the state file — a corrupt state is worse than a fresh start.
+	    if [ -f "$STATE_FILE" ]; then
+	      if ! jq 'del(.status_comment_id)' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null; then
+	        echo "WARNING: jq del(.status_comment_id) failed — removing corrupt state file"
+	        rm -f "$STATE_FILE"
+	      else
+	        mv "${STATE_FILE}.tmp" "$STATE_FILE"
+	      fi
+	    fi
+
+	    # Create this run's unique status comment BEFORE writing prompts so
+	    # STATUS_COMMENT_ID in the agent prompt points to the correct comment.
+	    status "🔄 Continuing..."
+	    STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+
 	    write_initial_prompt
 	    write_resume_prompt "$COMMENT_BODY"
-	    # Clear old status_comment_id so this run gets its own status comment
-	    if [ -f "$STATE_FILE" ]; then
-	      jq 'del(.status_comment_id)' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && mv "${STATE_FILE}.tmp" "$STATE_FILE" || true
-	    fi
-	    status "🔄 Continuing..."
 	    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume \"$SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
 	    log_step "Claude: $_resume_cmd"
 	    set +e
