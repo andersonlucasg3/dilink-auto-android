@@ -547,10 +547,10 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
     status "🔄 Continuing investigation..."
-    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume $CONV_ID -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --continue -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
     log_step "Claude: $_resume_cmd"
     set +e
-    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --continue -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     echo "--- Claude Code output (resume) ---"
@@ -561,7 +561,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
       rm -f "$STATE_FILE"
       status "🔍 Analyzing request..."
       STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
-      write_initial_prompt
+      # Use resume prompt (includes user's comment), not initial prompt (only issue body)
+      write_resume_prompt "$COMMENT_BODY"
       _cmd="$CLAUDE_BIN --dangerously-skip-permissions -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
       log_step "Claude: $_cmd"
       set +e
@@ -581,6 +582,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
     log_step "STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
     write_initial_prompt
+    write_resume_prompt "$COMMENT_BODY"
     log_ok "prompt written"
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
