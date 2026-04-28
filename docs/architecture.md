@@ -2,15 +2,14 @@
 
 ## Overview
 
-DiLink-Auto is a three-module Gradle project (v0.13.1) plus a standalone VD server:
+DiLink-Auto is a four-module Gradle project:
 
 ```
 DiLink-Auto/
 ├── protocol/        Android library -- shared by both apps (Gradle module)
 ├── app-client/      Android application -- runs on the phone (Gradle module)
 ├── app-server/      Android application -- runs on the car (Gradle module)
-└── vd-server/       Standalone Java -- compiled directly by app-client's buildVdServer task,
-                     NOT a Gradle module (not in settings.gradle.kts)
+├── vd-server/       Android library -- VirtualDisplay server (Gradle module)
 ```
 
 ## Virtual Display Architecture
@@ -129,13 +128,13 @@ Parallel connection model with WiFi (3 connections) and USB tracks.
 
 ### vd-server (Shell-Privileged Process)
 
-Standalone Java source, compiled directly by `app-client/build.gradle.kts` `buildVdServer` task (javac → d8 → JAR), NOT a Gradle module. Deployed by phone to `/sdcard/DiLinkAuto/`.
+Android library module (`com.android.library`), compiled via `bundleLibRuntimeToJarDebug` then D8 into a JAR by the `buildVdServer` task in `app-client/build.gradle.kts`. Depends on `:protocol` and `kotlinx-coroutines-core`. Deployed by phone to `/sdcard/DiLinkAuto/`.
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| VirtualDisplayServer | `VirtualDisplayServer.java` | Creates VD, NIO write queue + Selector reader, H.264 encoder, configurable FPS |
-| FakeContext | `FakeContext.java` | Spoofs `com.android.shell` for DisplayManager access |
-| SurfaceScaler | `SurfaceScaler.java` | EGL/GLES GPU downscale pipeline, periodic re-draw on idle |
+| VirtualDisplayServer | `VirtualDisplayServer.kt` | Creates VD, NIO write queue + Selector reader, H.264 encoder, configurable FPS, backpressure |
+| FakeContext | `FakeContext.kt` | Spoofs `com.android.shell` for DisplayManager access |
+| SurfaceScaler | `SurfaceScaler.kt` | EGL/GLES GPU downscale pipeline, skips GL work on idle (relies on encoder repeat-previous-frame-after) |
 
 ## Connection Flow
 
@@ -179,7 +178,7 @@ States: IDLE -> CONNECTING -> CONNECTED -> STREAMING
 | **Reverse VD connection** | VD server connects TO phone (not phone to VD), simplifying firewall/NAT handling. |
 | **NIO non-blocking everywhere** | All sockets non-blocking: WiFi connections, VD server localhost, Selector-based reads. No blocking I/O in the pipeline. |
 | **Configurable FPS** | Car sends `targetFps` in handshake, VD server uses it. All pipeline timeouts derived from `FRAME_INTERVAL_MS = 1000/fps`. |
-| **Periodic SurfaceScaler re-draw** | Feeds encoder input every frame interval even on static content. Prevents encoder starvation. |
+| **Encoder repeat-previous-frame-after** | SurfaceScaler skips GL work on idle frames. Encoder set to repeat last frame for up to 500ms on static content, preventing starvation without GPU overhead. |
 | **Early decoder start** | Decoder starts on offscreen SurfaceTexture when first CONFIG arrives, before MirrorScreen's TextureView is created. Prevents keyframe loss during UI composition. |
 | **Smart network callback** | `onLost` ignores unrelated network drops (mobile data). Only tears down session if the active connection's network is lost. |
 | **Car auto-update with messaging** | Phone sends UPDATING_CAR before installing. Car shows status, doesn't reconnect blindly. |
@@ -193,23 +192,24 @@ States: IDLE -> CONNECTING -> CONNECTED -> STREAMING
 | **logSink callbacks** | VideoDecoder and UsbAdbConnection route logs through protocol to phone's FileLog. |
 | **ADB prehashed auth** | AUTH_SIGNATURE uses `NONEwithRSA` + SHA-1 DigestInfo prefix (prehashed). Matches AOSP's `RSA_sign(NID_sha1)`. "Always allow" persists correctly. |
 | **Display power via SurfaceControl** | `DisplayControl` loaded from `services.jar` via `ClassLoaderFactory` (Android 14+). Falls back to `cmd display power-off/on`. Phone restores display on VD disconnect. |
-| **Decoder catchup** | When queue exceeds 100ms of frames, skips every other non-keyframe (2x playback speed) to catch up with realtime. |
+| **Decoder catchup** | Four graduated speedup zones: normal (0-6 frames), gentle 1.5x (7-12), medium 2x (13-20), aggressive 3x (21+). Keyframes never skipped. |
 | **App launch dedup** | `am start` without `--activity-clear-task`. Existing apps resume instead of restarting. |
+| **VD server backpressure** | Drops non-keyframes at encoder when write queue depth exceeds 6 frames. Prevents unbounded memory growth. |
 | **User disconnect** | Stays IDLE, no auto-reconnect. Persisted to SharedPreferences. |
 
 ## Technology Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Language | Kotlin 1.9.22 (apps), Java 17 (VD server) |
+| Language | Kotlin 1.9.22 (all modules) |
 | Build | Gradle 8.7, AGP 8.2.2 |
 | UI | Jetpack Compose + Material 3 |
-| Video | MediaCodec H.264 (encoder: VD server 12Mbps CBR High, decoder: car) |
+| Video | MediaCodec H.264 (encoder: VD server 8Mbps CBR Main, decoder: car) |
 | GPU | EGL14 + GLES20 + SurfaceTexture (SurfaceScaler with periodic re-draw) |
 | Networking | NIO ServerSocketChannel / SocketChannel / Selector, Android NSD (mDNS) |
 | USB ADB | Custom protocol in protocol/ module (shared), logSink for diagnostics |
 | WiFi ADB | dadb 1.2.10 (car auto-update) |
 | Async | Kotlin Coroutines + Flow |
 | Min API | 29 (Android 10) |
-| App Version | versionCode = 46 (read at runtime via PackageManager) |
+| App Version | versionCode read at runtime via PackageManager (shared in gradle.properties) |
 | Protocol Version | PROTOCOL_VERSION = 1 |

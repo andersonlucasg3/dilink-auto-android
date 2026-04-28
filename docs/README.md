@@ -1,6 +1,6 @@
 # DiLink-Auto
 
-**v0.13.1** — Use your phone apps on your car's built-in screen. Open-source, no Google Services required.
+Use your phone apps on your car's built-in screen. Open-source, no Google Services required.
 
 An open-source alternative to Android Auto for **any Android 10+ phone** paired with **BYD DiLink 3.0+** infotainment systems. Originally motivated by the Xiaomi HyperOS / Chinese ROM gap, but works universally.
 
@@ -9,7 +9,7 @@ An open-source alternative to Android Auto for **any Android 10+ phone** paired 
 
 ## What It Does
 
-DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at 60fps, 12Mbps, with the phone's screen turned off to save battery.
+DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at up to 60fps, 8Mbps CBR, with the phone's screen turned off to save battery.
 
 **Original motivation:** bridging the gap when your phone can't run Android Auto (Chinese ROM, no Google Play Services) but your car only supports Android Auto (no CarWith, CarPlay, or Carlife). But DiLink-Auto works with any Android phone — Google Services or not.
 
@@ -59,7 +59,7 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 ## Current Status
 
 **Working:**
-- 60fps H.264 video streaming (12Mbps CBR, High profile)
+- 60fps H.264 video streaming (8Mbps CBR, Main profile, configurable via handshake)
 - Full touch input (multi-touch, pinch-to-zoom)
 - App launcher with search, alphabetical sort, 64dp icons
 - Notifications on car screen with progress bars, tap to open
@@ -67,7 +67,7 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 - Auto-update: phone detects outdated car app and updates it over WiFi ADB
 - Phone screen off during streaming (battery saving)
 - Guided onboarding for all required permissions
-- Internationalization: English, Portuguese, Russian, Belarusian, Kazakh, Ukrainian, Uzbek
+- Internationalization: English, Portuguese, Russian, Belarusian, French, Kazakh, Ukrainian, Uzbek
 - Display restore after USB disconnect (v0.14.0+)
 - Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
 
@@ -77,7 +77,7 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 - VD server process restarts on USB disconnect (reconnects automatically).
 - Hotspot must be enabled manually (Android 16 limitation).
 - Occasional visual artifacts — decoder restart race, recovers at next keyframe (~1s).
-- Streaming latency ~100-200ms under load. CBR 12Mbps.
+- Streaming latency ~100-200ms under load. CBR 8Mbps.
 - Display may stay off after abrupt USB disconnect (fixed in v0.14.0).
 
 ## Documentation

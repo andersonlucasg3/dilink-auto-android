@@ -17,6 +17,10 @@ The phone client manages VD server deployment, car auto-update, and 3-connection
 
 ## Components
 
+### ClientApp
+
+Application class. Creates notification channels (`dilinkauto_service`, `dilinkauto_update`), initializes `UpdateManager` on create.
+
 ### UpdateManager
 
 Self-update mechanism that checks GitHub Releases for new versions.
@@ -29,12 +33,12 @@ Self-update mechanism that checks GitHub Releases for new versions.
 
 Entry point with two screens:
 
-- **OnboardingScreen** (first launch): guides the user through each required permission one at a time — All Files Access, Battery Optimization, Accessibility Service, Notification Access. Each step explains what breaks without the permission. User can grant or skip. On completion, the main screen appears.
-- **ClientScreen** (subsequent launches): status card, start/stop button, Install on Car, self-update card, and remaining permission status for anything skipped during onboarding.
+- **OnboardingScreen** (first launch): 7-step wizard — Welcome, All Files Access, Battery Optimization, Accessibility Service, Notification Access, Car Setup, Done. Each permission step explains what breaks without it. Auto-advances when permission is granted. User can skip any step.
+- **ClientScreen** (subsequent launches): status card, start/stop button, Install on Car, self-update card, Share Logs button, and remaining permission status for anything skipped during onboarding.
 
 ### ConnectionService
 
-Foreground service that manages the phone-car connection lifecycle with 3 dedicated connections.
+Foreground service that manages the phone-car connection lifecycle with 3 dedicated connections. Auto-starts when the phone app is opened (e.g., via car USB ADB).
 
 - **Control connection** (port 9637): NIO TCP server on `0.0.0.0`, handles handshake, heartbeat, app commands, DATA channel
 - **Video connection** (port 9638): accepted after handshake, passed to VirtualDisplayClient for video relay
@@ -63,12 +67,25 @@ Accepts reverse connection from the VD server process on `localhost:19637`. Take
 - Touch writes to localhost are synchronous with `FrameCodec.writeAll()` under `writeLock`
 - On disconnect: restores physical display (`cmd display power-on 0` + `KEYCODE_WAKEUP`) as safety net when VD server process is killed before cleanup
 
+### AdbBridge
+
+Fallback shell command helper. Provides `execShell()` and `execFast()` using `Runtime.exec()` for VD server operations and display power management when direct API reflection fails.
+
+### VirtualDisplayManager
+
+Manages app launching on the physical display when VD is not in use. Bridges to `InputInjectionService` for gesture-based input injection.
+
+### VideoEncoder
+
+MediaProjection + MediaCodec H.264 encoder using `AUTO_MIRROR` virtual display. Alternative encoding path (not used in the primary streaming pipeline which flows through VD server).
+
 ### FileLog
 
 File-based logger that bypasses Android logcat filtering (HyperOS filters `Log.i/d` for non-system apps).
 
 - Writes to `/sdcard/DiLinkAuto/client.log`
 - `rotate()`: archives current log as `client-YYYYMMDD-HHmmss.log`, starts fresh
+- `zipLogs()`: creates `dilinkauto-logs.zip` from all `.log` files for sharing
 - Keeps 10 logs max (9 archived + current)
 - Thread-safe: lock-free ConcurrentLinkedQueue drained by writer thread
 - Also calls `android.util.Log.*` for standard logcat output

@@ -66,6 +66,12 @@ Foreground service managing the full connection lifecycle with a parallel prereq
 - Skips video/input connection attempts and reconnect loop during update
 - After `pm install -r`, car app restarts fresh
 
+**State Flows:**
+- `_state`, `_phoneName`, `_appList`, `_notifications`, `_mediaMetadata`, `_playbackState`: primary state exposed to UI
+- `_videoReady`: true when first non-config video frame arrives
+- `_statusMessage`: human-readable status for UI display
+- `_vdStackEmpty` (SharedFlow): emitted when phone reports VD has no activities (triggers navigation to home)
+
 **VD Server Launch:**
 - `deployVdServer()`: `shellNoWait` with CLASSPATH from handshake's vdServerJarPath
 - Args: `W H DPI PORT EW EH FPS` — FPS passed from handshake's targetFps
@@ -84,15 +90,24 @@ Foreground service managing the full connection lifecycle with a parallel prereq
 
 H.264 decoder using MediaCodec with Surface output (GPU-direct rendering).
 
-- Frame queue: 30 frames (500ms at 60fps) — buffers startup race and network jitter
+- Frame queue: 15 frames — buffers startup race and network jitter
 - `onFrameReceived()`: queues frames even before `start()` is called
 - `start()`: feeds cached CONFIG first, then drains queue
-- Drop-oldest on queue full, with keyframe tracking (logs dropped keyframes separately)
-- `KEY_LOW_LATENCY = 1` for minimum decode delay
+- Drop-oldest on queue full: prefers dropping P-frames, evicts queued P-frames for keyframes/CONFIG
+- `KEY_LOW_LATENCY = 1`, `KEY_PRIORITY = 0` for minimum decode delay
 - CONFIG (SPS/PPS) cached and replayed on decoder restart
 - `isRunning` property for early start coordination
 - `logSink` callback routes all decoder logs to phone via carLogSend
-- Catchup mode: when queue exceeds 100ms of frames, skips every other non-keyframe (2x speed) to stay realtime
+- Catchup mode: four graduated speedup zones based on queue depth — normal (0-6 frames), gentle 1.5x (7-12 frames, skips 1 of 3 non-keyframes), medium 2x (13-20 frames, skips 1 of 2), aggressive 3x (21+ frames, skips 2 of 3). Keyframes never skipped.
+- Flushes codec and re-feeds CONFIG on 10+ consecutive dequeueInputBuffer drops
+
+### ServerApp
+
+Application class. Creates notification channel `dilinkauto_car_service` with `IMPORTANCE_LOW`.
+
+### RemoteAdbController
+
+Direct ADB client using dadb library. Provides tap, swipe, back, home, and app launch via shell commands on the virtual display. Used as an alternative input path.
 
 ### CarLaunchScreen
 
@@ -107,11 +122,14 @@ Full-screen connection-focused composable shown before the phone connection is e
 ### PersistentNavBar
 
 76dp left navigation bar — **only shown in streaming mode** — with:
-- Notifications button with badge
+- Clock display (HH:mm, updates every 1s)
+- Eject button (disconnects and persists user preference)
+- Network status indicator
+- Notifications button with unread badge count
 - Home button
 - Back button
-- Recent app icons (pruned when apps become unavailable)
-- 40dp icons, 14sp text
+- Recent app icons (max 5, pruned when apps become unavailable)
+- 40dp icons, 12-14sp text
 
 Width computed to guarantee even viewport for H.264 encoder.
 
@@ -132,6 +150,22 @@ Shown as the main content area when streaming mode is active and current screen 
 - Alphabetical sort
 - Manual IP entry
 - Connection status
+
+### LauncherScreen (Legacy)
+
+Full integrated launcher layout with `CarStatusBar`, `SideNavBar` (80dp), and `AppGrid`. Not used in the current `CarShell` routing — the active UI uses `PersistentNavBar` + `HomeContent`/`MirrorContent`/`NotificationContent` composables inline.
+
+### RecentAppsState
+
+Tracks recently launched apps (max 5), persisted to SharedPreferences. `pruneUnavailable()` removes apps no longer present when app list updates.
+
+### NavBarComponents
+
+Individual nav bar widget composables: `ClockDisplay` (updates every 1s), `NetworkInfo` (connected/disconnected state), `RecentAppIcon` (40dp, with active state highlight), `NavActionButton` (40dp icons, 12sp labels).
+
+### CarTheme
+
+Material3 dark color scheme (`CarDark`) with category-specific app tile colors: Navigation (green), Music (pink), Communication (blue), Other (gray).
 
 ### Car Display Info
 
