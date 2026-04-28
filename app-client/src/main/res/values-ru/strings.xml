@@ -53,6 +53,11 @@
     <string name="updates_ready">Телефон: v%1$s готово</string>
     <string name="updates_install_btn">Установить обновление</string>
     <string name="updates_retry">Повторить</string>
+    <string name="updates_available_title">Доступно обновление</string>
+    <string name="updates_update_btn">Обновить</string>
+    <string name="updates_dismiss_btn">Пропустить</string>
+    <string name="updates_downloading_title">Загрузка обновления v%1$s</string>
+    <string name="updates_ready_title">Готово к установке</string>
     <string name="updates_car_title">Приложение авто</string>
     <string name="updates_car_desc">Установить или обновить приложение авто по WiFi ADB</string>
     <string name="updates_car_install">Установить</string>

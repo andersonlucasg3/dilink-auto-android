@@ -53,6 +53,11 @@
     <string name="updates_ready">Тэлефон: v%1$s гатова</string>
     <string name="updates_install_btn">Усталяваць абнаўленне</string>
     <string name="updates_retry">Паўтарыць</string>
+    <string name="updates_available_title">Даступна абнаўленне</string>
+    <string name="updates_update_btn">Абнавіць</string>
+    <string name="updates_dismiss_btn">Прапусціць</string>
+    <string name="updates_downloading_title">Загрузка абнаўлення v%1$s</string>
+    <string name="updates_ready_title">Гатова да ўстаноўкі</string>
     <string name="updates_car_title">Праграма аўто</string>
     <string name="updates_car_desc">Усталяваць або абнавіць праграму аўто праз WiFi ADB</string>
     <string name="updates_car_install">Усталяваць</string>

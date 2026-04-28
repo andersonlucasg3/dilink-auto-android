@@ -53,6 +53,11 @@
     <string name="updates_ready">Phone: v%1$s ready</string>
     <string name="updates_install_btn">Install Update</string>
     <string name="updates_retry">Retry</string>
+    <string name="updates_available_title">Update Available</string>
+    <string name="updates_update_btn">Update</string>
+    <string name="updates_dismiss_btn">Dismiss</string>
+    <string name="updates_downloading_title">Downloading Update v%1$s</string>
+    <string name="updates_ready_title">Ready to Install</string>
     <string name="updates_car_title">Car App</string>
     <string name="updates_car_desc">Install or update the car app over WiFi ADB</string>
     <string name="updates_car_install">Install</string>
