@@ -678,9 +678,9 @@ class CarConnectionService : Service() {
             val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
             val viewportWidth = displayMetrics.widthPixels - navBarPx
             val viewportHeight = displayMetrics.heightPixels
-            val phoneDpi = 480
+            val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
             val dpiScale = phoneDpi.toFloat() / 160f
-            val scaledH = ((600 * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
+            val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
             val scaledW = ((scaledH * viewportWidth.toFloat() / viewportHeight).toInt()) and 0x7FFFFFFE.toInt()
 
             val jarPath = vdServerJarPath
