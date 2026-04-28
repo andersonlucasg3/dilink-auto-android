@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.nav.PersistentNavBar
 import com.dilinkauto.server.ui.nav.RecentAppsState
@@ -203,7 +205,7 @@ fun CarShell(service: CarConnectionService) {
                                 )
                                 androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
                                 androidx.compose.material3.Text(
-                                    statusMessage.ifEmpty { "Starting virtual display..." },
+                                    statusMessage.ifEmpty { stringResource(R.string.status_starting_vd) },
                                     color = androidx.compose.ui.graphics.Color.White,
                                     fontSize = 18.sp
                                 )

@@ -28,7 +28,7 @@ class ClientApp : Application() {
 
         val updateChannel = NotificationChannel(
             CHANNEL_UPDATE,
-            "App Updates",
+            getString(R.string.notification_channel_update),
             NotificationManager.IMPORTANCE_LOW
         ).apply { setShowBadge(false) }
         manager.createNotificationChannel(updateChannel)

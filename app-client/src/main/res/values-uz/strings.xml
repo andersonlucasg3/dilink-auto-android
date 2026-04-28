@@ -152,4 +152,48 @@
     <string name="channel_prerelease">Oldindan reliz</string>
     <string name="channel_release_desc">Barqaror relizlar — kundalik foydalanish uchun tavsiya etiladi</string>
     <string name="channel_prerelease_desc">Ishlab chiqish yig\'imi — eng so\'nggi xususiyatlar, beqaror bo\'lishi mumkin</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_distribution">Tarqatish</string>
+
+    <!-- Install on Car Status -->
+    <string name="car_install_status_searching">Avtomobil qidirilmoqda</string>
+    <string name="car_install_status_connecting">Avtomobilga ulanilmoqda</string>
+    <string name="car_install_status_checking_version">Versiya tekshirilmoqda</string>
+    <string name="car_install_status_pushing">APK yuborilmoqda</string>
+    <string name="car_install_status_installing_stage">O\'rnatilmoqda</string>
+    <string name="car_install_status_launching">Ishga tushirilmoqda</string>
+    <string name="car_install_title_installed">Avtomobil ilovasi o\'rnatildi</string>
+    <string name="car_install_title_failed">O\'rnatish muvaffaqiyatsiz tugadi</string>
+    <string name="car_install_title_installing">Avtomobilga o\'rnatilmoqda</string>
+    <string name="car_install_status_connecting_to">%s ga ulanilmoqda…</string>
+    <string name="car_install_status_not_reachable">%s 5555-portda mavjud emas</string>
+    <string name="car_install_status_car_not_found">Avtomobil topilmadi. USB orqali ulang yoki WiFi ADB-ni tekshiring.</string>
+    <string name="car_install_status_already_up_to_date">Eng so\'nggi versiya (v%s)</string>
+    <string name="car_install_status_pushing_apk">APK yuborilmoqda (%d MB)…</string>
+    <string name="car_install_status_installing_version">v%s o\'rnatilmoqda…</string>
+    <string name="car_install_status_launching_car_app">Avtomobil ilovasi ishga tushirilmoqda…</string>
+    <string name="car_install_status_car_installed">Avtomobil ilovasi v%s o\'rnatildi!</string>
+    <string name="car_install_status_failed">Muvaffaqiyatsiz: %s</string>
+    <string name="car_install_status_error">Xato: %s</string>
+    <string name="car_install_status_car_apk_not_found">Avtomobil APK topilmadi</string>
+
+    <!-- Auto-Update Status -->
+    <string name="status_auto_update">Avtomobil ilovasi yangilanmoqda (v%1$s → v%2$s)…</string>
+    <string name="status_auto_update_complete">Avtomobil ilovasi yangilandi! Qayta ishga tushirilmoqda…</string>
+    <string name="status_update_failed">Yangilash muvaffaqiyatsiz: %s</string>
+    <string name="status_auto_update_failed">Avto-yangilash muvaffaqiyatsiz: %s</string>
+
+    <!-- Notification Actions -->
+    <string name="notification_action_stop">To\'xtatish</string>
+
+    <!-- Update Manager Errors -->
+    <string name="update_no_release">Reliz topilmadi</string>
+    <string name="update_no_version">Joriy versiyani aniqlab bo\'lmadi</string>
+    <string name="update_download_http_error">Yuklab olishda xato: HTTP %d</string>
+    <string name="update_invalid_apk">Yuklab olingan APK yaroqsiz</string>
+    <string name="update_download_failed">Yuklab olishda xato: %s</string>
+    <string name="update_file_not_found">Yangilash fayli topilmadi</string>
+    <string name="update_installer_error">O\'rnatuvchini ochib bo\'lmadi: %s</string>
+    <string name="update_rate_limit">GitHub so\'rov chegarasiga yetildi. Keyinroq urinib ko\'ring.</string>
 </resources>

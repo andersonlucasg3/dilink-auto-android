@@ -41,4 +41,50 @@
     <string name="manual_connect_label">Ou conecte manualmente por IP</string>
     <string name="manual_connect_ip_label">Endereço IP do telefone</string>
     <string name="manual_connect_button">Conectar</string>
+
+    <!-- Branding -->
+    <string name="branding_title">DiLink Auto</string>
+    <string name="branding_tagline">Use seus aplicativos na tela do carro</string>
+
+    <!-- Connection Status -->
+    <string name="status_ready_to_connect">Pronto para conectar</string>
+    <string name="status_connecting">Conectando…</string>
+    <string name="status_connected">Conectado</string>
+    <string name="status_streaming">Transmitindo</string>
+
+    <!-- How to Connect Steps -->
+    <string name="how_to_step_1">Ative o hotspot WiFi do seu telefone</string>
+    <string name="how_to_step_2">Conecte seu telefone na porta USB do carro</string>
+    <string name="how_to_step_3">Abra o app DiLink Auto no seu telefone</string>
+    <string name="how_to_step_4">Aguarde o carro conectar automaticamente</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_eject">Ejetar</string>
+    <string name="nav_alerts">Alertas</string>
+
+    <!-- Network -->
+    <string name="network_connected">Conectado</string>
+    <string name="network_offline">Offline</string>
+
+    <!-- Recent Apps -->
+    <string name="recent_app_fallback">App</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">Sem notificações</string>
+
+    <!-- Connection Status Messages -->
+    <string name="status_deploying_vd">Implantando tela virtual…</string>
+    <string name="status_waiting_usb">Aguardando USB…</string>
+    <string name="status_waiting_wifi">Aguardando WiFi…</string>
+    <string name="status_tcp_adb_failed">Conexão TCP ADB falhou</string>
+    <string name="status_tcp_adb_connected">TCP ADB conectado</string>
+    <string name="status_connecting_usb">Conectando USB… Verifique a autorização no telefone</string>
+    <string name="status_usb_failed">Falha na conexão USB — verifique autorização no telefone</string>
+    <string name="status_usb_connected">USB conectado</string>
+    <string name="status_updating_car">Atualizando app do carro…</string>
+    <string name="status_preparing_vd">Preparando tela virtual…</string>
+    <string name="status_starting_vd">Iniciando tela virtual…</string>
+    <string name="status_vd_failed">Servidor VD falhou</string>
+    <string name="status_waiting_video">Aguardando stream de vídeo…</string>
+    <string name="status_updating_please_wait">Atualizando app do carro… Aguarde</string>
 </resources>

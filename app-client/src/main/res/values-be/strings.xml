@@ -152,4 +152,48 @@
     <string name="channel_prerelease">Прэ-рэліз</string>
     <string name="channel_release_desc">Стабільныя рэлізы — рэкамендаваны для штодзённага выкарыстання</string>
     <string name="channel_prerelease_desc">Зборкі для распрацоўшчыкаў — найноўшыя функцыі, могуць быць нестабільнымі</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_distribution">Распаўсюджванне</string>
+
+    <!-- Install on Car Status -->
+    <string name="car_install_status_searching">Пошук аўтамабіля</string>
+    <string name="car_install_status_connecting">Падключэнне да аўтамабіля</string>
+    <string name="car_install_status_checking_version">Праверка версіі</string>
+    <string name="car_install_status_pushing">Адпраўка APK</string>
+    <string name="car_install_status_installing_stage">Усталяванне</string>
+    <string name="car_install_status_launching">Запуск</string>
+    <string name="car_install_title_installed">Праграма аўто ўсталявана</string>
+    <string name="car_install_title_failed">Усталяванне не атрымалася</string>
+    <string name="car_install_title_installing">Усталяванне ў аўтамабіль</string>
+    <string name="car_install_status_connecting_to">Падключэнне да %s…</string>
+    <string name="car_install_status_not_reachable">%s недаступны на порце 5555</string>
+    <string name="car_install_status_car_not_found">Аўтамабіль не знойдзены. Падключыце праз USB або праверце WiFi ADB.</string>
+    <string name="car_install_status_already_up_to_date">Ужо актуальна (v%s)</string>
+    <string name="car_install_status_pushing_apk">Адпраўка APK (%d МБ)…</string>
+    <string name="car_install_status_installing_version">Усталяванне v%s…</string>
+    <string name="car_install_status_launching_car_app">Запуск праграмы аўто…</string>
+    <string name="car_install_status_car_installed">Праграма аўто v%s усталявана!</string>
+    <string name="car_install_status_failed">Не атрымалася: %s</string>
+    <string name="car_install_status_error">Памылка: %s</string>
+    <string name="car_install_status_car_apk_not_found">APK аўтамабіля не знойдзены</string>
+
+    <!-- Auto-Update Status -->
+    <string name="status_auto_update">Абнаўленне праграмы аўто (v%1$s → v%2$s)…</string>
+    <string name="status_auto_update_complete">Праграма аўто абноўлена! Перазапуск…</string>
+    <string name="status_update_failed">Памылка абнаўлення: %s</string>
+    <string name="status_auto_update_failed">Памылка аўта-абнаўлення: %s</string>
+
+    <!-- Notification Actions -->
+    <string name="notification_action_stop">Стоп</string>
+
+    <!-- Update Manager Errors -->
+    <string name="update_no_release">Рэліз не знойдзены</string>
+    <string name="update_no_version">Не ўдалося вызначыць бягучую версію</string>
+    <string name="update_download_http_error">Памылка загрузкі: HTTP %d</string>
+    <string name="update_invalid_apk">Загружаны APK несапраўдны</string>
+    <string name="update_download_failed">Памылка загрузкі: %s</string>
+    <string name="update_file_not_found">Файл абнаўлення не знойдзены</string>
+    <string name="update_installer_error">Не ўдалося адкрыць усталёўшчык: %s</string>
+    <string name="update_rate_limit">Дасягнуты ліміт запытаў GitHub. Паспрабуйце пазней.</string>
 </resources>

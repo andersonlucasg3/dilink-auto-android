@@ -400,7 +400,7 @@ class ConnectionService : Service() {
                 // Do NOT start VD wait or send app list — the car will restart after update.
                 autoUpdateAttempted = true
                 FileLog.i(TAG, "Car app outdated (v$carVersion < v$myVersion) — updating, then waiting for reconnect")
-                _installStatusStatic.value = "Updating car app (v$carVersion → v$myVersion)..."
+                _installStatusStatic.value = getString(R.string.status_auto_update, carVersion.toString(), myVersion.toString())
                 autoUpdateCarApp(conn)
                 // autoUpdateCarApp restarts the car app — it will reconnect with the new version.
                 // We disconnect and go back to WAITING.
@@ -507,7 +507,7 @@ class ConnectionService : Service() {
                 }
 
                 FileLog.i(TAG, "Auto-updating car app at $carIp:5555...")
-                _installStatusStatic.value = "Connecting to car ADB..."
+                _installStatusStatic.value = getString(R.string.car_install_status_connecting_to, carIp)
                 val privKey = java.io.File(filesDir, "adbkey")
                 val pubKey = java.io.File(filesDir, "adbkey.pub")
                 if (!privKey.exists()) {
@@ -525,11 +525,11 @@ class ConnectionService : Service() {
                     val result = dadb.shell("pm install -r $remotePath").allOutput
                     FileLog.i(TAG, "Auto-update result: ${result.trim()}")
                     if (result.contains("Success")) {
-                        _installStatusStatic.value = "Car app updated! Restarting..."
+                        _installStatusStatic.value = getString(R.string.status_auto_update_complete)
                         FileLog.i(TAG, "Car app auto-updated — restarting")
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
                     } else {
-                        _installStatusStatic.value = "Update failed: ${result.trim()}"
+                        _installStatusStatic.value = getString(R.string.status_update_failed, result.trim())
                         autoUpdateFailedAt = System.currentTimeMillis()
                         FileLog.w(TAG, "Auto-update failed: ${result.trim()} — will retry in 5min")
                     }
@@ -537,7 +537,7 @@ class ConnectionService : Service() {
                     dadb.close()
                 }
             } catch (e: Exception) {
-                _installStatusStatic.value = "Auto-update failed: ${e.message}"
+                _installStatusStatic.value = getString(R.string.status_auto_update_failed, e.message ?: "unknown")
                 autoUpdateFailedAt = System.currentTimeMillis()
                 FileLog.e(TAG, "Auto-update failed: ${e.message} — will retry in 5min")
             }
@@ -625,25 +625,25 @@ class ConnectionService : Service() {
                 ensureAssetsReady()
                 val apkFile = java.io.File(filesDir, "app-server.apk")
                 if (!apkFile.exists()) {
-                    _installStatus.value = "Car APK not found"
+                    _installStatus.value = getString(R.string.car_install_status_car_apk_not_found)
                     FileLog.w(TAG, "No embedded car APK")
                     return@launch
                 }
 
-                _installStatus.value = if (explicitIp != null) "Connecting to $explicitIp..." else "Searching for car..."
+                _installStatus.value = if (explicitIp != null) getString(R.string.car_install_status_connecting_to, explicitIp) else getString(R.string.car_install_status_searching)
                 val carIp = if (!explicitIp.isNullOrBlank()) {
                     if (probePort(explicitIp, 5555)) explicitIp else {
-                        _installStatus.value = "$explicitIp not reachable on port 5555"
+                        _installStatus.value = getString(R.string.car_install_status_not_reachable, explicitIp)
                         null
                     }
                 } else findCarAdb()
                 if (carIp == null) {
-                    _installStatus.value = "Car not found. Plug into USB or check WiFi ADB."
+                    _installStatus.value = getString(R.string.car_install_status_car_not_found)
                     FileLog.w(TAG, "Could not find car ADB on USB or network")
                     return@launch
                 }
 
-                _installStatus.value = "Connecting to $carIp..."
+                _installStatus.value = getString(R.string.car_install_status_connecting_to, carIp)
                 FileLog.i(TAG, "Connecting to car ADB at $carIp:5555")
                 val privKey = java.io.File(filesDir, "adbkey")
                 val pubKey = java.io.File(filesDir, "adbkey.pub")
@@ -655,7 +655,7 @@ class ConnectionService : Service() {
                 val dadb = Dadb.create(carIp, 5555, keyPair)
 
                 try {
-                    _installStatus.value = "Checking version..."
+                    _installStatus.value = getString(R.string.car_install_status_checking_version)
                     val versionOutput = dadb.shell(
                         "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionCode"
                     ).allOutput
@@ -666,31 +666,31 @@ class ConnectionService : Service() {
                     FileLog.i(TAG, "Car app: installed=v$installedVersion, embedded=v$myVersion")
 
                     if (installedVersion >= myVersion) {
-                        _installStatus.value = "Already up-to-date (v$installedVersion)"
+                        _installStatus.value = getString(R.string.car_install_status_already_up_to_date, installedVersion.toString())
                         return@launch
                     }
 
-                    _installStatus.value = "Pushing APK (${apkFile.length() / 1024 / 1024}MB)..."
+                    _installStatus.value = getString(R.string.car_install_status_pushing_apk, apkFile.length() / 1024 / 1024)
                     val remotePath = "/data/local/tmp/app-server.apk"
                     dadb.push(apkFile, remotePath)
                     FileLog.i(TAG, "Car APK pushed (${apkFile.length()} bytes)")
 
-                    _installStatus.value = "Installing v$myVersion..."
+                    _installStatus.value = getString(R.string.car_install_status_installing_version, myVersion.toString())
                     val result = dadb.shell("pm install -r $remotePath").allOutput
                     FileLog.i(TAG, "Install result: ${result.trim()}")
 
                     if (result.contains("Success")) {
-                        _installStatus.value = "Launching car app..."
+                        _installStatus.value = getString(R.string.car_install_status_launching_car_app)
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
-                        _installStatus.value = "Car app v$myVersion installed!"
+                        _installStatus.value = getString(R.string.car_install_status_car_installed, myVersion.toString())
                     } else {
-                        _installStatus.value = "Failed: ${result.trim()}"
+                        _installStatus.value = getString(R.string.car_install_status_failed, result.trim())
                     }
                 } finally {
                     dadb.close()
                 }
             } catch (e: Exception) {
-                _installStatus.value = "Error: ${e.message}"
+                _installStatus.value = getString(R.string.car_install_status_error, e.message ?: "unknown")
                 FileLog.e(TAG, "Car app install failed", e)
             } finally {
                 delay(5000)
@@ -958,7 +958,7 @@ class ConnectionService : Service() {
             .setContentText(getString(messageRes))
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPi)
+            .addAction(android.R.drawable.ic_media_pause, getString(R.string.notification_action_stop), stopPi)
             .build()
     }
 

@@ -538,7 +538,7 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Retry", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.car_app_retry), fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
             } else {
                 Button(
@@ -591,7 +591,7 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    if (step.isGranted()) "Continue" else step.actionLabel,
+                    if (step.isGranted()) stringResource(R.string.onboarding_continue) else step.actionLabel,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -812,7 +812,7 @@ fun SettingsScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
-            Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(stringResource(R.string.settings_title), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
         }
 
         // Scrollable content
@@ -825,37 +825,37 @@ fun SettingsScreen(
             Spacer(Modifier.height(16.dp))
 
         // Permissions
-        Text("Permissions", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+        Text(stringResource(R.string.settings_permissions), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
             modifier = Modifier.padding(bottom = 12.dp))
 
         SetupItem(
             icon = if (hasAllFiles) Icons.Default.CheckCircle else Icons.Default.Folder,
-            title = if (hasAllFiles) "All Files Access ✓" else "All Files Access",
-            description = if (hasAllFiles) "Granted" else "Needed to deploy the virtual display server",
+            title = if (hasAllFiles) "${stringResource(R.string.perm_all_files)} ✓" else stringResource(R.string.perm_all_files),
+            description = if (hasAllFiles) stringResource(R.string.perm_granted) else stringResource(R.string.perm_all_files_granted),
             onClick = onOpenAllFilesAccess
         )
         Spacer(Modifier.height(8.dp))
 
         SetupItem(
             icon = if (hasBattery) Icons.Default.CheckCircle else Icons.Default.BatterySaver,
-            title = if (hasBattery) "Battery Optimization ✓" else "Battery Optimization",
-            description = if (hasBattery) "Granted" else "Keeps streaming alive when screen is off",
+            title = if (hasBattery) "${stringResource(R.string.perm_battery)} ✓" else stringResource(R.string.perm_battery),
+            description = if (hasBattery) stringResource(R.string.perm_granted) else stringResource(R.string.perm_battery_granted),
             onClick = onOpenBatteryExemption
         )
         Spacer(Modifier.height(8.dp))
 
         SetupItem(
             icon = if (hasAccessibility) Icons.Default.CheckCircle else Icons.Default.TouchApp,
-            title = if (hasAccessibility) "Accessibility Service ✓" else "Accessibility Service",
-            description = if (hasAccessibility) "Granted" else "Enables car touchscreen control",
+            title = if (hasAccessibility) "${stringResource(R.string.perm_accessibility)} ✓" else stringResource(R.string.perm_accessibility),
+            description = if (hasAccessibility) stringResource(R.string.perm_granted) else stringResource(R.string.perm_accessibility_granted),
             onClick = onOpenAccessibility
         )
         Spacer(Modifier.height(8.dp))
 
         SetupItem(
             icon = if (hasNotifications) Icons.Default.CheckCircle else Icons.Default.Notifications,
-            title = if (hasNotifications) "Notification Access ✓" else "Notification Access",
-            description = if (hasNotifications) "Granted" else "Forwards notifications to car display",
+            title = if (hasNotifications) "${stringResource(R.string.perm_notifications)} ✓" else stringResource(R.string.perm_notifications),
+            description = if (hasNotifications) stringResource(R.string.perm_granted) else stringResource(R.string.perm_notifications_granted),
             onClick = onOpenNotificationAccess
         )
 
@@ -863,15 +863,15 @@ fun SettingsScreen(
 
         SetupItem(
             icon = Icons.Default.Usb,
-            title = "USB Debugging",
-            description = "Required on both phone and car",
+            title = stringResource(R.string.perm_usb_debugging),
+            description = stringResource(R.string.perm_usb_desc),
             onClick = onOpenDeveloperOptions
         )
 
         Spacer(Modifier.height(32.dp))
 
         // Distribution Channel
-        Text("Distribution", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+        Text(stringResource(R.string.settings_distribution), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
             modifier = Modifier.padding(bottom = 12.dp))
 
         ChannelSelectorCard()
@@ -879,7 +879,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(32.dp))
 
         // Updates
-        Text("Updates", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+        Text(stringResource(R.string.updates_title), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
             modifier = Modifier.padding(bottom = 12.dp))
 
         UpdatesCard(
@@ -891,7 +891,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(32.dp))
 
         // About
-        Text("About", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+        Text(stringResource(R.string.about_title), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
             modifier = Modifier.padding(bottom = 12.dp))
 
         Card(
@@ -907,9 +907,9 @@ fun SettingsScreen(
                 val versionCode = try {
                     context.packageManager.getPackageInfo(context.packageName, 0).versionCode
                 } catch (_: Exception) { 0 }
-                Text("DiLink-Auto v$versionName (build $versionCode)", fontWeight = FontWeight.Medium, color = Color.White)
+                Text(stringResource(R.string.about_version, versionName), fontWeight = FontWeight.Medium, color = Color.White)
                 Spacer(Modifier.height(4.dp))
-                Text("Open-source alternative to Android Auto", fontSize = 12.sp, color = Color.Gray)
+                Text(stringResource(R.string.about_tagline), fontSize = 12.sp, color = Color.Gray)
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(R.string.about_dev_credit), fontSize = 12.sp, color = Color(0xFFB0BEC5))
                 TextButton(onClick = {
@@ -919,11 +919,11 @@ fun SettingsScreen(
                     Text(stringResource(R.string.about_dev_github), color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
                 }
                 Spacer(Modifier.height(12.dp))
-                Text("Open Source Libraries:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB0BEC5))
-                Text("dadb — Apache 2.0", fontSize = 12.sp, color = Color.Gray)
-                Text("Jetpack Compose — Apache 2.0", fontSize = 12.sp, color = Color.Gray)
-                Text("kotlinx-coroutines — Apache 2.0", fontSize = 12.sp, color = Color.Gray)
-                Text("scrcpy (FakeContext/SurfaceScaler concepts) — Apache 2.0", fontSize = 12.sp, color = Color.Gray)
+                Text(stringResource(R.string.about_libs_heading), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB0BEC5))
+                Text(stringResource(R.string.about_lib_dadb), fontSize = 12.sp, color = Color.Gray)
+                Text(stringResource(R.string.about_lib_compose), fontSize = 12.sp, color = Color.Gray)
+                Text(stringResource(R.string.about_lib_coroutines), fontSize = 12.sp, color = Color.Gray)
+                Text(stringResource(R.string.about_lib_scrcpy), fontSize = 12.sp, color = Color.Gray)
             }
         }
 
@@ -1024,55 +1024,55 @@ fun UpdatesCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Updates", fontWeight = FontWeight.Medium, color = Color.White)
+            Text(stringResource(R.string.updates_title), fontWeight = FontWeight.Medium, color = Color.White)
 
             // ── Self-update status ──
             Spacer(Modifier.height(8.dp))
             when (val state = updateState) {
                 is UpdateState.Idle -> {
                     TextButton(onClick = onCheckForUpdate) {
-                        Text("Check for phone update", color = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.updates_check_phone), color = MaterialTheme.colorScheme.primary)
                     }
                 }
                 is UpdateState.Checking -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(12.dp))
-                        Text("Checking for updates…", fontSize = 13.sp, color = Color.Gray)
+                        Text(stringResource(R.string.updates_checking), fontSize = 13.sp, color = Color.Gray)
                     }
                 }
                 is UpdateState.UpToDate -> {
-                    Text("Phone: up to date (v${state.version})", fontSize = 13.sp, color = Color(0xFF4CAF50))
+                    Text(stringResource(R.string.updates_up_to_date, state.version), fontSize = 13.sp, color = Color(0xFF4CAF50))
                 }
                 is UpdateState.Available -> {
-                    Text("Phone: v${state.version} available", fontSize = 13.sp, color = Color(0xFFFFA726))
+                    Text(stringResource(R.string.updates_available, state.version), fontSize = 13.sp, color = Color(0xFFFFA726))
                     val sizeMb = state.sizeBytes / (1024.0 * 1024.0)
-                    Text("${"%.1f".format(sizeMb)} MB", fontSize = 12.sp, color = Color.Gray)
+                    Text(stringResource(R.string.updates_size_mb, sizeMb), fontSize = 12.sp, color = Color.Gray)
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = onDownloadUpdate, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Download Update")
+                        Text(stringResource(R.string.updates_download_btn))
                     }
                 }
                 is UpdateState.Downloading -> {
                     LinearProgressIndicator(progress = downloadProgress / 100f, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = Color(0xFF30363D))
                     Spacer(Modifier.height(8.dp))
-                    Text("Downloading… ${downloadProgress}%", fontSize = 13.sp, color = Color.Gray)
+                    Text(stringResource(R.string.updates_downloading, downloadProgress), fontSize = 13.sp, color = Color.Gray)
                 }
                 is UpdateState.ReadyToInstall -> {
-                    Text("Phone: v${state.version} ready", fontSize = 13.sp, color = Color(0xFF4CAF50))
+                    Text(stringResource(R.string.updates_ready, state.version), fontSize = 13.sp, color = Color(0xFF4CAF50))
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = onInstallUpdate, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))) {
                         Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Install Update")
+                        Text(stringResource(R.string.updates_install_btn))
                     }
                 }
                 is UpdateState.Error -> {
                     Text(state.message, fontSize = 12.sp, color = Color(0xFFEF5350))
                     Spacer(Modifier.height(4.dp))
-                    TextButton(onClick = onCheckForUpdate) { Text("Retry", color = MaterialTheme.colorScheme.primary) }
+                    TextButton(onClick = onCheckForUpdate) { Text(stringResource(R.string.updates_retry), color = MaterialTheme.colorScheme.primary) }
                 }
             }
 
@@ -1266,12 +1266,12 @@ fun InstallStatusCard(status: String) {
 
     // Determine current stage index for progress visualization
     val stageLabels = listOf(
-        "Searching" to "Searching for car",
-        "Connecting" to "Connecting to car",
-        "Checking" to "Checking version",
-        "Push" to "Pushing APK",
-        "Install" to "Installing",
-        "Launching" to "Launching"
+        "Searching" to stringResource(R.string.car_install_status_searching),
+        "Connecting" to stringResource(R.string.car_install_status_connecting),
+        "Checking" to stringResource(R.string.car_install_status_checking_version),
+        "Push" to stringResource(R.string.car_install_status_pushing),
+        "Install" to stringResource(R.string.car_install_status_installing_stage),
+        "Launching" to stringResource(R.string.car_install_status_launching)
     )
     val currentStage = stageLabels.indexOfLast { status.contains(it.first, ignoreCase = true) }
 
@@ -1297,10 +1297,10 @@ fun InstallStatusCard(status: String) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     when {
-                        isDone -> "Car App Installed"
-                        isError -> "Installation Failed"
-                        isActive -> "Installing on Car"
-                        else -> "Car App"
+                        isDone -> stringResource(R.string.car_install_title_installed)
+                        isError -> stringResource(R.string.car_install_title_failed)
+                        isActive -> stringResource(R.string.car_install_title_installing)
+                        else -> stringResource(R.string.car_app_title)
                     },
                     fontWeight = FontWeight.Medium,
                     color = Color.White,
@@ -1365,12 +1365,12 @@ fun InstallStatusCard(status: String) {
 @Composable
 fun InstallStageProgress(status: String) {
     val stageLabels = listOf(
-        "Searching" to "Searching for car",
-        "Connecting" to "Connecting to car",
-        "Checking" to "Checking version",
-        "Push" to "Pushing APK",
-        "Install" to "Installing",
-        "Launching" to "Launching"
+        "Searching" to stringResource(R.string.car_install_status_searching),
+        "Connecting" to stringResource(R.string.car_install_status_connecting),
+        "Checking" to stringResource(R.string.car_install_status_checking_version),
+        "Push" to stringResource(R.string.car_install_status_pushing),
+        "Install" to stringResource(R.string.car_install_status_installing_stage),
+        "Launching" to stringResource(R.string.car_install_status_launching)
     )
     val currentStage = stageLabels.indexOfLast { status.contains(it.first, ignoreCase = true) }
 
