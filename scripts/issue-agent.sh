@@ -222,7 +222,7 @@ curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
   -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
 \`\`\`
 
-Update status: start reading docs → investigating code → implementing → building → done.
+Update status: 📖 reading docs → 🔍 investigating → ✏️ implementing → 🔨 building → ✅ done.
 ENDSTATUS
 
   cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
@@ -280,7 +280,7 @@ curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
   -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
 \`\`\`
 
-Update status: start reading docs → investigating code → implementing → building → done.
+Update status: 📖 reading docs → 🔍 investigating → ✏️ implementing → 🔨 building → ✅ done.
 ENDSTATUS
 
   cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
