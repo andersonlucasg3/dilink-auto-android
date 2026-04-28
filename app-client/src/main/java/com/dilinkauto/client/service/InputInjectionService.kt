@@ -36,7 +36,7 @@ class InputInjectionService : AccessibilityService() {
         virtualDisplayId = -1
         vdWidth = 0
         vdHeight = 0
-        activePtrPrev.clear()
+        activePaths.clear()
         Log.i(TAG, "Virtual display cleared")
     }
 
@@ -67,33 +67,40 @@ class InputInjectionService : AccessibilityService() {
         when (event.action) {
             InputMsg.TOUCH_DOWN -> {
                 // Release any stuck pointers from an interrupted previous session.
-                // Without this, a phantom finger accumulates and multi-touch gestures break.
-                activePtrPrev.keys.filter { it != event.pointerId }.toList().forEach {
-                    dispatchTap(activePtrPrev[it]!!.first, activePtrPrev[it]!!.second)
+                val stuck = activePaths.keys.filter { it != event.pointerId }.toList()
+                for (id in stuck) {
+                    dispatchTap(activePaths[id]!!.first().x, activePaths[id]!!.first().y)
                 }
-                activePtrPrev.clear()
-                activePtrPrev[event.pointerId] = Pair(pixelX, pixelY)
+                activePaths.clear()
+                activePaths[event.pointerId] = mutableListOf(
+                    Point(pixelX, pixelY, 0L)
+                )
             }
             InputMsg.TOUCH_MOVE -> {
-                val prev = activePtrPrev[event.pointerId] ?: return
-                // Dispatch incremental segment immediately so the VD gets real-time feedback.
-                // A 30ms stroke is short enough not to queue up at 60Hz input rate.
-                dispatchSegment(prev.first, prev.second, pixelX, pixelY)
-                activePtrPrev[event.pointerId] = Pair(pixelX, pixelY)
+                val points = activePaths[event.pointerId] ?: return
+                points.add(Point(pixelX, pixelY, (points.size * 16L).coerceAtLeast(1)))
             }
             InputMsg.TOUCH_UP -> {
-                activePtrPrev.remove(event.pointerId)
-                dispatchTap(pixelX, pixelY)
+                val points = activePaths.remove(event.pointerId)
+                if (points == null || points.size < 2) {
+                    dispatchTap(pixelX, pixelY)
+                } else {
+                    points.add(Point(pixelX, pixelY, (points.size * 16L).coerceAtLeast(1)))
+                    dispatchSwipe(points)
+                }
             }
         }
     }
 
-    private fun dispatchSegment(fromX: Float, fromY: Float, toX: Float, toY: Float) {
+    private fun dispatchSwipe(points: List<Point>) {
         val path = Path().apply {
-            moveTo(fromX, fromY)
-            lineTo(toX, toY)
+            moveTo(points.first().x, points.first().y)
+            for (i in 1 until points.size) {
+                lineTo(points[i].x, points[i].y)
+            }
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 30)
+        val totalDuration = points.last().elapsedMs.coerceIn(1, 5000)
+        val stroke = GestureDescription.StrokeDescription(path, 0, totalDuration)
         val gesture = buildGesture(stroke)
         dispatchGesture(gesture, null, null)
     }
@@ -123,7 +130,8 @@ class InputInjectionService : AccessibilityService() {
         return builder.build()
     }
 
-    private val activePtrPrev = mutableMapOf<Int, Pair<Float, Float>>()
+    private data class Point(val x: Float, val y: Float, val elapsedMs: Long)
+    private val activePaths = mutableMapOf<Int, MutableList<Point>>()
 
     companion object {
         private const val TAG = "InputInjectionService"
