@@ -56,10 +56,7 @@ git config user.name "DiLink-Auto Agent"
 # Prevent line-ending conversion (repo is Windows/CRLF, runner is Linux/LF)
 git config core.autocrlf false
 
-# Configure git push authentication via GITHUB_TOKEN
-if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
-  git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-fi
+# Configure git push authentication via GITHUB_TOKEN (runs before cd)
 
 # --- Helpers ---
 
@@ -101,8 +98,12 @@ status() {
     _status_http_code=$(echo "$_status_resp" | tail -1)
     _new_id=$(echo "$_status_resp" | sed '$d' | jq -r '.id // ""')
     if [ "$_status_http_code" = "201" ] && [ -n "$_new_id" ] && [ "$_new_id" != "null" ]; then
-      jq --arg sid "$_new_id" '. + {status_comment_id: $sid}' "$STATE_FILE" 2>/dev/null > "${STATE_FILE}.tmp" && \
-        mv "${STATE_FILE}.tmp" "$STATE_FILE" || true
+      if [ -f "$STATE_FILE" ]; then
+        jq --arg sid "$_new_id" '. + {status_comment_id: $sid}' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && \
+          mv "${STATE_FILE}.tmp" "$STATE_FILE" || true
+      else
+        jq -n --arg sid "$_new_id" '{status_comment_id: $sid}' > "$STATE_FILE" 2>/dev/null || true
+      fi
       echo "[status] Comment posted (id=$_new_id)"
     else
       echo "[status] ERROR: POST returned HTTP $_status_http_code — body saved to $_status_body_file"
@@ -350,6 +351,11 @@ else
 fi
 cd "$FIXED_WORKSPACE" || exit 1
 echo "[workspace] Working directory: $(pwd -P)"
+
+# Fix git remote — the clone may have local file:// origin from the runner workspace
+if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+fi
 
 # Record which conversations exist before the run (to detect the new one)
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | grep -v '/subagents/' | sort || true)
