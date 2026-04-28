@@ -10,6 +10,7 @@ set -euo pipefail
 # --- Paths ---
 AGENT_STATE_DIR="$HOME/.claude-agent/issues"
 SHARED_GRADLE_HOME="$HOME/.gradle-agent"
+AGENT_WORKSPACE_DIR="$HOME/agent-workspace"
 
 # Source machine-specific config (not in repo — created during runner setup)
 if [ -f "$HOME/.claude-agent/config" ]; then
@@ -283,6 +284,18 @@ else
   git checkout -f -b "$BRANCH"
 fi
 
+# Create a shared worktree at a fixed path so Claude Code sees the same
+# project directory regardless of which runner executes the job.
+# Without this, --resume fails because each runner has a different workspace path.
+WORKTREE="$AGENT_WORKSPACE_DIR/issue-${ISSUE_NUM}"
+if [ -d "$WORKTREE" ]; then
+  echo "[worktree] Cleaning stale worktree at $WORKTREE"
+  git worktree remove "$WORKTREE" --force 2>/dev/null || rm -rf "$WORKTREE"
+fi
+git worktree add "$WORKTREE" "$BRANCH"
+cd "$WORKTREE" || exit 1
+echo "[worktree] Working directory: $(pwd)"
+
 # Record which conversations exist before the run (to detect the new one)
 BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" \( -name '*.jsonl' -type f -o -type d \) 2>/dev/null | grep -v '/subagents$\|/\.' | sort || true)
 
@@ -479,62 +492,6 @@ SESSIONEOF
   fi
 
   if [ ! -f "$STATE_FILE" ]; then
-
-    write_resume_prompt "$COMMENT_BODY"
-
-    echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
-
-    # Copy conversation to all runner project dirs so --resume finds it
-    # Claude 2.1.121+ stores conversations as directories; older versions use .jsonl files.
-    # Copy both formats if they exist.
-    OLD_CONV=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}.jsonl" -type f 2>/dev/null | head -1)
-    OLD_CONV_DIR=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}" -type d 2>/dev/null | head -1)
-    if [ -n "$OLD_CONV" ] || [ -n "$OLD_CONV_DIR" ]; then
-      src_proj=""
-      if [ -n "$OLD_CONV" ]; then
-        src_proj=$(dirname "$OLD_CONV")
-      else
-        src_proj=$(dirname "$OLD_CONV_DIR")
-      fi
-      for proj in $(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -type d -name '--*' 2>/dev/null); do
-        if [ "$proj" != "$src_proj" ]; then
-          [ -n "$OLD_CONV" ] && cp -f "$OLD_CONV" "$proj/${CONV_ID}.jsonl" 2>/dev/null || true
-          [ -d "${src_proj}/${CONV_ID}" ] && cp -rf "${src_proj}/${CONV_ID}" "$proj/${CONV_ID}" 2>/dev/null || true
-        fi
-      done
-      echo "[resume] Copied conversation to all runner projects"
-    fi
-
-    register_session "$CONV_ID"
-
-    status "🔍 Continuing investigation..."
-    set +e
-    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
-    CLAUDE_EXIT=$?
-    set -e
-    if [ "$CLAUDE_EXIT" -ne 0 ]; then
-      echo "--- Resume failed (exit $CLAUDE_EXIT), starting fresh ---"
-      rm -f "$STATE_FILE"
-      write_initial_prompt
-      set +e
-      OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
-      CLAUDE_EXIT=$?
-      set -e
-      if [ "$CLAUDE_EXIT" -ne 0 ]; then
-        handle_error "Claude Code exited with code $CLAUDE_EXIT"
-      fi
-      CONV_ID=$(capture_conversation_id "$OUTPUT")
-      jq -n \
-        --arg cid "$CONV_ID" \
-        --arg branch "$BRANCH" \
-        --arg issue "$ISSUE_NUM" \
-        --arg title "$ISSUE_TITLE" \
-        '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
-        > "$STATE_FILE"
-      register_session "$CONV_ID"
-    fi
-    echo "--- Claude Code finished ---"
-  else
     echo "No prior state — treating as new for issue #$ISSUE_NUM"
     write_initial_prompt
 
