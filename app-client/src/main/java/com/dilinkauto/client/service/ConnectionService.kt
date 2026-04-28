@@ -43,6 +43,7 @@ class ConnectionService : Service() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var networkChangeDebounce: Job? = null
     private var autoUpdateAttempted = false
+    private var autoUpdateFailedAt = 0L
 
     enum class State { IDLE, WAITING, CONNECTED, STREAMING }
 
@@ -193,6 +194,9 @@ class ConnectionService : Service() {
     // ─── Connection Loop ───
 
     private fun startConnectionLoop() {
+        // Reset auto-update state on explicit start — gives user a fresh chance
+        autoUpdateAttempted = false
+        autoUpdateFailedAt = 0L
         connectionLoopJob?.cancel()
         connectionLoopJob = serviceScope.launch {
             // Register mDNS in background — don't block the listen loop.
@@ -371,7 +375,10 @@ class ConnectionService : Service() {
             val carVersion = request.appVersionCode
             @Suppress("DEPRECATION")
             val myVersion = packageManager.getPackageInfo(packageName, 0).versionCode
-            val needsUpdate = carVersion < myVersion && !autoUpdateAttempted
+            // Skip auto-update if a previous attempt failed recently (5min cooldown)
+            val updateCooldown = autoUpdateFailedAt > 0L &&
+                System.currentTimeMillis() - autoUpdateFailedAt < 5 * 60 * 1000L
+            val needsUpdate = carVersion < myVersion && !autoUpdateAttempted && !updateCooldown
 
             if (needsUpdate) {
                 // ─── UPDATE FLOW ───
@@ -523,13 +530,16 @@ class ConnectionService : Service() {
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
                     } else {
                         _installStatusStatic.value = "Update failed: ${result.trim()}"
+                        autoUpdateFailedAt = System.currentTimeMillis()
+                        FileLog.w(TAG, "Auto-update failed: ${result.trim()} — will retry in 5min")
                     }
                 } finally {
                     dadb.close()
                 }
             } catch (e: Exception) {
                 _installStatusStatic.value = "Auto-update failed: ${e.message}"
-                FileLog.e(TAG, "Auto-update failed: ${e.message}")
+                autoUpdateFailedAt = System.currentTimeMillis()
+                FileLog.e(TAG, "Auto-update failed: ${e.message} — will retry in 5min")
             }
         }
     }
@@ -915,7 +925,6 @@ class ConnectionService : Service() {
         controlConnection?.disconnect()
         controlConnection = null
         activeConnection = null
-        autoUpdateAttempted = false
         _serviceState.value = State.WAITING
     }
 
