@@ -300,8 +300,7 @@ ENDPROMPT
 # --- Main ---
 echo "=========================================="
 echo " DiLink-Auto Issue Agent"
-echo " Event:  $EVENT"
-echo " Issue:  #$ISSUE_NUM"
+log_step "Event: $EVENT | Issue: #$ISSUE_NUM"
 echo "=========================================="
 
 BRANCH=$(branch_name)
@@ -321,13 +320,13 @@ git clean -ffdx -e '.gradle' 2>/dev/null || true
 # Set up branch
 git fetch origin develop "$BRANCH" 2>/dev/null || true
 if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
-  echo "--- Reusing existing branch: $BRANCH ---"
+  log_step "Reusing branch: $BRANCH"
   git checkout -f "$BRANCH" 2>/dev/null || git checkout -f -b "$BRANCH" "origin/$BRANCH"
   git pull origin "$BRANCH" 2>/dev/null || true
   # Merge develop to get .gitattributes and prevent CRLF/LF churn
   git merge origin/develop --no-edit 2>/dev/null || git checkout -f origin/develop -- .gitattributes 2>/dev/null || true
 else
-  echo "--- Creating new branch: $BRANCH ---"
+  log_step "Creating branch: $BRANCH"
   git checkout -f develop
   git pull origin develop
   git branch -D "$BRANCH" 2>/dev/null || true
@@ -339,7 +338,7 @@ fi
 # their .git is a file (not a dir), which Claude Code 2.1.121 can't resolve.
 FIXED_WORKSPACE="$AGENT_WORKSPACE_DIR/issue-${ISSUE_NUM}"
 if [ -d "$FIXED_WORKSPACE" ]; then
-  echo "[workspace] Updating existing clone at $FIXED_WORKSPACE"
+  log_step "Workspace: updating clone at $FIXED_WORKSPACE"
   git -C "$FIXED_WORKSPACE" fetch origin develop 2>/dev/null || true
   git -C "$FIXED_WORKSPACE" checkout -f develop 2>/dev/null || true
   git -C "$FIXED_WORKSPACE" reset --hard "origin/develop" 2>/dev/null || true
@@ -378,6 +377,8 @@ if [ "$EVENT" = "issues" ]; then
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
+  _cmd="$CLAUDE_BIN --dangerously-skip-permissions -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+  log_step "Claude: $_cmd"
   set +e
   OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
@@ -546,6 +547,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
     status "🔄 Continuing investigation..."
+    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume $CONV_ID -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+    log_step "Claude: $_resume_cmd"
     set +e
     OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$CONV_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
@@ -582,7 +585,8 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
 
-    log_step 'Claude: $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading..."'"'"
+    _cmd="$CLAUDE_BIN --dangerously-skip-permissions -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+    log_step "Claude: $_cmd"
     set +e
     OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
