@@ -166,13 +166,27 @@ RELEASE_VERSION=""
 RELEASE_TARGET="develop"
 
 branch_name() {
-  # Check if this is a release issue
-  RELEASE_VERSION=$(echo "$ISSUE_BODY" | awk '/### Version/{v=1; next} v && /^[0-9]+\.[0-9]+\.[0-9]+/{print $1; exit} /^[[:space:]]*$/{next} {v=0}' | head -1 || true)
-  if [ -n "$RELEASE_VERSION" ]; then
-    RELEASE_TARGET="main"
-    echo "release/v${RELEASE_VERSION}"
+  # Release issues have a 'release' label plus ### Version field
+  if echo "${ISSUE_LABELS:-}" | jq -e 'index("release")' >/dev/null 2>&1; then
+    RELEASE_VERSION=$(echo "$ISSUE_BODY" | awk '/### Version/{v=1; next} v && /^[0-9]+\.[0-9]+\.[0-9]+/{print $1; exit} /^[[:space:]]*$/{next} {v=0}' | head -1 || true)
+    if [ -n "$RELEASE_VERSION" ]; then
+      RELEASE_TARGET="main"
+      echo "release/v${RELEASE_VERSION}"
+      return
+    fi
+  fi
+
+  # Map label to branch prefix
+  RELEASE_TARGET="develop"
+  if echo "${ISSUE_LABELS:-}" | jq -e 'index("bug")' >/dev/null 2>&1; then
+    echo "fix/${ISSUE_NUM}-agent"
+  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("feature")' >/dev/null 2>&1; then
+    echo "feature/${ISSUE_NUM}-agent"
+  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("investigation")' >/dev/null 2>&1; then
+    echo "investigate/${ISSUE_NUM}-agent"
+  elif echo "${ISSUE_LABELS:-}" | jq -e 'index("documentation")' >/dev/null 2>&1; then
+    echo "docs/${ISSUE_NUM}-agent"
   else
-    RELEASE_TARGET="develop"
     echo "issue/${ISSUE_NUM}-agent"
   fi
 }
