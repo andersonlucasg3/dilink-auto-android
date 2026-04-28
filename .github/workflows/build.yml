@@ -34,15 +34,18 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-          mkdir -p $ANDROID_HOME/cmdline-tools/latest
-          unzip -q cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools/latest
-          mv $ANDROID_HOME/cmdline-tools/latest/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/ 2>/dev/null || true
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
-            > /dev/null
+          if [ ! -f "$ANDROID_HOME/platforms/android-34/build.prop" ]; then
+            SDK_MGR_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            wget -q "$SDK_MGR_URL" -O /tmp/cmdline-tools.zip
+            mkdir -p $ANDROID_HOME/cmdline-tools/latest
+            unzip -q /tmp/cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools/latest
+            mv $ANDROID_HOME/cmdline-tools/latest/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/ 2>/dev/null || true
+            yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+              "platforms;android-34" \
+              "build-tools;34.0.0" \
+              > /dev/null
+          fi
 
       - name: Build Release APK
         run: |
