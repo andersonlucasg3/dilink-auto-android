@@ -291,7 +291,11 @@ WORKTREE="$AGENT_WORKSPACE_DIR/issue-${ISSUE_NUM}"
 if [ -d "$WORKTREE" ]; then
   echo "[worktree] Cleaning stale worktree at $WORKTREE"
   git worktree remove "$WORKTREE" --force 2>/dev/null || rm -rf "$WORKTREE"
+  git worktree prune
 fi
+# Detach HEAD in the current workspace to free the branch for the worktree
+git checkout --detach 2>/dev/null || true
+mkdir -p "$AGENT_WORKSPACE_DIR"
 git worktree add "$WORKTREE" "$BRANCH"
 cd "$WORKTREE" || exit 1
 echo "[worktree] Working directory: $(pwd)"
