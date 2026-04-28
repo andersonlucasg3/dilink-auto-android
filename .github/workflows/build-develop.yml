@@ -62,9 +62,15 @@ jobs:
           path: app-client/build/outputs/apk/debug/app-client-debug.apk
 
       - name: Update Dev Prerelease
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push'
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          # Find the matching dev tag on this commit (not the branch ref)
+          TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-dev' | head -1)
+          if [ -z "$TAG" ]; then
+            echo "No dev tag on this commit — skipping pre-release"
+            exit 0
+          fi
+          echo "Found dev tag: $TAG"
           VERSION_NAME="${TAG#v}"
 
           # Strip -NN suffix from both tag and gradle.properties for comparison.
