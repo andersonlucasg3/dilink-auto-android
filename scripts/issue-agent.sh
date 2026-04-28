@@ -342,14 +342,15 @@ log_step "EVENT=$EVENT ISSUE=$ISSUE_NUM STATE_FILE=$STATE_FILE"
 # --- Run Claude Code ---
 if [ "$EVENT" = "issues" ]; then
   echo "--- New issue: starting fresh conversation ---"
-  status "Analyzing request..."
+  status "🔍 Analyzing request..."
   write_initial_prompt
 
   echo "--- Starting Claude Code (new conversation) ---"
-  _cmd="$CLAUDE_BIN --dangerously-skip-permissions -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+  AGENT_SESSION_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "issue-${ISSUE_NUM}-$(date +%s)")
+  _cmd="$CLAUDE_BIN --dangerously-skip-permissions --session-id \"$AGENT_SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
   log_step "Claude: $_cmd"
   set +e
-  OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+  OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions --session-id "$AGENT_SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
   CLAUDE_EXIT=$?
   set -e
   echo "--- Claude Code output ---"
@@ -374,21 +375,21 @@ if [ "$EVENT" = "issues" ]; then
   SUMMARY_JSON=$(extract_summary_json "$OUTPUT")
   echo "Summary: $SUMMARY_JSON"
 
-  # Save state (skip if CONV_ID is invalid — e.g. "." "null" or empty)
-  if [ -n "$CONV_ID" ] && [ "$CONV_ID" != "." ] && [ "$CONV_ID" != "null" ] && [ "${#CONV_ID}" -ge 20 ]; then
+  # Save state with per-issue session ID
+  if [ -n "$AGENT_SESSION_ID" ] && [ "${#_session_id}" -ge 20 ]; then
     _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
     jq -n \
-      --arg cid "$CONV_ID" \
+      --arg sid "$AGENT_SESSION_ID" \
       --arg branch "$BRANCH" \
       --arg issue "$ISSUE_NUM" \
       --arg title "$ISSUE_TITLE" \
-      --arg sid "$_existing_sid" \
-      '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $sid}' \
+      --arg csid "$_existing_sid" \
+      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid}' \
       > "$STATE_FILE"
-    echo "State saved to $STATE_FILE"
-    register_session "$CONV_ID"
+    echo "State saved to $STATE_FILE (session=$AGENT_SESSION_ID)"
+    register_session "$AGENT_SESSION_ID"
   else
-    echo "WARNING: Invalid CONV_ID ($CONV_ID) — not saving state"
+    echo "WARNING: Invalid session_id ($AGENT_SESSION_ID) — not saving state"
   fi
 
   # Commit and push if changes were made
@@ -503,26 +504,23 @@ elif [ "$EVENT" = "issue_comment" ]; then
   echo "--- Issue comment: resuming or starting conversation ---"
 
   if [ -f "$STATE_FILE" ]; then
-    CONV_ID=$(jq -r '.conversation_id' "$STATE_FILE")
-    if [ "$CONV_ID" = "null" ] || [ "$CONV_ID" = "." ] || [ "${#CONV_ID}" -lt 20 ]; then
-      echo "Invalid CONV_ID in state ($CONV_ID) — clearing state"
+    SESSION_ID=$(jq -r '.session_id // ""' "$STATE_FILE")
+    if [ "$SESSION_ID" = "null" ] || [ "$SESSION_ID" = "." ] || [ "${#SESSION_ID}" -lt 20 ]; then
+      echo "Invalid session_id in state ($SESSION_ID) — clearing state"
       rm -f "$STATE_FILE"
-      CONV_ID=""
+      SESSION_ID=""
     fi
-    echo "Found prior state — resuming conversation: $CONV_ID"
+    echo "Found prior state — resuming: $SESSION_ID"
 
     write_initial_prompt
     write_resume_prompt "$COMMENT_BODY"
 
-    # Git worktree ensures all runners share the same working directory path,
-    # so Claude Code's project hash is consistent — no need to copy or relocate.
-
-    echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
+    echo "--- Resuming Claude Code: $SESSION_ID (10m timeout) ---"
     status "🔄 Continuing investigation..."
-    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --continue -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
+    _resume_cmd="$CLAUDE_BIN --dangerously-skip-permissions --resume \"$SESSION_ID\" -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
     log_step "Claude: $_resume_cmd"
     set +e
-    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --continue -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     echo "--- Claude Code output (resume) ---"
@@ -560,9 +558,10 @@ elif [ "$EVENT" = "issue_comment" ]; then
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
 
     _cmd="$CLAUDE_BIN --dangerously-skip-permissions -p \"Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there.\""
-    log_step "Claude: $_cmd"
+    AGENT_SESSION_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "issue-${ISSUE_NUM}-$(date +%s)")
+    log_step "Claude: $_cmd (session=$AGENT_SESSION_ID)"
     set +e
-    OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions --session-id "$AGENT_SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     echo "[DEBUG] Claude exited with code $CLAUDE_EXIT"
