@@ -895,6 +895,8 @@ class ConnectionService : Service() {
         vdWaitJob = null
         vdClient?.disconnect()
         vdClient = null
+        // Clear stuck pointers from any interrupted touch session
+        InputInjectionService.instance?.clearVirtualDisplay()
         videoConnection?.disconnect()
         videoConnection = null
         inputConnection?.disconnect()

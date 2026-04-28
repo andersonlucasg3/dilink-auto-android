@@ -36,6 +36,7 @@ class InputInjectionService : AccessibilityService() {
         virtualDisplayId = -1
         vdWidth = 0
         vdHeight = 0
+        activePtrPrev.clear()
         Log.i(TAG, "Virtual display cleared")
     }
 
@@ -65,6 +66,12 @@ class InputInjectionService : AccessibilityService() {
 
         when (event.action) {
             InputMsg.TOUCH_DOWN -> {
+                // Release any stuck pointers from an interrupted previous session.
+                // Without this, a phantom finger accumulates and multi-touch gestures break.
+                activePtrPrev.keys.filter { it != event.pointerId }.toList().forEach {
+                    dispatchTap(activePtrPrev[it]!!.first, activePtrPrev[it]!!.second)
+                }
+                activePtrPrev.clear()
                 activePtrPrev[event.pointerId] = Pair(pixelX, pixelY)
             }
             InputMsg.TOUCH_MOVE -> {
