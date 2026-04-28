@@ -68,6 +68,11 @@ class MainActivity : ComponentActivity() {
             startConnectionService()
         }
 
+        // Check for updates every time the app is opened
+        if (onboardingCompleted) {
+            UpdateManager.checkForUpdate(force = true)
+        }
+
         setContent {
             DiLinkAutoTheme {
                 val installStatus by ConnectionService.installStatusFlow.collectAsState()
@@ -100,7 +105,9 @@ class MainActivity : ComponentActivity() {
                             onStopService = { stopConnectionService() },
                             onInstallOnCar = { ip -> installOnCar(ip) },
                             onOpenSettings = { showSettings = true },
-                            onShareLogs = { shareLogs() }
+                            onShareLogs = { shareLogs() },
+                            onDownloadUpdate = { UpdateManager.downloadUpdate() },
+                            onInstallUpdate = { UpdateManager.installUpdate(this) }
                         )
                     }
                 }
@@ -646,11 +653,16 @@ fun MainScreen(
     onStopService: () -> Unit,
     onInstallOnCar: (String?) -> Unit,
     onOpenSettings: () -> Unit,
-    onShareLogs: () -> Unit
+    onShareLogs: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit
 ) {
     val serviceState by ConnectionService.serviceState.collectAsState()
     val installStatus by ConnectionService.installStatusFlow.collectAsState()
+    val updateState by UpdateManager.updateState.collectAsState()
+    val downloadProgress by UpdateManager.downloadProgress.collectAsState()
     val isRunning = serviceState != ConnectionService.State.IDLE
+    var updateDismissed by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -686,6 +698,100 @@ fun MainScreen(
 
         // Service status
         StatusCard(serviceState)
+
+        // Update available notification
+        if (updateState is UpdateState.Available && !updateDismissed) {
+            val available = updateState as UpdateState.Available
+            Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B3A2A))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Download, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.updates_available_title), fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(stringResource(R.string.updates_available, available.version), fontSize = 13.sp, color = Color(0xFFB0BEC5))
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onDownloadUpdate,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.updates_update_btn))
+                        }
+                        OutlinedButton(
+                            onClick = { updateDismissed = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(stringResource(R.string.updates_dismiss_btn), color = Color.Gray)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Download progress
+        if (updateState is UpdateState.Downloading) {
+            val downloading = updateState as UpdateState.Downloading
+            Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(stringResource(R.string.updates_downloading_title, downloading.version), fontWeight = FontWeight.Medium, color = Color.White)
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(progress = downloadProgress / 100f, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = Color(0xFF30363D))
+                    Spacer(Modifier.height(4.dp))
+                    Text(stringResource(R.string.updates_downloading, downloadProgress), fontSize = 13.sp, color = Color.Gray)
+                }
+            }
+        }
+
+        // Ready to install
+        if (updateState is UpdateState.ReadyToInstall) {
+            val ready = updateState as UpdateState.ReadyToInstall
+            Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B3A2A))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.updates_ready_title), fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(stringResource(R.string.updates_ready, ready.version), fontSize = 13.sp, color = Color(0xFFB0BEC5))
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = onInstallUpdate,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                    ) {
+                        Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.updates_install_btn))
+                    }
+                }
+            }
+        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -1043,6 +1149,10 @@ fun UpdatesCard(
                 }
                 is UpdateState.UpToDate -> {
                     Text(stringResource(R.string.updates_up_to_date, state.version), fontSize = 13.sp, color = Color(0xFF4CAF50))
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onCheckForUpdate) {
+                        Text(stringResource(R.string.updates_check_phone), color = MaterialTheme.colorScheme.primary)
+                    }
                 }
                 is UpdateState.Available -> {
                     Text(stringResource(R.string.updates_available, state.version), fontSize = 13.sp, color = Color(0xFFFFA726))
