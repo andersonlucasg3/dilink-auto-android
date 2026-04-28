@@ -316,16 +316,20 @@ if [ "$EVENT" = "issues" ]; then
   SUMMARY_JSON=$(extract_summary_json "$OUTPUT")
   echo "Summary: $SUMMARY_JSON"
 
-  # Save state
-  jq -n \
-    --arg cid "$CONV_ID" \
-    --arg branch "$BRANCH" \
-    --arg issue "$ISSUE_NUM" \
-    --arg title "$ISSUE_TITLE" \
-    '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
-    > "$STATE_FILE"
-  echo "State saved to $STATE_FILE"
-  register_session "$CONV_ID"
+  # Save state (skip if CONV_ID is invalid — e.g. "." or empty from corrupted capture)
+  if [ -n "$CONV_ID" ] && [ "$CONV_ID" != "." ] && [ "${#CONV_ID}" -ge 20 ]; then
+    jq -n \
+      --arg cid "$CONV_ID" \
+      --arg branch "$BRANCH" \
+      --arg issue "$ISSUE_NUM" \
+      --arg title "$ISSUE_TITLE" \
+      '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
+      > "$STATE_FILE"
+    echo "State saved to $STATE_FILE"
+    register_session "$CONV_ID"
+  else
+    echo "WARNING: Invalid CONV_ID ($CONV_ID) — not saving state"
+  fi
 
   # Commit and push if changes were made
   CHANGES_MADE=$(echo "$SUMMARY_JSON" | jq -r '.changes_made // false')
