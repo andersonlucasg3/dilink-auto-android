@@ -16,6 +16,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for tag-based pre-releases and changelog
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
