@@ -580,15 +580,9 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     echo "--- Starting Claude Code (new conversation, no prior state) ---"
 
-    STABLE_WORK="/tmp/issue-agent-${ISSUE_NUM}"
-    rm -rf "$STABLE_WORK"
-    echo "[DEBUG] ln -sf $(pwd -P) -> $STABLE_WORK"
-    ln -sf "$(pwd -P)" "$STABLE_WORK"
-    echo "[DEBUG] symlink created"
-
-    echo "[DEBUG] invoking Claude: $CLAUDE_BIN"
+    log_step "Claude: $CLAUDE_BIN --dangerously-skip-permissions -p ...agent-prompt-${ISSUE_NUM}.txt"
     set +e
-    OUTPUT=$(cd "$STABLE_WORK" && timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 7200 $CLAUDE_BIN --dangerously-skip-permissions -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
     CLAUDE_EXIT=$?
     set -e
     echo "[DEBUG] Claude exited with code $CLAUDE_EXIT"
