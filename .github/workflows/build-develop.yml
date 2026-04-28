@@ -64,6 +64,7 @@ jobs:
       - name: Update Dev Prerelease
         if: github.event_name == 'push'
         run: |
+          git fetch --tags origin 2>/dev/null || true
           # Find the matching dev tag on this commit (not the branch ref)
           TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-dev' | head -1)
           if [ -z "$TAG" ]; then
