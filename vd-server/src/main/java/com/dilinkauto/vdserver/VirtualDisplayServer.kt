@@ -3,8 +3,10 @@ package com.dilinkauto.vdserver
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
+import android.os.SystemClock
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.Surface
 import com.dilinkauto.protocol.FrameCodec
@@ -206,15 +208,16 @@ class VirtualDisplayServer(
 
             // Tell client the display is ready (direct write before threads start).
             // Format: MSG_DISPLAY_READY (1) + displayId (4) + flags (1)
-            // flags bit 0 = inputManager available (IInputManager.injectInputEvent works)
-            val flags: Byte = if (inputManager != null && injectInputEventMethod != null) 1 else 0
+            // flags bit 0 = IInputManager.injectInputEvent actually works
+            val hasInjection = checkDirectInjectionWorks()
+            val flags: Byte = if (hasInjection) 1 else 0
             val readyBuf = ByteBuffer.allocate(6)
             readyBuf.put(MSG_DISPLAY_READY)
             readyBuf.putInt(displayId)
             readyBuf.put(flags)
             readyBuf.flip()
             writeAllBlocking(ch, readyBuf)
-            log("Display ready: id=$displayId ${width}x${height}@${dpi} injectInput=${flags.toInt() == 1}")
+            log("Display ready: id=$displayId ${width}x${height}@${dpi} injectInput=$hasInjection")
 
             // Launch home activity on VD so the encoder has content
             execShell("am start --display $displayId -a android.intent.action.MAIN -c android.intent.category.HOME")
@@ -918,6 +921,40 @@ class VirtualDisplayServer(
         } catch (e: Exception) {
             err("InputManager init failed: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace()
+        }
+    }
+
+    /** Returns true if IInputManager.injectInputEvent actually works (has INJECT_EVENTS). */
+    private fun checkDirectInjectionWorks(): Boolean {
+        if (inputManager == null || injectInputEventMethod == null) return false
+        try {
+            val displayId = this.displayId
+            if (displayId < 0) return false
+            val downTime = SystemClock.uptimeMillis()
+            val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0 })
+            val coords = arrayOf(MotionEvent.PointerCoords().apply { x = 0f; y = 0f; pressure = 1.0f })
+            val event = MotionEvent.obtain(downTime, downTime,
+                MotionEvent.ACTION_DOWN, 1, props, coords, 0, 0, 1.0f, 1.0f,
+                0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+            try {
+                setDisplayIdMethod?.invoke(event, displayId)
+            } catch (_: Exception) {}
+            injectInputEventMethod!!.invoke(inputManager, event, 0)
+            // Send UP to release the test pointer
+            val upEvent = MotionEvent.obtain(downTime, downTime + 1,
+                MotionEvent.ACTION_UP, 1, props, coords, 0, 0, 1.0f, 1.0f,
+                0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+            try {
+                setDisplayIdMethod?.invoke(upEvent, displayId)
+            } catch (_: Exception) {}
+            injectInputEventMethod!!.invoke(inputManager, upEvent, 0)
+            event.recycle()
+            upEvent.recycle()
+            log("Direct injection verified — INJECT_EVENTS available")
+            return true
+        } catch (e: Exception) {
+            log("Direct injection not available: ${e.javaClass.simpleName}")
+            return false
         }
     }
 
