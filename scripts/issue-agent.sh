@@ -201,7 +201,7 @@ You are an autonomous development agent for **DiLink-Auto** — an open-source A
 Read all docs in docs/*.md before starting.
 Build with: `./gradlew :app-client:assembleDebug`
 You are already on the correct branch for this issue — do NOT create a new branch.
-You must `git add -A && git commit` all changes before your final output.
+You must: (1) `git add -A && git commit` (2) `git push origin HEAD` before finishing.
 
 CRITICAL: This is a temporary GitHub Actions runner session. Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
 
