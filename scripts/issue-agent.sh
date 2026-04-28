@@ -422,12 +422,13 @@ if [ "$EVENT" = "issues" ]; then
     git commit -m "$(echo "$SUMMARY_JSON" | jq -r '"Agent: \(.summary)"')" || true
   fi
   # Push if local differs from remote (agent may have committed without pushing)
+  PUSH_OK=true
   if git rev-parse "origin/$BRANCH" >/dev/null 2>&1; then
     if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$BRANCH")" ]; then
-      git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+      git push origin "$BRANCH" || PUSH_OK=false
     fi
   else
-    git push origin "$BRANCH" || echo "Warning: push failed (non-fatal)"
+    git push -u origin "$BRANCH" || PUSH_OK=false
   fi
   COMMIT_SHA=$(git rev-parse --short HEAD)
 
@@ -477,6 +478,20 @@ EOFCOMMENT
     cat >> /tmp/summary-comment.md << EOFCOMMENT
 ### Build
 ❌ Build failed — check the [workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})
+
+EOFCOMMENT
+  fi
+
+  if [ "$PUSH_OK" = true ]; then
+    cat >> /tmp/summary-comment.md << EOFCOMMENT
+### Push
+✅ Pushed to [\`${BRANCH}\`](${SERVER_URL}/${REPO}/tree/${BRANCH})${COMMIT_SHA:+ (\`${COMMIT_SHA}\`)}
+
+EOFCOMMENT
+  else
+    cat >> /tmp/summary-comment.md << EOFCOMMENT
+### Push
+❌ Push failed — changes are committed locally but not on GitHub
 
 EOFCOMMENT
   fi
