@@ -15,12 +15,16 @@ android {
         versionName = project.property("app.versionName").toString()
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile = file(System.getenv("RELEASE_KEYSTORE_FILE") ?: "dilink-auto-release.keystore")
-            storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: "D1L1nk@R3l3as3#2026!"
-            keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "dilinkauto"
-            keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: "D1L1nk@R3l3as3#2026!"
+    val releaseKeystorePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+    val releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+    if (releaseKeystorePassword != null && releaseKeyPassword != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(System.getenv("RELEASE_KEYSTORE_FILE") ?: "dilink-auto-release.keystore")
+                storePassword = releaseKeystorePassword
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "dilinkauto"
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -32,8 +36,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
         }
+    }
+
+    // Apply release signing to both debug and release when env vars are available.
+    // This ensures users can install any build over another without signature conflicts.
+    signingConfigs.findByName("release")?.let { releaseConfig ->
+        buildTypes.getByName("release").signingConfig = releaseConfig
+        buildTypes.getByName("debug").signingConfig = releaseConfig
     }
 
     buildFeatures {
