@@ -202,28 +202,9 @@ Read all docs in docs/*.md before starting.
 Build with: `./gradlew :app-client:assembleDebug`
 This is a temporary GitHub Actions runner session. You must `git add -A && git commit` all changes before your final output.
 
-CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, push, and issue close.
+CRITICAL: This is a temporary GitHub Actions runner session. Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
 
 ENDPROMPT
-
-  # Append status update instructions (bash expands variables directly, no sed)
-  _sid="${STATUS_COMMENT_ID:-unknown}"
-  _token="${GITHUB_TOKEN:-}"
-  _repo="${REPO}"
-  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDSTATUS
-
-## Status Updates
-To keep the user informed, run this to update the status comment on the issue:
-
-\`\`\`bash
-curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
-  -H "Accept: application/vnd.github+json" \\
-  "https://api.github.com/repos/${_repo}/issues/comments/${_sid}" \\
-  -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
-\`\`\`
-
-Update status: 📖 reading docs → 🔍 investigating → ✏️ implementing → 🔨 building → ✅ done.
-ENDSTATUS
 
   cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
 ## GitHub Issue #${ISSUE_NUM}: ${ISSUE_TITLE}
@@ -244,6 +225,25 @@ ${ISSUE_BODY}
 
 Set "action" to "close" to close the issue, "pr" to create a pull request to develop, or "none".
 ENDPROMPT
+
+  # Status update instructions at the bottom (tools, not the main focus)
+  _sid="${STATUS_COMMENT_ID:-unknown}"
+  _token="${GITHUB_TOKEN:-}"
+  _repo="${REPO}"
+  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDSTATUS
+
+## Status Updates
+Keep the user informed by running this:
+
+\`\`\`bash
+curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
+  -H "Accept: application/vnd.github+json" \\
+  "https://api.github.com/repos/${_repo}/issues/comments/${_sid}" \\
+  -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
+\`\`\`
+
+📖 reading docs → 🔍 investigating → ✏️ implementing → 🔨 building → ✅ done
+ENDSTATUS
 }
 
 write_resume_prompt() {
@@ -260,7 +260,7 @@ ${comment}
 - If asked to change direction, change it — don't keep the old approach.
 - Review \`git diff HEAD~1\` to see what's already on this branch.
 
-CRITICAL: This is a temporary GitHub Actions runner session — git add -A && git commit all changes before finishing. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments, push, and issue close.
+CRITICAL: This is a temporary GitHub Actions runner session. Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
 
 ENDPROMPT
 
