@@ -376,7 +376,7 @@ if [ "$EVENT" = "issues" ]; then
   echo "Summary: $SUMMARY_JSON"
 
   # Save state with per-issue session ID
-  if [ -n "$AGENT_SESSION_ID" ] && [ "${#_session_id}" -ge 20 ]; then
+  if [ -n "$AGENT_SESSION_ID" ] && [ "${#AGENT_SESSION_ID}" -ge 20 ]; then
     _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
     jq -n \
       --arg sid "$AGENT_SESSION_ID" \
@@ -586,14 +586,14 @@ elif [ "$EVENT" = "issue_comment" ]; then
 
     _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
     jq -n \
-      --arg cid "$CONV_ID" \
+      --arg sid "${AGENT_SESSION_ID:-unknown}" \
       --arg branch "$BRANCH" \
       --arg issue "$ISSUE_NUM" \
       --arg title "$ISSUE_TITLE" \
-      --arg sid "$_existing_sid" \
-      '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $sid}' \
+      --arg csid "$_existing_sid" \
+      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid}' \
       > "$STATE_FILE"
-      register_session "$CONV_ID"
+      register_session "${AGENT_SESSION_ID:-unknown}"
   fi
 
   SUMMARY_JSON=$(extract_summary_json "$OUTPUT")
