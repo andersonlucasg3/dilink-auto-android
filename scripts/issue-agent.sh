@@ -133,9 +133,11 @@ capture_conversation_id() {
   # Try parsing from stdout
   cid=$(echo "$output" | grep -oiP 'conversation[_-]?\s*(id)?:\s*\K[a-f0-9-]{20,}' | head -1 || true)
 
-  # Fallback: newest .jsonl across ALL project directories
+  # Fallback: newest conversation (directory or .jsonl) across ALL project dirs
   if [ -z "$cid" ] && [ -d "$CLAUDE_PROJECTS_DIR" ]; then
-    cid=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -1 | xargs basename | sed 's/\.jsonl$//' || true)
+    cid=$(find "$CLAUDE_PROJECTS_DIR" \( -name '*.jsonl' -type f -o -type d \) 2>/dev/null \
+      | grep -v '/subagents$\|/\.' \
+      | xargs ls -dt 2>/dev/null | head -1 | xargs basename | sed 's/\.jsonl$//' || true)
   fi
 
   echo "$cid"
@@ -174,7 +176,7 @@ register_session() {
   local sessions_dir="$(dirname "$CLAUDE_PROJECTS_DIR")/sessions"
   mkdir -p "$sessions_dir"
   cat > "${sessions_dir}/${cid}.json" << SESSIONEOF
-{"pid":0,"sessionId":"${cid}","cwd":"${cwd}","startedAt":$(date +%s)000,"version":"2.1.120","kind":"headless","entrypoint":"claude-cli"}
+{"pid":0,"sessionId":"${cid}","cwd":"${cwd}","startedAt":$(date +%s)000,"version":"2.1.121","kind":"headless","entrypoint":"claude-cli"}
 SESSIONEOF
   echo "[session] Registered ${cid} (cwd: ${cwd})"
 }
@@ -281,8 +283,8 @@ else
   git checkout -f -b "$BRANCH"
 fi
 
-# Record which .jsonl files exist before the run (to detect the new one)
-BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
+# Record which conversations exist before the run (to detect the new one)
+BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" \( -name '*.jsonl' -type f -o -type d \) 2>/dev/null | grep -v '/subagents$\|/\.' | sort || true)
 
 # --- Run Claude Code ---
 if [ "$EVENT" = "issues" ]; then
@@ -302,8 +304,8 @@ if [ "$EVENT" = "issues" ]; then
 
   CONV_ID=$(capture_conversation_id "$OUTPUT")
   if [ -z "$CONV_ID" ]; then
-    # Try detecting new .jsonl
-    AFTER_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | sort || true)
+    # Try detecting new conversation (directory or .jsonl)
+    AFTER_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" \( -name '*.jsonl' -type f -o -type d \) 2>/dev/null | grep -v '/subagents$\|/\.' | sort || true)
     NEW_JSONL=$(comm -13 <(echo "$BEFORE_JSONLS") <(echo "$AFTER_JSONLS") | head -1 || true)
     if [ -n "$NEW_JSONL" ]; then
       CONV_ID=$(basename "$NEW_JSONL" .jsonl)
@@ -431,14 +433,21 @@ elif [ "$EVENT" = "issue_comment" ]; then
     echo "--- Resuming Claude Code conversation: $CONV_ID (10m timeout) ---"
 
     # Copy conversation to all runner project dirs so --resume finds it
-    # (Claude resolves git root for project hash; we can't predict which runner)
+    # Claude 2.1.121+ stores conversations as directories; older versions use .jsonl files.
+    # Copy both formats if they exist.
     OLD_CONV=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}.jsonl" -type f 2>/dev/null | head -1)
-    if [ -n "$OLD_CONV" ]; then
-      OLD_PROJ=$(dirname "$OLD_CONV")
+    OLD_CONV_DIR=$(find "$CLAUDE_PROJECTS_DIR" -name "${CONV_ID}" -type d 2>/dev/null | head -1)
+    if [ -n "$OLD_CONV" ] || [ -n "$OLD_CONV_DIR" ]; then
+      local src_proj
+      if [ -n "$OLD_CONV" ]; then
+        src_proj=$(dirname "$OLD_CONV")
+      else
+        src_proj=$(dirname "$OLD_CONV_DIR")
+      fi
       for proj in $(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -type d -name '--*' 2>/dev/null); do
-        if [ "$proj" != "$OLD_PROJ" ]; then
-          cp -f "$OLD_CONV" "$proj/${CONV_ID}.jsonl" 2>/dev/null || true
-          [ -d "${OLD_PROJ}/${CONV_ID}" ] && cp -rf "${OLD_PROJ}/${CONV_ID}" "$proj/${CONV_ID}" 2>/dev/null || true
+        if [ "$proj" != "$src_proj" ]; then
+          [ -n "$OLD_CONV" ] && cp -f "$OLD_CONV" "$proj/${CONV_ID}.jsonl" 2>/dev/null || true
+          [ -d "${src_proj}/${CONV_ID}" ] && cp -rf "${src_proj}/${CONV_ID}" "$proj/${CONV_ID}" 2>/dev/null || true
         fi
       done
       echo "[resume] Copied conversation to all runner projects"
