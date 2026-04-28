@@ -375,12 +375,14 @@ if [ "$EVENT" = "issues" ]; then
 
   # Save state (skip if CONV_ID is invalid — e.g. "." "null" or empty)
   if [ -n "$CONV_ID" ] && [ "$CONV_ID" != "." ] && [ "$CONV_ID" != "null" ] && [ "${#CONV_ID}" -ge 20 ]; then
+    _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
     jq -n \
       --arg cid "$CONV_ID" \
       --arg branch "$BRANCH" \
       --arg issue "$ISSUE_NUM" \
       --arg title "$ISSUE_TITLE" \
-      '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
+      --arg sid "$_existing_sid" \
+      '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $sid}' \
       > "$STATE_FILE"
     echo "State saved to $STATE_FILE"
     register_session "$CONV_ID"
@@ -580,12 +582,14 @@ elif [ "$EVENT" = "issue_comment" ]; then
       fi
     fi
 
+    _existing_sid=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
     jq -n \
       --arg cid "$CONV_ID" \
       --arg branch "$BRANCH" \
       --arg issue "$ISSUE_NUM" \
       --arg title "$ISSUE_TITLE" \
-      '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title}' \
+      --arg sid "$_existing_sid" \
+      '{conversation_id: $cid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $sid}' \
       > "$STATE_FILE"
       register_session "$CONV_ID"
   fi
