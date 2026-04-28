@@ -60,13 +60,16 @@ fi
 
 # Post or update a single status comment — first call creates, later calls edit
 status() {
+  echo "[status] DEBUG: status() called"
   local body="$1"
   # Write body to temp file to avoid shell escaping issues with multiline markdown
   local body_file="/tmp/agent-comment-body-${ISSUE_NUM}.json"
-  jq -n --rawfile body <(echo "$body") '{body: $body}' > "$body_file" 2>/dev/null || {
-    echo "[status] WARNING: failed to build comment JSON"
+  echo "[status] DEBUG: writing body to $body_file"
+  echo "$body" | jq -R -s '{body: .}' > "$body_file" 2>/dev/null || {
+    echo "[status] WARNING: failed to build comment JSON (jq pipe)"
     return
   }
+  echo "[status] DEBUG: body file written"
 
   local status_id=""
   [ -f "$STATE_FILE" ] && status_id=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || true)
@@ -352,6 +355,9 @@ BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null 
 
 # Read status comment ID (set by status() calls above) for agent prompt
 STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+
+echo "[DEBUG] EVENT=$EVENT ISSUE_NUM=$ISSUE_NUM"
+echo "[DEBUG] STATE_FILE=$STATE_FILE exists=$(test -f "$STATE_FILE" && echo yes || echo no)"
 
 # --- Run Claude Code ---
 if [ "$EVENT" = "issues" ]; then
