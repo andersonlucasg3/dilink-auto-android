@@ -134,11 +134,15 @@ capture_conversation_id() {
   # Try parsing from stdout
   cid=$(echo "$output" | grep -oiP 'conversation[_-]?\s*(id)?:\s*\K[a-f0-9-]{20,}' | head -1 || true)
 
-  # Fallback: newest conversation (directory or .jsonl) across ALL project dirs
+  # Fallback: newest .jsonl conversation across ALL project dirs
   if [ -z "$cid" ] && [ -d "$CLAUDE_PROJECTS_DIR" ]; then
-    cid=$(find "$CLAUDE_PROJECTS_DIR" \( -name '*.jsonl' -type f -o -type d \) 2>/dev/null \
-      | grep -v '/subagents$\|/\.' \
-      | xargs ls -dt 2>/dev/null | head -1 | xargs basename | sed 's/\.jsonl$//' || true)
+    cid=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null \
+      | grep -v '/subagents/' \
+      | xargs ls -t 2>/dev/null | head -1 | xargs basename | sed 's/\.jsonl$//' || true)
+  fi
+  # Reject invalid IDs (e.g. "." from corrupted detection)
+  if [ "$cid" = "." ] || [ "${#cid}" -lt 20 ]; then
+    cid=""
   fi
 
   echo "$cid"
@@ -320,24 +324,26 @@ else
   git checkout -f -b "$BRANCH"
 fi
 
-# Create a shared worktree at a fixed path so Claude Code sees the same
-# project directory regardless of which runner executes the job.
-# Without this, --resume fails because each runner has a different workspace path.
-WORKTREE="$AGENT_WORKSPACE_DIR/issue-${ISSUE_NUM}"
-if [ -d "$WORKTREE" ]; then
-  echo "[worktree] Cleaning stale worktree at $WORKTREE"
-  git worktree remove "$WORKTREE" --force 2>/dev/null || rm -rf "$WORKTREE"
-  git worktree prune
+# Clone to a fixed path so Claude Code sees the same project directory
+# regardless of which runner executes the job. Worktrees don't work because
+# their .git is a file (not a dir), which Claude Code 2.1.121 can't resolve.
+FIXED_WORKSPACE="$AGENT_WORKSPACE_DIR/issue-${ISSUE_NUM}"
+if [ -d "$FIXED_WORKSPACE" ]; then
+  echo "[workspace] Updating existing clone at $FIXED_WORKSPACE"
+  git -C "$FIXED_WORKSPACE" fetch origin 2>/dev/null || true
+  git -C "$FIXED_WORKSPACE" checkout -f "$BRANCH" 2>/dev/null || true
+  git -C "$FIXED_WORKSPACE" reset --hard "origin/$BRANCH" 2>/dev/null || true
+else
+  echo "[workspace] Creating new clone at $FIXED_WORKSPACE"
+  mkdir -p "$AGENT_WORKSPACE_DIR"
+  git clone --branch "$BRANCH" "file://$(pwd -P)" "$FIXED_WORKSPACE" 2>/dev/null || \
+    git clone "https://github.com/${REPO}.git" --branch "$BRANCH" "$FIXED_WORKSPACE"
 fi
-# Detach HEAD in the current workspace to free the branch for the worktree
-git checkout --detach 2>/dev/null || true
-mkdir -p "$AGENT_WORKSPACE_DIR"
-git worktree add "$WORKTREE" "$BRANCH"
-cd "$WORKTREE" || exit 1
-echo "[worktree] Working directory: $(pwd)"
+cd "$FIXED_WORKSPACE" || exit 1
+echo "[workspace] Working directory: $(pwd -P)"
 
 # Record which conversations exist before the run (to detect the new one)
-BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" \( -name '*.jsonl' -type f -o -type d \) 2>/dev/null | grep -v '/subagents$\|/\.' | sort || true)
+BEFORE_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | grep -v '/subagents/' | sort || true)
 
 # Read status comment ID (set by status() calls above) for agent prompt
 STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
@@ -361,7 +367,7 @@ if [ "$EVENT" = "issues" ]; then
   CONV_ID=$(capture_conversation_id "$OUTPUT")
   if [ -z "$CONV_ID" ]; then
     # Try detecting new conversation (directory or .jsonl)
-    AFTER_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" \( -name '*.jsonl' -type f -o -type d \) 2>/dev/null | grep -v '/subagents$\|/\.' | sort || true)
+    AFTER_JSONLS=$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -type f 2>/dev/null | grep -v '/subagents/' | sort || true)
     NEW_JSONL=$(comm -13 <(echo "$BEFORE_JSONLS") <(echo "$AFTER_JSONLS") | head -1 || true)
     if [ -n "$NEW_JSONL" ]; then
       CONV_ID=$(basename "$NEW_JSONL" .jsonl)
