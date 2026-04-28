@@ -510,9 +510,10 @@ elif [ "$EVENT" = "issue_comment" ]; then
       rm -f "$STATE_FILE"
       SESSION_ID=""
     fi
-    echo "Found prior state — resuming: $SESSION_ID"
+    if [ -n "$SESSION_ID" ]; then
+      echo "Found prior state — resuming: $SESSION_ID"
 
-    write_initial_prompt
+      write_initial_prompt
     write_resume_prompt "$COMMENT_BODY"
 
     echo "--- Resuming Claude Code: $SESSION_ID (10m timeout) ---"
@@ -542,6 +543,7 @@ elif [ "$EVENT" = "issue_comment" ]; then
     else
       echo "--- Claude Code resumed ---"
     fi
+    fi  # end [ -n "$SESSION_ID" ]
   fi
 
   if [ ! -f "$STATE_FILE" ]; then
