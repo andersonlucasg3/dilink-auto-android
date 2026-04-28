@@ -415,6 +415,8 @@ fun ConnectionStatus(
 @Composable
 fun ManualConnectBox(onConnect: (String) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences("dilinkauto", android.content.Context.MODE_PRIVATE) }
+    val savedIp = remember { prefs.getString("last_manual_ip", null) }
     val gatewayIp = remember {
         try {
             val wm = context.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
@@ -423,7 +425,9 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
             else ""
         } catch (_: Exception) { "" }
     }
-    var ipAddress by remember { mutableStateOf(gatewayIp.ifEmpty { "192.168.43.1" }) }
+    var ipAddress by remember {
+        mutableStateOf(savedIp ?: gatewayIp.ifEmpty { "192.168.43.1" })
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -453,7 +457,13 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
                 )
                 Spacer(Modifier.width(12.dp))
                 Button(
-                    onClick = { if (ipAddress.isNotBlank()) onConnect(ipAddress.trim()) },
+                    onClick = {
+                        val ip = ipAddress.trim()
+                        if (ip.isNotBlank()) {
+                            prefs.edit().putString("last_manual_ip", ip).apply()
+                            onConnect(ip)
+                        }
+                    },
                     modifier = Modifier.height(56.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
