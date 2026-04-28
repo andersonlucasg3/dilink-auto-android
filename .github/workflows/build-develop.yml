@@ -65,14 +65,15 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           VERSION_NAME="${TAG#v}"
 
-          # Strip -NN suffix from tag for comparison with gradle.properties
-          # e.g. v0.17.0-dev-02 → 0.17.0-dev to compare against app.versionName
-          BASE_VERSION=$(echo "$VERSION_NAME" | sed -E 's/-dev-[0-9]+$/-dev/')
-
-          # Verify tag base version matches gradle.properties
+          # Strip -NN suffix from both tag and gradle.properties for comparison.
+          # gradle.properties mirrors the tag exactly (e.g. 0.17.0-dev-02).
+          # Compare base versions: tag base → gradle base (both -dev without -NN).
+          TAG_BASE=$(echo "$VERSION_NAME" | sed -E 's/-dev-[0-9]+$/-dev/')
           FILE_VERSION=$(grep 'app.versionName' gradle.properties | sed 's/.*=//')
-          if [ "$BASE_VERSION" != "$FILE_VERSION" ]; then
-            echo "ERROR: Tag base version ($BASE_VERSION) does not match gradle.properties ($FILE_VERSION)"
+          FILE_BASE=$(echo "$FILE_VERSION" | sed -E 's/-dev-[0-9]+$/-dev/')
+
+          if [ "$TAG_BASE" != "$FILE_BASE" ]; then
+            echo "ERROR: Tag base ($TAG_BASE) does not match gradle.properties base ($FILE_BASE)"
             exit 1
           fi
 
