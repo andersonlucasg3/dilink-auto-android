@@ -276,6 +276,8 @@ class CarConnectionService : Service() {
                     _statusMessage.value = getString(R.string.status_waiting_usb)
                 } else if (!wifiReady && usbReady) {
                     _statusMessage.value = getString(R.string.status_waiting_wifi)
+                } else if (!wifiReady && !usbReady) {
+                    _statusMessage.value = getString(R.string.status_connecting)
                 }
             }
 
@@ -295,7 +297,8 @@ class CarConnectionService : Service() {
 
     private fun startWifiTrack() {
         // Strategy 1: Gateway IP retry loop (phone is hotspot)
-        // Retries every 3s — handles hotspot enabled after USB plug
+        // Retries every 3s until wifiReady — handles hotspot enabled after USB plug
+        // and Shizuku mode where phone's service may not be listening on first attempt
         scope.launch(Dispatchers.IO) {
             delay(500)
             while (isActive && !wifiReady && _state.value == State.CONNECTING) {
@@ -303,7 +306,6 @@ class CarConnectionService : Service() {
                 if (gatewayIp != null) {
                     carLogSend("WiFi track: trying gateway $gatewayIp")
                     connectToPhone(gatewayIp, Discovery.DEFAULT_PORT)
-                    break
                 }
                 delay(3000) // retry every 3 seconds
             }
