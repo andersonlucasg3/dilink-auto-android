@@ -109,3 +109,57 @@ Pour un fonctionnement fiable sur HyperOS :
 1. Paramètres -> Applications -> DiLink Auto -> Démarrage automatique -> Activer
 2. Paramètres -> Batterie -> DiLink Auto -> Aucune restriction
 3. Épinglez l'application dans les Applications récentes (appui long sur la fiche -> Épingler)
+## Conseils pour Samsung One UI
+
+Les appareils Samsung sous One UI 5+ (Android 13+) disposent de fonctions de sécurité et d'économie d'énergie supplémentaires qui peuvent empêcher DiLink-Auto de fonctionner correctement. Cela s'applique aux séries Galaxy A, M, S, Z et Tab.
+
+### Désactiver Auto Blocker (critique pour USB ADB)
+
+**Auto Blocker** bloque les commandes USB et peut empêcher la voiture de se connecter à votre téléphone via USB ADB. C'est le problème le plus courant lié à Samsung.
+
+1. **Paramètres → Sécurité et confidentialité → Auto Blocker → Désactivé**
+2. Si vous préférez garder Auto Blocker activé, désactivez au moins l'option **"Bloquer les commandes par câble USB"**
+
+### Autoriser l'accès à tous les fichiers
+
+Le gestionnaire de permissions Samsung peut révoquer automatiquement les permissions des applications que vous n'avez pas ouvertes récemment :
+
+1. **Paramètres → Applications → DiLink Auto → Autorisations → Fichiers et médias → Autoriser la gestion de tous les fichiers**
+2. Activez **"Autoriser la gestion de tous les fichiers"**
+3. Vérifiez qu'il reste ACTIVÉ après avoir fermé les paramètres (Samsung peut afficher une confirmation)
+
+### Désactiver l'optimisation de la batterie
+
+La gestion de la batterie de Samsung est plus agressive que celle d'Android standard :
+
+1. **Paramètres → Applications → DiLink Auto → Batterie → Illimitée**
+2. **Paramètres → Batterie → Limites d'utilisation en arrière-plan → Applications jamais en veille → Ajouter DiLink Auto**
+3. **Paramètres → Batterie → Limites d'utilisation en arrière-plan → Applications en veille profonde → Supprimer DiLink Auto** si listée
+
+### Verrouiller l'application dans les Récentes
+
+One UI de Samsung peut tuer les applications en arrière-plan pour libérer de la mémoire :
+
+1. Ouvrez les Applications récentes (glissez vers le haut depuis le bas avec navigation à 3 boutons ou par gestes)
+2. Appuyez sur l'icône DiLink Auto en haut de sa carte
+3. Sélectionnez **"Garder ouvert"**
+
+### Désactiver l'optimisation automatique de Samsung Device Care
+
+Device Care de Samsung peut arrêter automatiquement les services en arrière-plan :
+
+1. **Paramètres → Batterie et entretien de l'appareil → Automatisation → Optimisation quotidienne automatique → Désactivé**
+2. **Paramètres → Batterie et entretien de l'appareil → Automatisation → Redémarrage automatique → Désactivé**
+
+### Si vous voyez un popup d'autorisation "DeX"
+
+Certains appareils Samsung affichent un popup concernant "Samsung DeX" ou les autorisations "d'affichage externe" lorsqu'une application tente de créer un affichage virtuel. Même si les séries Galaxy A/M ne prennent pas en charge DeX, la boîte de dialogue peut apparaître. Appuyez simplement sur **"Autoriser"** ou **"Démarrer maintenant"**. Si la boîte de dialogue réapparaît, allez dans **Paramètres → Appareils connectés → Samsung DeX** et désactivez "Démarrage automatique lorsque HDMI est connecté".
+
+### Considérations de sécurité Knox
+
+Samsung Knox peut afficher une notification de sécurité lorsque DiLink-Auto accède à :
+- La surface d'affichage virtuel (pour l'encodage vidéo)
+- Le pont de débogage USB (pour la connexion ADB de la voiture)
+- Le stockage de tous les fichiers (pour le déploiement du serveur VD)
+
+Ces comportements sont normaux. Appuyez sur "Autoriser" ou "OK" sur toute invite liée à Knox. Si les invites persistent, vous pouvez temporairement abaisser la protection Knox à "Moyen" sous **Paramètres → Sécurité et confidentialité → Samsung Knox**.

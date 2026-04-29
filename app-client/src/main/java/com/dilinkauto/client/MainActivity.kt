@@ -686,6 +686,8 @@ fun MainScreen(
     val downloadProgress by UpdateManager.downloadProgress.collectAsState()
     val isRunning = serviceState != ConnectionService.State.IDLE
     var updateDismissed by remember { mutableStateOf(false) }
+    val isSamsung = remember { Build.MANUFACTURER.equals("samsung", ignoreCase = true) }
+    var samsungWarningDismissed by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -718,6 +720,36 @@ fun MainScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(16.dp))
+
+        // Samsung device warning
+        if (isSamsung && !samsungWarningDismissed) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF332211))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFFFA726), modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.samsung_warning_title), fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(stringResource(R.string.samsung_warning_desc), fontSize = 12.sp, color = Color(0xFFB0BEC5))
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onOpenSettings) {
+                            Text(stringResource(R.string.samsung_settings_guide), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                        TextButton(onClick = { samsungWarningDismissed = true }) {
+                            Text(stringResource(R.string.onboarding_skip_btn), fontSize = 13.sp, color = Color.Gray)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
         // Service status
         StatusCard(serviceState)

@@ -151,6 +151,11 @@
     <string name="donation_github">GitHub homiysi</string>
     <string name="donation_pix">Pix (Braziliya)</string>
 
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Samsung qurilmasi aniqlandi</string>
+    <string name="samsung_warning_desc">Samsung One UI qo‘shimcha sozlashni talab qiladi: Auto Blocker-ni o‘chiring (USB ADB-ni bloklaydi), batareyaga cheksiz ruxsat bering va barcha fayllarga kirishga ruxsat eting. Batafsil Sozlamalar bo‘limida.</string>
+    <string name="samsung_settings_guide">Samsung sozlash qo‘llanmasi</string>
+
     <!-- Distribution Channel -->
     <string name="channel_title">Tarqatish kanali</string>
     <string name="channel_release">Reliz</string>
