@@ -1,5 +1,7 @@
 package com.dilinkauto.server.ui.screen
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -16,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -29,6 +30,8 @@ import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
 import kotlin.math.max
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Car-optimized home screen — similar to Android Auto / CarPlay.
@@ -236,40 +239,55 @@ fun AppGrid(
         else sorted.filter { it.appName.contains(searchQuery, ignoreCase = true) }
     }
 
-    // Cache decoded app icons so they aren't re-decoded during scroll
-    val iconCache = remember { mutableMapOf<String, androidx.compose.ui.graphics.ImageBitmap?>() }
-    iconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
+    // Async-decoded icon cache — populated on Dispatchers.IO, composable reads reactively
+    val iconCache = remember { mutableStateMapOf<String, androidx.compose.ui.graphics.ImageBitmap?>() }
+
+    // Pre-decode icons in background when the app list arrives
+    LaunchedEffect(apps.size) {
+        if (apps.isEmpty()) return@LaunchedEffect
+        val toDecode = apps.filter { it.iconPng.isNotEmpty() && it.packageName !in iconCache }
+        for (app in toDecode) {
+            try {
+                val bmp = withContext(Dispatchers.IO) {
+                    val opts = BitmapFactory.Options().apply {
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    }
+                    BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size, opts)
+                }
+                if (bmp != null) {
+                    iconCache[app.packageName] = bmp.asImageBitmap()
+                }
+            } catch (e: Exception) {
+                Log.w("AppGrid", "Decode failed for ${app.packageName}: ${e.message}")
+            }
+        }
+    }
+
+    // Remove stale entries when apps change
+    remember(apps) {
+        iconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
+    }
 
     Column(modifier = modifier) {
-        // Grid + scrollbar row
         Row(modifier = Modifier.weight(1f)) {
-            BoxWithConstraints(modifier = Modifier.weight(1f)) {
-                // Fixed columns prevents layout recalc crashes during fast scroll
-                val gridColumns = when {
-                    maxWidth < 400.dp -> 3
-                    maxWidth < 600.dp -> 4
-                    else -> 5
-                }
-
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Fixed(gridColumns),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
-                        AppTile(
-                            app = app,
-                            iconCache = iconCache,
-                            onClick = { onAppClick(app.packageName) }
-                        )
-                    }
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Adaptive(minSize = 96.dp),
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
+                    AppTile(
+                        app = app,
+                        cachedIcon = iconCache[app.packageName],
+                        onClick = { onAppClick(app.packageName) }
+                    )
                 }
             }
 
-            // Visual-only scrollbar (no drag handler — LazyVerticalGrid scrolls natively)
+            // Visual-only scrollbar
             GridScrollbar(
                 state = gridState,
                 totalItems = filteredApps.size,
@@ -280,7 +298,7 @@ fun AppGrid(
             )
         }
 
-        // Search bar at the bottom
+        // Search bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { newValue ->
@@ -314,7 +332,6 @@ fun AppGrid(
             )
         )
 
-        // Note: apps control their own layout — portrait-only apps will be letterboxed
         Text(
             text = stringResource(R.string.landscape_app_note),
             fontSize = 11.sp,
@@ -328,8 +345,7 @@ fun AppGrid(
 }
 
 /**
- * Visual scrollbar for the app grid — tracks scroll position without handling input.
- * LazyVerticalGrid handles scrolling natively; this just shows where you are.
+ * Visual scrollbar — tracks position, no input handling.
  */
 @Composable
 private fun GridScrollbar(
@@ -385,7 +401,11 @@ private fun GridScrollbar(
 }
 
 @Composable
-fun AppTile(app: AppInfo, iconCache: MutableMap<String, androidx.compose.ui.graphics.ImageBitmap?>, onClick: () -> Unit) {
+fun AppTile(
+    app: AppInfo,
+    cachedIcon: androidx.compose.ui.graphics.ImageBitmap?,
+    onClick: () -> Unit
+) {
     val categoryIcon = when (app.category) {
         AppCategory.NAVIGATION -> Icons.Default.Navigation
         AppCategory.MUSIC -> Icons.Default.MusicNote
@@ -400,20 +420,6 @@ fun AppTile(app: AppInfo, iconCache: MutableMap<String, androidx.compose.ui.grap
         AppCategory.OTHER -> OtherColor
     }
 
-    val iconBitmap = remember(app.packageName) {
-        iconCache.getOrPut(app.packageName) {
-            if (app.iconPng.isNotEmpty()) {
-                try {
-                    val bmp = android.graphics.BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size)
-                    bmp?.asImageBitmap()
-                } catch (e: Exception) {
-                    Log.w("AppTile", "Icon decode failed for ${app.packageName}: ${e.message}")
-                    null
-                }
-            } else null
-        }
-    }
-
     Column(
         modifier = Modifier
             .clickable(onClick = onClick)
@@ -421,9 +427,9 @@ fun AppTile(app: AppInfo, iconCache: MutableMap<String, androidx.compose.ui.grap
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        if (iconBitmap != null) {
+        if (cachedIcon != null) {
             Image(
-                bitmap = iconBitmap,
+                bitmap = cachedIcon,
                 contentDescription = app.appName,
                 modifier = Modifier
                     .size(64.dp)
