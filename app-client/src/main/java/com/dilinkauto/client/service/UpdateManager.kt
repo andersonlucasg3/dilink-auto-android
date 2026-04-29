@@ -9,6 +9,8 @@ import androidx.core.content.FileProvider
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.R
 import com.dilinkauto.client.ShizukuManager
+import dadb.AdbKeyPair
+import dadb.Dadb
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -231,31 +233,92 @@ object UpdateManager {
                         latestRelease = null
                     } else {
                         val msg = result ?: "Shizuku command returned null"
-                        FileLog.w(TAG, "Shizuku install failed: $msg")
-                        _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, msg.take(120)))
+                        FileLog.w(TAG, "Shizuku install failed, trying dadb fallback: $msg")
+                        tryDadbInstall(apkFile, version)
                     }
                 } catch (e: Exception) {
-                    FileLog.e(TAG, "Shizuku install error", e)
-                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
+                    FileLog.e(TAG, "Shizuku install error, trying dadb fallback", e)
+                    tryDadbInstall(apkFile, version)
                 }
             }
         } else {
             // Fallback to system package installer
-            try {
-                val uri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    apkFile
-                )
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/vnd.android.package-archive")
-                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                context.startActivity(intent)
-            } catch (e: Exception) {
-                FileLog.e(TAG, "Install intent failed", e)
-                _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
+            launchSystemInstaller(context, apkFile)
+        }
+    }
+
+    private suspend fun tryDadbInstall(apkFile: File, version: String) {
+        try {
+            val filesDir = appContext.filesDir
+            val privKey = File(filesDir, "adbkey")
+            val pubKey = File(filesDir, "adbkey.pub")
+            if (!privKey.exists()) {
+                filesDir.mkdirs()
+                AdbKeyPair.generate(privKey, pubKey)
             }
+            val keyPair = AdbKeyPair.read(privKey, pubKey)
+
+            val dadbExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+            val dadb: Dadb? = try {
+                val future = dadbExecutor.submit<Dadb> {
+                    Dadb.create("127.0.0.1", 5555, keyPair)
+                }
+                try {
+                    future.get(10, java.util.concurrent.TimeUnit.SECONDS)
+                } catch (e: java.util.concurrent.TimeoutException) {
+                    FileLog.w(TAG, "Dadb self-connect timed out")
+                    null
+                }
+            } finally {
+                dadbExecutor.shutdownNow()
+            }
+
+            if (dadb == null) {
+                FileLog.w(TAG, "Dadb self-connect failed, falling back to system installer")
+                launchSystemInstaller(appContext, apkFile)
+                return
+            }
+
+            try {
+                FileLog.i(TAG, "Dadb self-install ($version): pushing APK...")
+                val remotePath = "/data/local/tmp/update.apk"
+                dadb.push(apkFile, remotePath)
+                val result = dadb.shell("pm install -r $remotePath").allOutput
+                FileLog.i(TAG, "Dadb self-install result: ${result.trim()}")
+                if (result.contains("Success")) {
+                    FileLog.i(TAG, "Dadb self-install succeeded")
+                    _updateState.value = UpdateState.Installed
+                    downloadedFile?.delete()
+                    downloadedFile = null
+                    latestRelease = null
+                } else {
+                    FileLog.w(TAG, "Dadb self-install failed: ${result.trim()}, falling back to system installer")
+                    launchSystemInstaller(appContext, apkFile)
+                }
+            } finally {
+                dadb.close()
+            }
+        } catch (e: Exception) {
+            FileLog.e(TAG, "Dadb self-install error, falling back to system installer", e)
+            launchSystemInstaller(appContext, apkFile)
+        }
+    }
+
+    private fun launchSystemInstaller(context: Context, apkFile: File) {
+        try {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                apkFile
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            FileLog.e(TAG, "System installer also failed", e)
+            _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
         }
     }
 
