@@ -151,6 +151,11 @@
     <string name="donation_github">Спонсар GitHub</string>
     <string name="donation_pix">Pix (Бразілія)</string>
 
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Знойдзена прылада Samsung</string>
+    <string name="samsung_warning_desc">Samsung One UI патрабуе дадатковай налады: адключыце Auto Blocker (блакуе USB ADB), дайце неабмежаваны доступ да батарэі і дазвольце доступ да ўсіх файлаў. Падрабязнасці ў Наладах.</string>
+    <string name="samsung_settings_guide">Кіраўніцтва па наладцы Samsung</string>
+
     <!-- Distribution Channel -->
     <string name="channel_title">Канал распаўсюджвання</string>
     <string name="channel_release">Рэліз</string>

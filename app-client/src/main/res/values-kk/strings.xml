@@ -151,6 +151,11 @@
     <string name="donation_github">GitHub демеушісі</string>
     <string name="donation_pix">Pix (Бразилия)</string>
 
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Samsung құрылғысы анықталды</string>
+    <string name="samsung_warning_desc">Samsung One UI қосымша баптауды қажет етеді: Auto Blocker өшіріңіз (USB ADB блоктайды), батареяға шектеусіз рұқсат беріңіз және барлық файлдарға қол жеткізуге рұқсат етіңіз. Толығырақ Баптаулардан қараңыз.</string>
+    <string name="samsung_settings_guide">Samsung баптау нұсқаулығы</string>
+
     <!-- Distribution Channel -->
     <string name="channel_title">Тарату арнасы</string>
     <string name="channel_release">Релиз</string>
