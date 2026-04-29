@@ -1,9 +1,13 @@
 # Progress Tracker
 
-Current version: **v0.15.0** (stable)
-Last updated: 2026-04-28
+Current version: **v0.16.0-dev** (pre-release)
+Last updated: 2026-04-29
 
 ## Milestones
+
+### v0.16.0 (in progress)
+
+- Pre-release version `v0.16.0-dev` tagged.
 
 ### v0.15.0 (2026-04-28)
 
