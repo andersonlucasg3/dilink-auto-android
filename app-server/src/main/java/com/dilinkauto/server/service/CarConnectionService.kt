@@ -356,7 +356,10 @@ class CarConnectionService : Service() {
                     appVersionCode = packageManager.getPackageInfo(packageName, 0).let {
                         @Suppress("DEPRECATION") it.versionCode
                     },
-                    targetFps = 60
+                    targetFps = 60,
+                    appVersionName = packageManager.getPackageInfo(packageName, 0).let {
+                        it.versionName ?: ""
+                    }
                 )
                 ctrl.sendControl(ControlMsg.HANDSHAKE_REQUEST, handshake.encode())
 

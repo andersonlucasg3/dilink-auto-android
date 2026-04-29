@@ -20,11 +20,13 @@ data class HandshakeRequest(
     val displayMode: Byte = DISPLAY_MODE_VIRTUAL,
     val screenDpi: Int = 160,
     val appVersionCode: Int,
-    val targetFps: Int = 30
+    val targetFps: Int = 30,
+    val appVersionName: String = ""
 ) {
     fun encode(): ByteArray {
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
-        val buf = ByteBuffer.allocate(4 + 2 + nameBytes.size + 4 + 4 + 4 + 1 + 4 + 4 + 4)
+        val verNameBytes = appVersionName.toByteArray(Charsets.UTF_8)
+        val buf = ByteBuffer.allocate(4 + 2 + nameBytes.size + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 2 + verNameBytes.size)
             .order(ByteOrder.BIG_ENDIAN)
         buf.putInt(protocolVersion)
         buf.putShort(nameBytes.size.toShort())
@@ -36,6 +38,8 @@ data class HandshakeRequest(
         buf.putInt(screenDpi)
         buf.putInt(appVersionCode)
         buf.putInt(targetFps)
+        buf.putShort(verNameBytes.size.toShort())
+        buf.put(verNameBytes)
         return buf.array()
     }
 
@@ -55,7 +59,15 @@ data class HandshakeRequest(
                 displayMode = if (buf.hasRemaining()) buf.get() else DISPLAY_MODE_VIRTUAL,
                 screenDpi = if (buf.remaining() >= 4) buf.getInt() else 160,
                 appVersionCode = if (buf.remaining() >= 4) buf.getInt() else 0,
-                targetFps = if (buf.remaining() >= 4) buf.getInt() else 30
+                targetFps = if (buf.remaining() >= 4) buf.getInt() else 30,
+                appVersionName = if (buf.remaining() >= 2) {
+                    val vnLen = buf.getShort().toInt().coerceAtMost(buf.remaining())
+                    if (vnLen > 0) {
+                        val vnBytes = ByteArray(vnLen)
+                        buf.get(vnBytes)
+                        String(vnBytes, Charsets.UTF_8)
+                    } else ""
+                } else ""
             )
             return request
         }

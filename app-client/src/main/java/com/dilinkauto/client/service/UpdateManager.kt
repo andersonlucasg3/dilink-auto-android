@@ -313,9 +313,9 @@ object UpdateManager {
     // "0.17.0-dev-02" → ("0.17.0", true, 2)
     // "0.17.0-dev"    → ("0.17.0", true, 0)
     // "0.17.0"        → ("0.17.0", false, 0)
-    private data class ParsedVersion(val base: String, val isDev: Boolean, val devNum: Int)
+    internal data class ParsedVersion(val base: String, val isDev: Boolean, val devNum: Int)
 
-    private fun parseVersion(v: String): ParsedVersion {
+    internal fun parseVersion(v: String): ParsedVersion {
         val m = Regex("^(.*)-dev(?:-(\\d+))?\$").find(v)
         return if (m != null) {
             ParsedVersion(m.groupValues[1], true, m.groupValues[2].toIntOrNull() ?: 0)
@@ -324,7 +324,7 @@ object UpdateManager {
         }
     }
 
-    private fun compareVersions(a: String, b: String): Int {
+    internal fun compareVersions(a: String, b: String): Int {
         val (baseA, devA, numA) = parseVersion(a)
         val (baseB, devB, numB) = parseVersion(b)
         val aParts = baseA.split(".").map { it.toIntOrNull() ?: 0 }
