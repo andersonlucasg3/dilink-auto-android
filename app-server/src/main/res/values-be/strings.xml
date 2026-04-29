@@ -25,4 +25,68 @@
     <!-- Люстраванне -->
     <string name="status_updating">Абнаўленне праграмы аўто…</string>
     <string name="status_please_wait">Калі ласка, пачакайце</string>
+
+    <!-- Арыентацыя -->
+    <string name="landscape_app_note">Праграмы самі кіруюць арыентацыяй. Праграмы толькі з партрэтным рэжымам могуць адлюстроўвацца з палосамі.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Як падключыцца</string>
+
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">Рэжым прамога Wi-Fi</string>
+    <string name="dev_mode_desc_on">WiFi ADB (аўто падключаецца да тэлефона праз Wi-Fi — USB-кабель не патрэбны)</string>
+    <string name="dev_mode_desc_off">USB ADB (аўто падключаецца да тэлефона праз USB-кабель)</string>
+    <string name="wifi_adb_setup_title">Налада WiFi ADB</string>
+    <string name="wifi_adb_setup_desc">Каб выкарыстоўваць рэжым прамога Wi-Fi, спачатку ўключыце ADB праз Wi-Fi на тэлефоне. Падключыце тэлефон да камп\'ютара праз USB і выканайце:\n\nadb tcpip 5555\n\nГэта трэба зрабіць толькі адзін раз. Пасля гэтага аўто зможа падключацца да тэлефона праз Wi-Fi без USB-кабеля.</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Або падключыцца ўручную па IP</string>
+    <string name="manual_connect_ip_label">IP-адрас тэлефона</string>
+    <string name="manual_connect_button">Падключыць</string>
+
+    <!-- Branding -->
+    <string name="branding_title">DiLink Auto</string>
+    <string name="branding_tagline">Выкарыстоўвайце праграмы тэлефона на экране аўто</string>
+
+    <!-- Connection Status -->
+    <string name="status_ready_to_connect">Гатовы да падключэння</string>
+    <string name="status_connecting">Падключэнне…</string>
+    <string name="status_connected">Падключана</string>
+    <string name="status_streaming">Трансляцыя</string>
+
+    <!-- How to Connect Steps -->
+    <string name="how_to_step_1">Уключыце кропку доступу WiFi на тэлефоне</string>
+    <string name="how_to_step_2">Падключыце тэлефон да USB-порта аўто</string>
+    <string name="how_to_step_3">Адкрыйце праграму DiLink Auto на тэлефоне</string>
+    <string name="how_to_step_4">Чакайце аўтаматычнага падключэння аўто</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_eject">Выняць</string>
+    <string name="nav_alerts">Апавяшчэнні</string>
+
+    <!-- Network -->
+    <string name="network_connected">Падключана</string>
+    <string name="network_offline">Афлайн</string>
+
+    <!-- Recent Apps -->
+    <string name="recent_app_fallback">Праграма</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">Няма апавяшчэнняў</string>
+
+    <!-- Connection Status Messages -->
+    <string name="status_deploying_vd">Разгортванне віртуальнага дысплея…</string>
+    <string name="status_waiting_usb">Чаканне USB…</string>
+    <string name="status_waiting_wifi">Чаканне WiFi…</string>
+    <string name="status_tcp_adb_failed">Памылка TCP ADB падключэння</string>
+    <string name="status_tcp_adb_connected">TCP ADB падключаны</string>
+    <string name="status_connecting_usb">Падключэнне USB… Праверце дыялог аўтарызацыі на тэлефоне</string>
+    <string name="status_usb_failed">Памылка USB падключэння — праверце дыялог аўтарызацыі на тэлефоне</string>
+    <string name="status_usb_connected">USB падключана</string>
+    <string name="status_updating_car">Абнаўленне праграмы аўто…</string>
+    <string name="status_preparing_vd">Падрыхтоўка віртуальнага дысплея…</string>
+    <string name="status_starting_vd">Запуск віртуальнага дысплея…</string>
+    <string name="status_vd_failed">Памылка VD сервера</string>
+    <string name="status_waiting_video">Чаканне відэапатоку…</string>
+    <string name="status_updating_please_wait">Абнаўленне праграмы аўто… Калі ласка, пачакайце</string>
 </resources>

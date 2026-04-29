@@ -2,12 +2,16 @@ package com.dilinkauto.client
 
 import android.os.Environment
 import android.util.Log
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.FileWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * File-based logger that bypasses Android logcat filtering.
@@ -44,7 +48,7 @@ object FileLog {
                         writer?.write("\n")
                         writer?.flush()
                     } else {
-                        Thread.sleep(50)
+                        Thread.sleep(200) // reduced poll rate for low-end devices
                     }
                 } catch (_: Exception) {}
             }
@@ -96,6 +100,27 @@ object FileLog {
         if (t != null) Log.e(tag, msg, t) else Log.e(tag, msg)
         write("E", tag, "$msg${t?.let { " | ${it.message}" } ?: ""}")
     }
+
+    fun zipLogs(): File? {
+        return try {
+            val zipFile = File(logDir, "dilinkauto-logs.zip")
+            ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile))).use { zos ->
+                val logFiles = logDir.listFiles { f -> f.name.endsWith(".log") }
+                if (logFiles == null || logFiles.isEmpty()) return null
+                for (file in logFiles) {
+                    zos.putNextEntry(ZipEntry(file.name))
+                    file.inputStream().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                }
+            }
+            zipFile
+        } catch (e: Exception) {
+            Log.e("FileLog", "Failed to zip logs: ${e.message}")
+            null
+        }
+    }
+
+    fun logDirectory(): File = logDir
 
     private fun write(level: String, tag: String, msg: String) {
         val ts = dateFormat.format(Date())

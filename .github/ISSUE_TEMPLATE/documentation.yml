@@ -1,0 +1,25 @@
+name: Documentation
+description: Request documentation updates from the development agent
+labels: [documentation, agent]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: Describe what documentation needs to be written or updated.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: '- [ ] Documentation is accurate and up to date'
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      placeholder: Links, references, or anything that helps.
+    validations:
+      required: false

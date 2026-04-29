@@ -19,11 +19,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.*
+import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
 
@@ -258,6 +260,16 @@ fun AppGrid(
                 cursorColor = MaterialTheme.colorScheme.primary
             )
         )
+
+        Text(
+            text = stringResource(R.string.landscape_app_note),
+            fontSize = 11.sp,
+            color = Color(0xFF666666),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 4.dp)
+        )
     }
 }
 
@@ -343,8 +355,7 @@ fun ConnectionStatus(
             modifier = Modifier.widthIn(max = 500.dp)
         ) {
             when (state) {
-                CarConnectionService.State.IDLE,
-                CarConnectionService.State.CONNECTING -> {
+                CarConnectionService.State.IDLE -> {
                     CircularProgressIndicator(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(48.dp)
@@ -404,6 +415,8 @@ fun ConnectionStatus(
 @Composable
 fun ManualConnectBox(onConnect: (String) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences("dilinkauto", android.content.Context.MODE_PRIVATE) }
+    val savedIp = remember { prefs.getString("last_manual_ip", null) }
     val gatewayIp = remember {
         try {
             val wm = context.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
@@ -412,7 +425,9 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
             else ""
         } catch (_: Exception) { "" }
     }
-    var ipAddress by remember { mutableStateOf(gatewayIp.ifEmpty { "192.168.43.1" }) }
+    var ipAddress by remember {
+        mutableStateOf(savedIp ?: gatewayIp.ifEmpty { "192.168.43.1" })
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -421,7 +436,7 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
-                "Or connect manually by IP",
+                stringResource(R.string.manual_connect_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = Color.Gray
             )
@@ -430,7 +445,7 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
                 OutlinedTextField(
                     value = ipAddress,
                     onValueChange = { ipAddress = it },
-                    label = { Text("Phone IP address") },
+                    label = { Text(stringResource(R.string.manual_connect_ip_label)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -442,11 +457,17 @@ fun ManualConnectBox(onConnect: (String) -> Unit) {
                 )
                 Spacer(Modifier.width(12.dp))
                 Button(
-                    onClick = { if (ipAddress.isNotBlank()) onConnect(ipAddress.trim()) },
+                    onClick = {
+                        val ip = ipAddress.trim()
+                        if (ip.isNotBlank()) {
+                            prefs.edit().putString("last_manual_ip", ip).apply()
+                            onConnect(ip)
+                        }
+                    },
                     modifier = Modifier.height(56.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Connect")
+                    Text(stringResource(R.string.manual_connect_button))
                 }
             }
         }

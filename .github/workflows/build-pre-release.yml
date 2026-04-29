@@ -1,0 +1,100 @@
+name: Build (Pre-Release)
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+-dev*']
+
+permissions:
+  contents: write
+
+jobs:
+  pre-release:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          export ANDROID_SDK_ROOT=$ANDROID_HOME
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          if [ ! -f "$ANDROID_HOME/platforms/android-34/build.prop" ]; then
+            wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/cmdline-tools.zip
+            mkdir -p $ANDROID_HOME/cmdline-tools/latest
+            unzip -q /tmp/cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools/latest
+            mv $ANDROID_HOME/cmdline-tools/latest/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/ 2>/dev/null || true
+            yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+              "platforms;android-34" \
+              "build-tools;34.0.0" \
+              > /dev/null
+          fi
+
+      - name: Build Debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app-client:assembleDebug
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          TAG="${{ github.ref_name }}"
+          echo "Tag: $TAG"
+          VERSION_NAME="${TAG#v}"
+
+          TAG_BASE=$(echo "$VERSION_NAME" | sed -E 's/-dev-[0-9]+$/-dev/')
+          FILE_VERSION=$(grep 'app.versionName' gradle.properties | sed 's/.*=//')
+          FILE_BASE=$(echo "$FILE_VERSION" | sed -E 's/-dev-[0-9]+$/-dev/')
+
+          if [ "$TAG_BASE" != "$FILE_BASE" ]; then
+            echo "ERROR: Tag base ($TAG_BASE) does not match gradle.properties base ($FILE_BASE)"
+            exit 1
+          fi
+
+          VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
+
+          git fetch --tags origin 2>/dev/null || true
+          PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tail -1)
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Commits since $PREV_TAG" > /tmp/release-notes.md
+            echo "" >> /tmp/release-notes.md
+            git log "$PREV_TAG..HEAD" --pretty=format:"* %s (%h)" --no-merges >> /tmp/release-notes.md
+            echo "" >> /tmp/release-notes.md
+            echo "---" >> /tmp/release-notes.md
+            echo "**versionCode:** $VERSION_CODE | **versionName:** $VERSION_NAME" >> /tmp/release-notes.md
+          else
+            echo "## Initial development build" > /tmp/release-notes.md
+            echo "" >> /tmp/release-notes.md
+            echo "**versionCode:** $VERSION_CODE | **versionName:** $VERSION_NAME" >> /tmp/release-notes.md
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          cat /tmp/release-notes.md
+
+      - name: Create Pre-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.notes.outputs.tag }}
+          name: ${{ steps.notes.outputs.tag }} — Development Build
+          body_path: /tmp/release-notes.md
+          files: app-client/build/outputs/apk/debug/app-client-debug.apk
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

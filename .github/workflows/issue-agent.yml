@@ -1,0 +1,84 @@
+name: Issue Agent
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+
+# Only one agent per issue at a time. Subsequent triggers queue up
+# and run in sequence, avoiding worktree conflicts and duplicate work.
+concurrency:
+  group: agent-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  agent:
+    if: |
+      (github.event_name == 'issues' &&
+       github.event.action == 'opened' &&
+       github.event.issue.user.login == 'andersonlucasg3') ||
+      (github.event_name == 'issue_comment' &&
+       github.event.action == 'created' &&
+       github.event.comment.user.login == 'andersonlucasg3' &&
+       !github.event.issue.pull_request)
+
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: develop
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          export ANDROID_SDK_ROOT=$ANDROID_HOME
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          if [ ! -f "$ANDROID_HOME/platforms/android-34/build.prop" ]; then
+            SDK_MGR_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            wget -q "$SDK_MGR_URL" -O /tmp/cmdline-tools.zip
+            mkdir -p $ANDROID_HOME/cmdline-tools/latest
+            unzip -q /tmp/cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools/latest
+            mv $ANDROID_HOME/cmdline-tools/latest/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/ 2>/dev/null || true
+            yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+              "platforms;android-34" \
+              "build-tools;34.0.0" \
+              > /dev/null
+          fi
+
+      - name: Run Issue Agent
+        run: bash scripts/issue-agent.sh
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+
+      - name: Upload APK
+        if: hashFiles('app-client/build/outputs/apk/debug/app-client-debug.apk') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: app-client/build/outputs/apk/debug/app-client-debug.apk
+          archive: false

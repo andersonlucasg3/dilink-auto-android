@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.dilinkauto.client.FileLog
+import com.dilinkauto.client.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,18 +30,23 @@ sealed class UpdateState {
     data class Error(val message: String) : UpdateState()
 }
 
+enum class DistributionChannel { RELEASE, PRE_RELEASE }
+
 object UpdateManager {
     private const val TAG = "UpdateManager"
-    // Release builds: `releases/latest` excludes prereleases.
-    // Debug builds: `releases?per_page=1` includes prereleases (dev builds from develop branch).
-    private val GITHUB_API = if (com.dilinkauto.client.BuildConfig.DEBUG)
-        "https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases?per_page=1"
-    else
-        "https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases/latest"
+    private const val GITHUB_REPO = "https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases"
     private const val COOLDOWN_MS = 6 * 3600 * 1000L
     private const val PREFS_NAME = "dilinkauto_update"
     private const val KEY_LAST_CHECK = "last_check_timestamp"
-    private const val KEY_DEV_TIMESTAMP = "last_dev_timestamp"
+    private const val KEY_CHANNEL = "distribution_channel"
+
+    var channel: DistributionChannel
+        get() = when (prefs.getString(KEY_CHANNEL, "release")) {
+            "pre_release" -> DistributionChannel.PRE_RELEASE
+            else -> DistributionChannel.RELEASE
+        }
+        set(value) = prefs.edit().putString(KEY_CHANNEL,
+            if (value == DistributionChannel.PRE_RELEASE) "pre_release" else "release").apply()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var prefs: SharedPreferences
@@ -87,14 +93,14 @@ object UpdateManager {
         scope.launch(Dispatchers.IO) {
             try {
                 val release = fetchLatestRelease() ?: run {
-                    _updateState.value = UpdateState.Error("No release found")
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_no_release))
                     return@launch
                 }
 
                 val currentVersion = readCurrentVersion()
                 if (currentVersion == null) {
                     FileLog.w(TAG, "Could not read current version")
-                    _updateState.value = UpdateState.Error("Could not determine current version")
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_no_version))
                     return@launch
                 }
 
@@ -139,7 +145,7 @@ object UpdateManager {
                 conn.connect()
 
                 if (conn.responseCode != HttpURLConnection.HTTP_OK) {
-                    _updateState.value = UpdateState.Error("Download failed: HTTP ${conn.responseCode}")
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_download_http_error, conn.responseCode))
                     return@launch
                 }
 
@@ -175,7 +181,7 @@ object UpdateManager {
                 )
                 if (pkgInfo == null || pkgInfo.packageName != appContext.packageName) {
                     tmpFile.delete()
-                    _updateState.value = UpdateState.Error("Downloaded APK is invalid")
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_invalid_apk))
                     return@launch
                 }
 
@@ -192,7 +198,7 @@ object UpdateManager {
             } catch (e: Exception) {
                 FileLog.e(TAG, "Download failed", e)
                 tmpFile.delete()
-                _updateState.value = UpdateState.Error("Download failed: ${e.message}")
+                _updateState.value = UpdateState.Error(appContext.getString(R.string.update_download_failed, e.message ?: "unknown"))
             } finally {
                 isDownloading.set(false)
             }
@@ -202,7 +208,7 @@ object UpdateManager {
     fun installUpdate(context: Context) {
         val apkFile = downloadedFile
         if (apkFile == null || !apkFile.exists()) {
-            _updateState.value = UpdateState.Error("Update file not found")
+            _updateState.value = UpdateState.Error(appContext.getString(R.string.update_file_not_found))
             return
         }
 
@@ -219,7 +225,7 @@ object UpdateManager {
             context.startActivity(intent)
         } catch (e: Exception) {
             FileLog.e(TAG, "Install intent failed", e)
-            _updateState.value = UpdateState.Error("Could not open installer: ${e.message}")
+            _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
         }
     }
 
@@ -234,8 +240,13 @@ object UpdateManager {
 
     // ─── Internal ───
 
+    private fun getApiUrl(): String = when (channel) {
+        DistributionChannel.RELEASE -> "$GITHUB_REPO/latest"
+        DistributionChannel.PRE_RELEASE -> "$GITHUB_REPO?per_page=1"
+    }
+
     private fun fetchLatestRelease(): ReleaseInfo? {
-        val url = URL(GITHUB_API)
+        val url = URL(getApiUrl())
         val conn = url.openConnection() as HttpURLConnection
         conn.connectTimeout = 10000
         conn.readTimeout = 10000
@@ -245,7 +256,7 @@ object UpdateManager {
 
         if (conn.responseCode == 403 || conn.responseCode == 429) {
             FileLog.w(TAG, "GitHub API rate limited (HTTP ${conn.responseCode})")
-            _updateState.value = UpdateState.Error("GitHub rate limit reached. Try again later.")
+            _updateState.value = UpdateState.Error(appContext.getString(R.string.update_rate_limit))
             return null
         }
 
@@ -299,15 +310,33 @@ object UpdateManager {
         }
     }
 
+    // "0.17.0-dev-02" → ("0.17.0", true, 2)
+    // "0.17.0-dev"    → ("0.17.0", true, 0)
+    // "0.17.0"        → ("0.17.0", false, 0)
+    private data class ParsedVersion(val base: String, val isDev: Boolean, val devNum: Int)
+
+    private fun parseVersion(v: String): ParsedVersion {
+        val m = Regex("^(.*)-dev(?:-(\\d+))?\$").find(v)
+        return if (m != null) {
+            ParsedVersion(m.groupValues[1], true, m.groupValues[2].toIntOrNull() ?: 0)
+        } else {
+            ParsedVersion(v, false, 0)
+        }
+    }
+
     private fun compareVersions(a: String, b: String): Int {
-        val aParts = a.split(".").map { it.toIntOrNull() ?: 0 }
-        val bParts = b.split(".").map { it.toIntOrNull() ?: 0 }
+        val (baseA, devA, numA) = parseVersion(a)
+        val (baseB, devB, numB) = parseVersion(b)
+        val aParts = baseA.split(".").map { it.toIntOrNull() ?: 0 }
+        val bParts = baseB.split(".").map { it.toIntOrNull() ?: 0 }
         val maxLen = maxOf(aParts.size, bParts.size)
         for (i in 0 until maxLen) {
             val aVal = aParts.getOrElse(i) { 0 }
             val bVal = bParts.getOrElse(i) { 0 }
             if (aVal != bVal) return aVal.compareTo(bVal)
         }
-        return 0
+        if (!devA && devB) return 1
+        if (devA && !devB) return -1
+        return numA.compareTo(numB)
     }
 }
