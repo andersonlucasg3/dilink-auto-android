@@ -53,15 +53,40 @@ SESSIONEOF
 # Each writes to /tmp/agent-prompt-${ISSUE_NUM}.txt to avoid shell escaping issues
 
 write_initial_prompt() {
-  cat > /tmp/agent-prompt-${ISSUE_NUM}.txt << 'ENDPROMPT'
+  # Build the status update snippet
+  _sid="${STATUS_COMMENT_ID:-unknown}"
+  _token="${GITHUB_TOKEN:-}"
+  _repo="${REPO}"
+  _resolve=""
+  [ -n "${GITHUB_API_IP:-}" ] && _resolve="--resolve api.github.com:443:${GITHUB_API_IP}"
+
+  cat > /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
 You are an autonomous development agent for **DiLink-Auto** — an open-source Android Auto alternative for BYD DiLink 3.0+ cars. Phone apps run on a virtual display, encode as H.264 video, and stream to the car over WiFi TCP. Touch events flow back from car to phone.
 
 Read all docs in docs/*.md before starting.
 Build with: `./gradlew :app-client:assembleDebug`
 You are already on the correct branch for this issue — do NOT create a new branch.
-You must: (1) `git add -A && git commit` (2) `git push origin HEAD` before finishing.
 
-CRITICAL: This is a temporary GitHub Actions runner session. Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD. You may use gh pr (create/view/diff/review). Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
+## ⚠️ MANDATORY: Update the Status Comment
+The user sees only the GitHub issue comment — there is no other output. You MUST update it at every milestone so the user knows you are working. Use this command (replace MESSAGE with a brief status):
+
+\`\`\`bash
+curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
+  -H "Accept: application/vnd.github+json" \\
+  ${_resolve} \\
+  "https://api.github.com/repos/${_repo}/issues/comments/${_sid}" \\
+  -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
+\`\`\`
+
+Required status updates (run the command above at each step):
+1. 📖 after reading docs → "📖 Reading documentation..."
+2. 🔍 after investigating code → "🔍 Investigating: <what you found>"
+3. ✏️ before modifying code → "✏️ Implementing: <what you are changing>"
+4. 🔨 before building → "🔨 Building APK..."
+5. ✅ after build passes → "✅ Build passed, pushing changes..."
+6. ❌ if build fails → "❌ Build failed, fixing..."
+
+CRITICAL: This is a temporary GitHub Actions runner session. Before finishing you MUST: (1) git add -A && git commit (2) git push origin HEAD. Do NOT use gh issue comment or GitHub issue API — the script handles comments and issue close.
 
 ENDPROMPT
 
@@ -84,17 +109,23 @@ ${ISSUE_BODY}
 
 Set "action" to "close" to close the issue, "pr" to create a pull request to develop, or "none".
 ENDPROMPT
+}
 
-  # Status update instructions at the bottom (tools, not the main focus)
+write_resume_prompt() {
+  local comment="$1"
   _sid="${STATUS_COMMENT_ID:-unknown}"
   _token="${GITHUB_TOKEN:-}"
   _repo="${REPO}"
   _resolve=""
   [ -n "${GITHUB_API_IP:-}" ] && _resolve="--resolve api.github.com:443:${GITHUB_API_IP}"
-  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDSTATUS
 
-## Status Updates
-Keep the user informed by running this:
+  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
+## User's New Request
+
+${comment}
+
+## ⚠️ MANDATORY: Update the Status Comment
+You MUST keep the user informed by updating the status comment at every milestone:
 
 \`\`\`bash
 curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
@@ -104,17 +135,7 @@ curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
   -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
 \`\`\`
 
-📖 reading docs → 🔍 investigating → ✏️ implementing → 🔨 building → ✅ done
-ENDSTATUS
-}
-
-write_resume_prompt() {
-  local comment="$1"
-
-  cat >> /tmp/agent-prompt-${ISSUE_NUM}.txt << ENDPROMPT
-## User's New Request
-
-${comment}
+Required: 📖 reading → 🔍 investigating → ✏️ implementing → 🔨 building → ✅/❌ result
 
 ## Critical Instructions
 - Focus ONLY on the user's new request above. Do NOT repeat or re-implement previous work.
