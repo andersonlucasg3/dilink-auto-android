@@ -293,6 +293,7 @@ fun AppGrid(
             )
         )
 
+        // Note: apps control their own layout — portrait-only apps will be letterboxed
         Text(
             text = stringResource(R.string.landscape_app_note),
             fontSize = 11.sp,

@@ -107,6 +107,12 @@ Si la boîte de dialogue apparaît encore lors de la première connexion après 
 - Journaux de la voiture : acheminés vers client.log du téléphone via le canal DATA du protocole (tag : `CarLog`)
 - Récupérer les journaux : `adb shell "cat /sdcard/DiLinkAuto/client.log"`
 
+### Les applis apparaissent en letterbox ou ne remplissent pas l'écran
+
+C'est normal. DiLink-Auto reflète les applis sur un écran virtuel en paysage qui correspond à l'écran de la voiture. Certaines applis (en particulier celles conçues principalement pour les téléphones) ne supportent que l'orientation portrait. Ces applis apparaîtront en letterbox, étroites, ou pourraient ne pas utiliser toute la largeur de l'écran.
+
+**C'est une limitation des applis elles-mêmes, pas de DiLink-Auto.** Le téléphone ne fait que refléter ce que l'appli dessine sur l'écran virtuel — si une appli ne supporte pas le paysage, rien de ce que DiLink-Auto peut faire ne la forcera à remplir l'écran. Contactez le développeur de l'appli pour demander la prise en charge du paysage.
+
 ## Conseils pour HyperOS (Xiaomi)
 
 Pour un fonctionnement fiable sur HyperOS :

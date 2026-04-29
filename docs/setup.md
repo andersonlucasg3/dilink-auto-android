@@ -107,6 +107,12 @@ If the dialog still appears on the first connection after updating, check "Alway
 - Car logs: routed to phone's client.log via protocol DATA channel (tag: `CarLog`)
 - Pull logs: `adb shell "cat /sdcard/DiLinkAuto/client.log"`
 
+### Apps appear letterboxed or don't fill the screen
+
+This is normal. DiLink-Auto mirrors apps onto a landscape virtual display that matches the car's screen. Some apps (especially those designed primarily for phones) only support portrait orientation. These apps will appear letterboxed, narrow, or may not use the full screen width.
+
+**This is a limitation of the apps themselves, not DiLink-Auto.** The phone is simply mirroring whatever the app draws on the virtual display — if an app doesn't support landscape, nothing DiLink-Auto can do will force it to fill the screen. Contact the app developer to request landscape support.
+
 ## HyperOS (Xiaomi) Tips
 
 For reliable operation on HyperOS:

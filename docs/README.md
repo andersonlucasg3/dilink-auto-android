@@ -100,6 +100,7 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 - Occasional visual artifacts — decoder restart race, recovers at next keyframe (~1s).
 - Streaming latency ~100-200ms under load. CBR 8Mbps.
 - Display may stay off after abrupt USB disconnect (fixed in v0.14.0).
+- **Some apps don't fill the screen (letterboxed/portrait-only).** DiLink-Auto mirrors a landscape virtual display to the car screen. Apps that don't support landscape orientation will appear letterboxed or narrow — this is entirely controlled by each app, not by DiLink-Auto. Nothing can be done from the mirroring side.
 
 ## Documentation
 
