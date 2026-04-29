@@ -83,6 +83,8 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("dev.mobile:dadb:1.2.10")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:aidl:13.1.5")
 }
 
 // Build the VD server JAR and copy to assets before the client APK is assembled.

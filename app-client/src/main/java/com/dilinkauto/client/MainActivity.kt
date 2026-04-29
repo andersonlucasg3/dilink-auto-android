@@ -1029,6 +1029,38 @@ fun SettingsScreen(
             onClick = onOpenDeveloperOptions
         )
 
+        Spacer(Modifier.height(8.dp))
+
+        // Shizuku
+        val shizukuInstalled = remember(permissionsKey) { ShizukuManager.isInstalled }
+        val shizukuAvailable = remember(permissionsKey) { ShizukuManager.isAvailable }
+        val shizukuIcon = when {
+            shizukuAvailable -> Icons.Default.Shield
+            shizukuInstalled -> Icons.Default.Security
+            else -> Icons.Default.Info
+        }
+        val shizukuTitle = when {
+            shizukuAvailable -> stringResource(R.string.perm_shizuku_available)
+            shizukuInstalled -> stringResource(R.string.perm_shizuku_needs_permission)
+            else -> stringResource(R.string.perm_shizuku)
+        }
+        val shizukuDesc = when {
+            shizukuAvailable -> stringResource(R.string.perm_shizuku_granted)
+            shizukuInstalled -> stringResource(R.string.perm_shizuku_permission_desc)
+            else -> stringResource(R.string.perm_shizuku_desc)
+        }
+        SetupItem(
+            icon = shizukuIcon,
+            title = shizukuTitle,
+            description = shizukuDesc,
+            onClick = {
+                if (!shizukuAvailable) {
+                    ShizukuManager.requestPermission()
+                    permissionsKey++
+                }
+            }
+        )
+
         Spacer(Modifier.height(32.dp))
 
         // Distribution Channel

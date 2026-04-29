@@ -70,12 +70,13 @@ data class HandshakeResponse(
     val displayHeight: Int,
     val virtualDisplayId: Int = -1,
     val adbPort: Int = 5555,
-    val vdServerJarPath: String = ""
+    val vdServerJarPath: String = "",
+    val connectionMethod: Byte = CONNECTION_METHOD_USB_ADB
 ) {
     fun encode(): ByteArray {
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
         val jarPathBytes = vdServerJarPath.toByteArray(Charsets.UTF_8)
-        val buf = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 4 + 4 + 2 + jarPathBytes.size)
+        val buf = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 4 + 4 + 2 + jarPathBytes.size + 1)
             .order(ByteOrder.BIG_ENDIAN)
         buf.putInt(protocolVersion)
         buf.put(if (accepted) 1.toByte() else 0.toByte())
@@ -87,6 +88,7 @@ data class HandshakeResponse(
         buf.putInt(adbPort)
         buf.putShort(jarPathBytes.size.toShort())
         buf.put(jarPathBytes)
+        buf.put(connectionMethod)
         return buf.array()
     }
 
@@ -110,6 +112,7 @@ data class HandshakeResponse(
                     String(pathBytes, Charsets.UTF_8)
                 } else ""
             } else ""
+            val connMethod = if (buf.hasRemaining()) buf.get() else CONNECTION_METHOD_USB_ADB
             return HandshakeResponse(
                 protocolVersion = version,
                 accepted = accepted,
@@ -118,7 +121,8 @@ data class HandshakeResponse(
                 displayHeight = dh,
                 virtualDisplayId = vdId,
                 adbPort = adbP,
-                vdServerJarPath = jarPath
+                vdServerJarPath = jarPath,
+                connectionMethod = connMethod
             )
         }
     }
@@ -428,4 +432,9 @@ const val FEATURE_AUDIO = 0x02
 const val FEATURE_NOTIFICATIONS = 0x04
 const val FEATURE_MEDIA_CONTROL = 0x08
 const val FEATURE_NAVIGATION = 0x10
+
+// Connection methods (handshake response)
+const val CONNECTION_METHOD_USB_ADB: Byte = 0
+const val CONNECTION_METHOD_WIFI_ADB: Byte = 1
+const val CONNECTION_METHOD_SHIZUKU: Byte = 2
 
