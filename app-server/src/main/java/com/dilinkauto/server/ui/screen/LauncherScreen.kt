@@ -317,6 +317,9 @@ private fun GridScrollbar(
 ) {
     if (totalItems == 0) return
 
+    val needsScroll by remember { derivedStateOf { state.canScrollForward || state.canScrollBackward } }
+    if (!needsScroll) return
+
     val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
     val layout by remember { derivedStateOf { state.layoutInfo } }
 
@@ -405,7 +408,9 @@ fun AppTile(app: AppInfo, onClick: () -> Unit) {
             Image(
                 bitmap = iconBitmap,
                 contentDescription = app.appName,
-                modifier = Modifier.size(64.dp)
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(12.dp))
             )
         } else {
             Icon(
