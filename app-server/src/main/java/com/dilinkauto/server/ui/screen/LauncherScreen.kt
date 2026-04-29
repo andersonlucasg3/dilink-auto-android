@@ -239,55 +239,39 @@ fun AppGrid(
         else sorted.filter { it.appName.contains(searchQuery, ignoreCase = true) }
     }
 
-    // Async-decoded icon cache — populated on Dispatchers.IO, composable reads reactively
-    val iconCache = remember { mutableStateMapOf<String, androidx.compose.ui.graphics.ImageBitmap?>() }
+    // Cache of decoded icons — shared across app tiles, populated lazily
+    val iconCache = remember { mutableMapOf<String, Bitmap?>() }
 
-    // Pre-decode icons in background when the app list arrives
-    LaunchedEffect(apps.size) {
-        if (apps.isEmpty()) return@LaunchedEffect
-        val toDecode = apps.filter { it.iconPng.isNotEmpty() && it.packageName !in iconCache }
-        for (app in toDecode) {
-            try {
-                val bmp = withContext(Dispatchers.IO) {
-                    val opts = BitmapFactory.Options().apply {
-                        inPreferredConfig = Bitmap.Config.RGB_565
-                    }
-                    BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size, opts)
-                }
-                if (bmp != null) {
-                    iconCache[app.packageName] = bmp.asImageBitmap()
-                }
-            } catch (e: Exception) {
-                Log.w("AppGrid", "Decode failed for ${app.packageName}: ${e.message}")
-            }
-        }
-    }
-
-    // Remove stale entries when apps change
+    // Cleanup stale cache entries when app list changes
     remember(apps) {
         iconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
     }
 
     Column(modifier = modifier) {
         Row(modifier = Modifier.weight(1f)) {
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Adaptive(minSize = 96.dp),
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
-                    AppTile(
-                        app = app,
-                        cachedIcon = iconCache[app.packageName],
-                        onClick = { onAppClick(app.packageName) }
-                    )
+            BoxWithConstraints(modifier = Modifier.weight(1f)) {
+                // Fixed columns calculated from available width — same density as
+                // Adaptive(100.dp) but without the runtime measurement crash risk
+                val gridColumns = max(3, (maxWidth / 100.dp).toInt().coerceAtMost(12))
+
+                LazyVerticalGrid(
+                    state = gridState,
+                    columns = GridCells.Fixed(gridColumns),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
+                        AppTile(
+                            app = app,
+                            iconCache = iconCache,
+                            onClick = { onAppClick(app.packageName) }
+                        )
+                    }
                 }
             }
 
-            // Visual-only scrollbar
             GridScrollbar(
                 state = gridState,
                 totalItems = filteredApps.size,
@@ -403,7 +387,7 @@ private fun GridScrollbar(
 @Composable
 fun AppTile(
     app: AppInfo,
-    cachedIcon: androidx.compose.ui.graphics.ImageBitmap?,
+    iconCache: MutableMap<String, Bitmap?>,
     onClick: () -> Unit
 ) {
     val categoryIcon = when (app.category) {
@@ -420,6 +404,34 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
+    // Lazy-decode icon when tile first appears — cancelled automatically
+    // when tile scrolls out of LazyVerticalGrid viewport
+    var iconBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+
+    LaunchedEffect(app.packageName) {
+        if (app.iconPng.isEmpty()) return@LaunchedEffect
+        val cached = iconCache[app.packageName]
+        if (cached != null) {
+            iconBitmap = cached.asImageBitmap()
+            return@LaunchedEffect
+        }
+        try {
+            val bmp = withContext(Dispatchers.IO) {
+                val opts = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                    inSampleSize = 2 // downscale for car display, 4x less memory
+                }
+                BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size, opts)
+            }
+            if (bmp != null) {
+                iconCache[app.packageName] = bmp
+                iconBitmap = bmp.asImageBitmap()
+            }
+        } catch (e: Exception) {
+            Log.w("AppTile", "Decode failed for ${app.packageName}: ${e.message}")
+        }
+    }
+
     Column(
         modifier = Modifier
             .clickable(onClick = onClick)
@@ -427,9 +439,9 @@ fun AppTile(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        if (cachedIcon != null) {
+        if (iconBitmap != null) {
             Image(
-                bitmap = cachedIcon,
+                bitmap = iconBitmap!!,
                 contentDescription = app.appName,
                 modifier = Modifier
                     .size(64.dp)
