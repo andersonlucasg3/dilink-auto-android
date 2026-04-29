@@ -19,6 +19,9 @@
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Shizuku: elevated shell access without ADB -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
     <!-- USB host mode for installing car app via USB ADB -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
@@ -89,5 +92,6 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
     </application>
 </manifest>

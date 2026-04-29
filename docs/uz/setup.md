@@ -22,6 +22,17 @@
 
 Hammasi shu. Simli disk raskadka, ulash kodlari, maxsus WiFi sozlamalari talab qilinmaydi.
 
+### Qo'shimcha: Shizuku (ADB-siz ulanish)
+
+[Shizuku](https://github.com/RikkaApps/Shizuku) oddiy ilovalarga yuqori qobiq imtiyozlarini beradi, bu DiLink-Auto-ga avtomobildan USB ADB ulanishisiz virtual displey serverini o'rnatish imkonini beradi. Bu USB ADB ga muqobil — avtomobilga faqat WiFi kerak.
+
+1. **Shizuku-ni** [GitHub Releases](https://github.com/RikkaApps/Shizuku/releases) yoki Google Play orqali o'rnating
+2. **Shizuku-ni** ADB orqali bir marta ishga tushiring (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`) yoki root orqali
+3. **DiLink Auto-ni oching** → Sozlamalar → Shizuku → ruxsat berish uchun bosing
+4. Shizuku faol bo'lganda, telefon VD serverini bevosita o'rnatadi. USB ADB yoki simsiz disk raskadka kerak emas.
+
+Shizuku faol bo'lganda, avtomobilga faqat WiFi orqali ulanish kerak — oqimli uzatish uchun USB kabeli kerak emas.
+
 ## Avtomobilni Sozlash
 
 **Internetga ulanish talab qilinmaydi.** Avtomobil APK-si telefon APK-si ichiga joylashtirilgan — telefon uni avtomobilga mahalliy WiFi orqali yuboradi. Sozlash yoki oqimli uzatish paytida hech qanday internet ulanishi kerak emas.

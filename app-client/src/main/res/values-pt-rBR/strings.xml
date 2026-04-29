@@ -76,6 +76,12 @@
     <string name="perm_granted">Concedido</string>
     <string name="perm_usb_debugging">Depuração USB</string>
     <string name="perm_usb_desc">Necessário no telefone e no carro</string>
+    <string name="perm_shizuku">Shizuku</string>
+    <string name="perm_shizuku_desc">Instale o Shizuku para conexão sem ADB. Inicie o Shizuku uma vez via ADB e conceda a permissão aqui.</string>
+    <string name="perm_shizuku_needs_permission">Shizuku — Precisa de Permissão</string>
+    <string name="perm_shizuku_permission_desc">O Shizuku está em execução. Toque para conceder permissão ao DiLink-Auto.</string>
+    <string name="perm_shizuku_available">Shizuku — Conectado</string>
+    <string name="perm_shizuku_granted">Shizuku ativo. O telefone pode implantar o servidor de exibição virtual sem USB ADB.</string>
 
     <!-- Support -->
     <string name="support_title">Apoio</string>

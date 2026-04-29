@@ -22,6 +22,17 @@
 
 That's it. No Wireless Debugging, no pairing codes, no special WiFi configuration.
 
+### Optional: Shizuku (ADB-Free Connection)
+
+[Shizuku](https://github.com/RikkaApps/Shizuku) provides elevated shell privileges to normal apps, allowing DiLink-Auto to deploy the Virtual Display server without needing a USB ADB connection from the car. This is an alternative to the USB ADB track — the car only needs WiFi connectivity.
+
+1. **Install Shizuku** from [GitHub Releases](https://github.com/RikkaApps/Shizuku/releases) or Google Play
+2. **Start Shizuku** once via ADB (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`) or via root
+3. **Open DiLink Auto** → Settings → Shizuku → tap to grant permission
+4. When Shizuku is active, the phone deploys the VD server directly. No need for USB ADB or Wireless Debugging.
+
+With Shizuku active, the car only needs to connect over WiFi — the USB cable is not required for streaming.
+
 ## Car Setup
 
 **No internet connection required.** The car APK is embedded inside the phone APK — the phone pushes it to the car over local WiFi. No internet connection is needed at any point during setup or streaming.

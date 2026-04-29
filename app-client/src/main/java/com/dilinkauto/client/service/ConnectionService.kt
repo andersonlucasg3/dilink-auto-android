@@ -16,6 +16,7 @@ import androidx.core.app.NotificationCompat
 import com.dilinkauto.client.ClientApp
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.R
+import com.dilinkauto.client.ShizukuManager
 import com.dilinkauto.client.display.VirtualDisplayClient
 import com.dilinkauto.protocol.*
 import dadb.AdbKeyPair
@@ -361,6 +362,7 @@ class ConnectionService : Service() {
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
             "vd-server.jar"
         ).absolutePath
+        val connMethod = if (ShizukuManager.isAvailable) CONNECTION_METHOD_SHIZUKU else CONNECTION_METHOD_USB_ADB
         val resp = HandshakeResponse(
             accepted = true,
             deviceName = android.os.Build.MODEL,
@@ -368,7 +370,8 @@ class ConnectionService : Service() {
             displayHeight = request.screenHeight,
             virtualDisplayId = -1,
             adbPort = 5555,
-            vdServerJarPath = vdJarPath
+            vdServerJarPath = vdJarPath,
+            connectionMethod = connMethod
         )
         serviceScope.launch(Dispatchers.IO) {
             // Check version BEFORE sending response — determines the flow
@@ -437,6 +440,12 @@ class ConnectionService : Service() {
                 }
                 waitForVDServer(VD_SERVER_PORT)
 
+                // If Shizuku is available, start the VD server directly
+                // (no need for the car's USB ADB to deploy it)
+                if (ShizukuManager.isAvailable) {
+                    startVdServerViaShizuku(request.screenWidth, request.screenHeight)
+                }
+
                 sendAppList()
             }
         }
@@ -480,6 +489,48 @@ class ConnectionService : Service() {
                 }
             } else {
                 FileLog.w(TAG, "VD server did not connect within timeout")
+            }
+        }
+    }
+
+    /**
+     * Start the VD server process directly on the phone using Shizuku.
+     *
+     * Shizuku provides shell-level privileges so the phone can run app_process
+     * without waiting for the car's USB ADB connection. The VD server will
+     * reverse-connect to localhost:19637 as usual.
+     */
+    private fun startVdServerViaShizuku(carWidth: Int, carHeight: Int) {
+        if (!ShizukuManager.isAvailable) {
+            FileLog.w(TAG, "Shizuku not available — cannot start VD server")
+            return
+        }
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
+                val dpiScale = phoneDpi.toFloat() / 160f
+                val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
+                val scaledW = ((scaledH * carWidth.toFloat() / carHeight).toInt()) and 0x7FFFFFFE.toInt()
+                val jarPath = java.io.File(
+                    java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
+                    "vd-server.jar"
+                ).absolutePath
+                val logFile = "/data/local/tmp/vd-server.log"
+                val args = "$scaledW $scaledH $phoneDpi $VD_SERVER_PORT $carWidth $carHeight $targetFps"
+
+                // Kill any existing VD server process
+                ShizukuManager.execAndWait("pkill -f VirtualDisplayServer 2>/dev/null")
+                delay(200)
+
+                // Launch VD server via app_process (shell UID 2000) using Shizuku.
+                // The command runs detached (&) so it doesn't block the Shizuku service call.
+                val cmd = "CLASSPATH=$jarPath exec app_process / " +
+                        "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
+                        " >$logFile 2>&1"
+                ShizukuManager.execBackground(cmd)
+                FileLog.i(TAG, "VD server started via Shizuku: ${scaledW}x${scaledH}")
+            } catch (e: Exception) {
+                FileLog.e(TAG, "Shizuku VD server start failed", e)
             }
         }
     }
