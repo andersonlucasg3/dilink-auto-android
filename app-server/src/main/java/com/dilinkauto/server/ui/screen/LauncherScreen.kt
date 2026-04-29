@@ -1,9 +1,9 @@
 package com.dilinkauto.server.ui.screen
 
+import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,9 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,8 +29,6 @@ import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
 import kotlin.math.max
-import kotlin.math.min
-import kotlinx.coroutines.launch
 
 /**
  * Car-optimized home screen — similar to Android Auto / CarPlay.
@@ -60,6 +58,12 @@ fun LauncherScreen(
     val notifications by service.notifications.collectAsState()
     val mediaMetadata by service.mediaMetadata.collectAsState()
     val playbackState by service.playbackState.collectAsState()
+
+    LaunchedEffect(appList.size) {
+        if (appList.isNotEmpty()) {
+            Log.i("LauncherScreen", "App list loaded: ${appList.size} apps")
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -232,23 +236,40 @@ fun AppGrid(
         else sorted.filter { it.appName.contains(searchQuery, ignoreCase = true) }
     }
 
+    // Cache decoded app icons so they aren't re-decoded during scroll
+    val iconCache = remember { mutableMapOf<String, androidx.compose.ui.graphics.ImageBitmap?>() }
+    iconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
+
     Column(modifier = modifier) {
         // Grid + scrollbar row
         Row(modifier = Modifier.weight(1f)) {
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Adaptive(minSize = 100.dp),
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(filteredApps, key = { it.packageName }) { app ->
-                    AppTile(app = app, onClick = { onAppClick(app.packageName) })
+            BoxWithConstraints(modifier = Modifier.weight(1f)) {
+                // Fixed columns prevents layout recalc crashes during fast scroll
+                val gridColumns = when {
+                    maxWidth < 400.dp -> 3
+                    maxWidth < 600.dp -> 4
+                    else -> 5
+                }
+
+                LazyVerticalGrid(
+                    state = gridState,
+                    columns = GridCells.Fixed(gridColumns),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
+                        AppTile(
+                            app = app,
+                            iconCache = iconCache,
+                            onClick = { onAppClick(app.packageName) }
+                        )
+                    }
                 }
             }
 
-            // Wide draggable scrollbar on the right
+            // Visual-only scrollbar (no drag handler — LazyVerticalGrid scrolls natively)
             GridScrollbar(
                 state = gridState,
                 totalItems = filteredApps.size,
@@ -307,8 +328,8 @@ fun AppGrid(
 }
 
 /**
- * Wide draggable scrollbar for the app grid.
- * Lightweight — avoids heavy recomposition during scroll.
+ * Visual scrollbar for the app grid — tracks scroll position without handling input.
+ * LazyVerticalGrid handles scrolling natively; this just shows where you are.
  */
 @Composable
 private fun GridScrollbar(
@@ -322,16 +343,17 @@ private fun GridScrollbar(
     if (!needsScroll) return
 
     val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
-    val layout by remember { derivedStateOf { state.layoutInfo } }
+    val layoutInfo by remember { derivedStateOf { state.layoutInfo } }
 
-    val viewportHeight = layout.viewportEndOffset - layout.viewportStartOffset
+    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
     if (viewportHeight <= 0) return
 
-    val itemsPerRow = remember(layout) {
-        if (layout.visibleItemsInfo.isEmpty()) 1
+    val itemsPerRow = remember(layoutInfo) {
+        val visible = layoutInfo.visibleItemsInfo
+        if (visible.isEmpty()) 1
         else {
-            val firstOffset = layout.visibleItemsInfo.first().offset.y
-            layout.visibleItemsInfo.count { it.offset.y == firstOffset }
+            val firstOffset = visible.first().offset.y
+            visible.count { it.offset.y == firstOffset }
         }
     }
 
@@ -344,22 +366,11 @@ private fun GridScrollbar(
         ((firstVisibleIndex / itemsPerRow).toFloat() / (totalRows - 1).toFloat()) * maxThumbOffset
     } else 0f
 
-    val scope = rememberCoroutineScope()
-
     Box(
         modifier = modifier
             .padding(end = 4.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFF2A2F3A).copy(alpha = 0.3f))
-            .pointerInput(totalRows, itemsPerRow) {
-                detectVerticalDragGestures { _, dragAmount ->
-                    val currentRow = state.firstVisibleItemIndex / itemsPerRow
-                    val rowDelta = ((dragAmount / max(1f, maxThumbOffset)) * totalRows).toInt()
-                    val targetRow = (currentRow + rowDelta).coerceIn(0, totalRows - 1)
-                    val targetIndex = (targetRow * itemsPerRow).coerceAtMost(totalItems - 1)
-                    scope.launch { state.scrollToItem(targetIndex) }
-                }
-            }
     ) {
         Box(
             modifier = Modifier
@@ -374,7 +385,7 @@ private fun GridScrollbar(
 }
 
 @Composable
-fun AppTile(app: AppInfo, onClick: () -> Unit) {
+fun AppTile(app: AppInfo, iconCache: MutableMap<String, androidx.compose.ui.graphics.ImageBitmap?>, onClick: () -> Unit) {
     val categoryIcon = when (app.category) {
         AppCategory.NAVIGATION -> Icons.Default.Navigation
         AppCategory.MUSIC -> Icons.Default.MusicNote
@@ -389,13 +400,18 @@ fun AppTile(app: AppInfo, onClick: () -> Unit) {
         AppCategory.OTHER -> OtherColor
     }
 
-    val iconBitmap = remember(app.packageName, app.iconPng.size) {
-        if (app.iconPng.isNotEmpty()) {
-            try {
-                val bmp = android.graphics.BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size)
-                bmp?.asImageBitmap()
-            } catch (_: Exception) { null }
-        } else null
+    val iconBitmap = remember(app.packageName) {
+        iconCache.getOrPut(app.packageName) {
+            if (app.iconPng.isNotEmpty()) {
+                try {
+                    val bmp = android.graphics.BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size)
+                    bmp?.asImageBitmap()
+                } catch (e: Exception) {
+                    Log.w("AppTile", "Icon decode failed for ${app.packageName}: ${e.message}")
+                    null
+                }
+            } else null
+        }
     }
 
     Column(
