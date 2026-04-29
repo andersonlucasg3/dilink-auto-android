@@ -5,8 +5,8 @@
 #   STATE_FILE, ISSUE_NUM, REPO, GITHUB_TOKEN, SERVER_URL, RUN_ID
 #   GITHUB_API_IP (optional) — set by issue-agent.sh to bypass WSL DNS
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/logging.sh"
+GITHUB_API_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$GITHUB_API_LIB_DIR/logging.sh"
 
 # Build --resolve flag for curl if GITHUB_API_IP is known
 _resolve_flag() {
