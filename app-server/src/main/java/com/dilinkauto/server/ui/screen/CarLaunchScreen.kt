@@ -30,7 +30,7 @@ fun CarLaunchScreen(service: CarConnectionService) {
     val state by service.state.collectAsState()
     val phoneName by service.phoneName.collectAsState()
     val statusMessage by service.statusMessage.collectAsState()
-    val isDebug = (service.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    var devMode by remember { mutableStateOf(service.devMode) }
 
     Box(
         modifier = Modifier
@@ -69,17 +69,27 @@ fun CarLaunchScreen(service: CarConnectionService) {
                         modifier = Modifier.weight(1f),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        ConnectionStatusCard(state, phoneName, statusMessage)
+                        ConnectionStatusCard(
+                            state = state,
+                            phoneName = phoneName,
+                            statusMessage = statusMessage,
+                            devMode = devMode,
+                            onDevModeChange = { newValue ->
+                                devMode = newValue
+                                service.devMode = newValue
+                            }
+                        )
+
+                        if (devMode && (state == CarConnectionService.State.IDLE ||
+                                    state == CarConnectionService.State.CONNECTING)) {
+                            Spacer(Modifier.height(16.dp))
+                            WifiAdbSetupCard()
+                        }
 
                         if (state != CarConnectionService.State.STREAMING &&
                             state != CarConnectionService.State.CONNECTED) {
                             Spacer(Modifier.height(24.dp))
                             ManualConnectBox(onConnect = { ip -> service.connectManual(ip) })
-
-                            if (isDebug) {
-                                Spacer(Modifier.height(16.dp))
-                                DevModeToggle(service = service)
-                            }
                         }
                     }
                 }
@@ -91,17 +101,27 @@ fun CarLaunchScreen(service: CarConnectionService) {
                 ) {
                     BrandingSection()
                     Spacer(Modifier.height(32.dp))
-                    ConnectionStatusCard(state, phoneName, statusMessage)
+                    ConnectionStatusCard(
+                        state = state,
+                        phoneName = phoneName,
+                        statusMessage = statusMessage,
+                        devMode = devMode,
+                        onDevModeChange = { newValue ->
+                            devMode = newValue
+                            service.devMode = newValue
+                        }
+                    )
+
+                    if (devMode && (state == CarConnectionService.State.IDLE ||
+                                state == CarConnectionService.State.CONNECTING)) {
+                        Spacer(Modifier.height(12.dp))
+                        WifiAdbSetupCard()
+                    }
 
                     if (state != CarConnectionService.State.STREAMING &&
                         state != CarConnectionService.State.CONNECTED) {
                         Spacer(Modifier.height(20.dp))
                         HowToConnect()
-
-                        if (isDebug) {
-                            Spacer(Modifier.height(12.dp))
-                            DevModeToggle(service = service)
-                        }
 
                         Spacer(Modifier.height(20.dp))
                         ManualConnectBox(onConnect = { ip -> service.connectManual(ip) })
@@ -135,67 +155,137 @@ private fun BrandingSection() {
     )
 }
 
+/**
+ * Connection status card with integrated WiFi/USB mode selector.
+ * Shows connection indicator, status text, phone name, and the
+ * connection mode toggle when not yet streaming.
+ */
 @Composable
 private fun ConnectionStatusCard(
     state: CarConnectionService.State,
     phoneName: String,
-    statusMessage: String
+    statusMessage: String,
+    devMode: Boolean,
+    onDevModeChange: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Connection indicator dot
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .background(
-                        when (state) {
-                            CarConnectionService.State.STREAMING -> Color(0xFF4CAF50)
-                            CarConnectionService.State.CONNECTED -> Color(0xFFFFA726)
-                            CarConnectionService.State.CONNECTING -> Color(0xFFFFA726)
-                            else -> Color(0xFF757575)
-                        },
-                        RoundedCornerShape(6.dp)
-                    )
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    when (state) {
-                        CarConnectionService.State.IDLE -> stringResource(R.string.status_ready_to_connect)
-                        CarConnectionService.State.CONNECTING -> stringResource(R.string.status_connecting)
-                        CarConnectionService.State.CONNECTED -> stringResource(R.string.status_connected)
-                        CarConnectionService.State.STREAMING -> stringResource(R.string.status_streaming)
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Connection indicator dot
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(
+                            when (state) {
+                                CarConnectionService.State.STREAMING -> Color(0xFF4CAF50)
+                                CarConnectionService.State.CONNECTED -> Color(0xFFFFA726)
+                                CarConnectionService.State.CONNECTING -> Color(0xFFFFA726)
+                                else -> Color(0xFF757575)
+                            },
+                            RoundedCornerShape(6.dp)
+                        )
                 )
-                if (statusMessage.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        if (phoneName.isNotEmpty()) phoneName else statusMessage,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
+                        when (state) {
+                            CarConnectionService.State.IDLE -> stringResource(R.string.status_ready_to_connect)
+                            CarConnectionService.State.CONNECTING -> stringResource(R.string.status_connecting)
+                            CarConnectionService.State.CONNECTED -> stringResource(R.string.status_connected)
+                            CarConnectionService.State.STREAMING -> stringResource(R.string.status_streaming)
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White
+                    )
+                    if (statusMessage.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            if (phoneName.isNotEmpty()) phoneName else statusMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                }
+                if (state == CarConnectionService.State.CONNECTING ||
+                    state == CarConnectionService.State.IDLE
+                ) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
                     )
                 }
             }
-            if (state == CarConnectionService.State.CONNECTING ||
-                state == CarConnectionService.State.IDLE
-            ) {
-                CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp
+
+            // Connection mode selector — always visible when not streaming
+            if (state != CarConnectionService.State.STREAMING &&
+                state != CarConnectionService.State.CONNECTED) {
+                Spacer(Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = 0.1f))
                 )
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.dev_mode_title),
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            if (devMode) stringResource(R.string.dev_mode_desc_on)
+                            else stringResource(R.string.dev_mode_desc_off),
+                            color = if (devMode) Color(0xFFFFA726) else Color.Gray,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = devMode,
+                        onCheckedChange = onDevModeChange,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = Color(0xFFFFA726)
+                        )
+                    )
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun WifiAdbSetupCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.wifi_adb_setup_title),
+                color = Color(0xFFFFA726),
+                style = MaterialTheme.typography.titleSmall
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.wifi_adb_setup_desc),
+                color = Color(0xFFBBBBBB),
+                style = MaterialTheme.typography.bodySmall,
+                lineHeight = 20.sp
+            )
         }
     }
 }
@@ -250,47 +340,5 @@ private fun ConnectStep(number: String, text: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = Color(0xFFBBBBBB)
         )
-    }
-}
-
-@Composable
-private fun DevModeToggle(service: CarConnectionService) {
-    var checked by remember { mutableStateOf(service.devMode) }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.dev_mode_title),
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    if (checked) stringResource(R.string.dev_mode_desc_on)
-                    else stringResource(R.string.dev_mode_desc_off),
-                    color = if (checked) Color(0xFFFFA726) else Color.Gray,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            Switch(
-                checked = checked,
-                onCheckedChange = { newValue ->
-                    checked = newValue
-                    service.devMode = newValue
-                },
-                colors = SwitchDefaults.colors(
-                    checkedTrackColor = Color(0xFFFFA726)
-                )
-            )
-        }
     }
 }

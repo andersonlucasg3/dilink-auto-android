@@ -182,6 +182,7 @@
     <string name="car_install_status_failed">Не удалось: %s</string>
     <string name="car_install_status_error">Ошибка: %s</string>
     <string name="car_install_status_car_apk_not_found">APK автомобиля не найден</string>
+    <string name="car_install_status_auth_needed">Требуется авторизация — Примите диалог отладки USB на экране авто, затем нажмите Продолжить для повтора</string>
 
     <!-- Auto-Update Status -->
     <string name="status_auto_update">Обновление приложения авто (v%1$s → v%2$s)…</string>

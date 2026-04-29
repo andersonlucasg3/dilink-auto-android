@@ -182,6 +182,7 @@
     <string name="car_install_status_failed">Сәтсіз: %s</string>
     <string name="car_install_status_error">Қате: %s</string>
     <string name="car_install_status_car_apk_not_found">Автокөлік APK табылмады</string>
+    <string name="car_install_status_auth_needed">Авторизация қажет — Автокөлік экранындағы USB жөндеу диалогын қабылдаңыз, содан кейін Қайталау үшін Жалғастыру түймесін басыңыз</string>
 
     <!-- Auto-Update Status -->
     <string name="status_auto_update">Автокөлік қолданбасы жаңартылуда (v%1$s → v%2$s)…</string>

@@ -497,7 +497,10 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                 !installStatus.contains("up-to-date", ignoreCase = true) &&
                 !installStatus.contains("Error", ignoreCase = true) &&
                 !installStatus.contains("Failed", ignoreCase = true) &&
-                !installStatus.contains("not found", ignoreCase = true)
+                !installStatus.contains("not found", ignoreCase = true) &&
+                !installStatus.contains("Authorization", ignoreCase = true)
+
+            val isAuthNeeded = installStatus.contains("Authorization", ignoreCase = true)
 
             val isDone = installStatus.contains("Success", ignoreCase = true) ||
                 installStatus.contains("installed", ignoreCase = true) ||
@@ -527,6 +530,26 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                     Text(installStatus, fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
                 }
                 Spacer(Modifier.height(8.dp))
+            } else if (isAuthNeeded) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFA726), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(installStatus, fontSize = 13.sp, color = Color(0xFFFFA726))
+                }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onInstallOnCar,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A73E8))
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.onboarding_continue), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
             } else if (isError) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1198,7 +1221,8 @@ fun CarInstallCard(installStatus: String, onInstallOnCar: (String?) -> Unit) {
         !installStatus.contains("up-to-date", ignoreCase = true) &&
         !installStatus.contains("Error", ignoreCase = true) &&
         !installStatus.contains("Failed", ignoreCase = true) &&
-        !installStatus.contains("not found", ignoreCase = true)
+        !installStatus.contains("not found", ignoreCase = true) &&
+        !installStatus.contains("Authorization", ignoreCase = true)
 
     val isDone = installStatus.contains("Success", ignoreCase = true) ||
         installStatus.contains("installed", ignoreCase = true) ||
@@ -1207,6 +1231,8 @@ fun CarInstallCard(installStatus: String, onInstallOnCar: (String?) -> Unit) {
     val isError = installStatus.contains("Error", ignoreCase = true) ||
         installStatus.contains("Failed", ignoreCase = true) ||
         installStatus.contains("not found", ignoreCase = true)
+
+    val isAuthNeeded = installStatus.contains("Authorization", ignoreCase = true)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1218,7 +1244,7 @@ fun CarInstallCard(installStatus: String, onInstallOnCar: (String?) -> Unit) {
                 Icon(
                     Icons.Default.DirectionsCar,
                     contentDescription = null,
-                    tint = if (isDone) Color(0xFF4CAF50) else if (isError) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary,
+                    tint = if (isDone) Color(0xFF4CAF50) else if (isError || isAuthNeeded) Color(0xFFFFA726) else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(Modifier.width(12.dp))
@@ -1230,6 +1256,7 @@ fun CarInstallCard(installStatus: String, onInstallOnCar: (String?) -> Unit) {
                         color = when {
                             isDone -> Color(0xFF4CAF50)
                             isError -> Color(0xFFEF5350)
+                            isAuthNeeded -> Color(0xFFFFA726)
                             isInstalling -> Color(0xFFFFA726)
                             else -> Color.Gray
                         }
@@ -1250,7 +1277,7 @@ fun CarInstallCard(installStatus: String, onInstallOnCar: (String?) -> Unit) {
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                     ) {
-                        Text(if (isError) stringResource(R.string.car_app_retry) else stringResource(R.string.car_app_install), fontSize = 13.sp)
+                        Text(if (isError || isAuthNeeded) stringResource(R.string.onboarding_continue) else stringResource(R.string.car_app_install), fontSize = 13.sp)
                     }
                 }
             }
