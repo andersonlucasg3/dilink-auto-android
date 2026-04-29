@@ -1,5 +1,7 @@
 package com.dilinkauto.client
 
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
@@ -17,6 +19,7 @@ import java.io.FileInputStream
 object ShizukuManager {
 
     private const val TAG = "ShizukuManager"
+    private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
     private const val REQUEST_CODE = 0
 
     @Volatile
@@ -29,22 +32,25 @@ object ShizukuManager {
 
     private var listenersRegistered = false
 
-    fun init() {
+    fun init(context: Context) {
         if (listenersRegistered) return
         listenersRegistered = true
 
         try {
-            isInstalled = Shizuku.pingBinder()
+            isInstalled = try {
+                context.packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0)
+                true
+            } catch (_: PackageManager.NameNotFoundException) {
+                false
+            }
 
             Shizuku.addBinderReceivedListener {
-                isInstalled = true
                 FileLog.i(TAG, "Shizuku binder received")
                 checkPermission()
             }
 
             Shizuku.addBinderDeadListener {
                 isAvailable = false
-                isInstalled = false
                 FileLog.i(TAG, "Shizuku binder dead")
             }
 
@@ -83,6 +89,21 @@ object ShizukuManager {
             Shizuku.requestPermission(REQUEST_CODE)
         } catch (e: Exception) {
             Log.w(TAG, "Shizuku permission request failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Open the Shizuku app so the user can manage authorization manually.
+     */
+    fun openShizukuApp(context: Context) {
+        try {
+            val intent = context.packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to open Shizuku: ${e.message}")
         }
     }
 

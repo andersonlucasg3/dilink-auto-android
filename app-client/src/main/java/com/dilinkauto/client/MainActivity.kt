@@ -1054,9 +1054,13 @@ fun SettingsScreen(
             title = shizukuTitle,
             description = shizukuDesc,
             onClick = {
-                if (!shizukuAvailable) {
-                    ShizukuManager.requestPermission()
-                    permissionsKey++
+                when {
+                    shizukuAvailable -> { /* already authorized */ }
+                    shizukuInstalled -> {
+                        ShizukuManager.requestPermission()
+                        ShizukuManager.openShizukuApp(context)
+                        permissionsKey++
+                    }
                 }
             }
         )
