@@ -128,17 +128,22 @@ Branches are created automatically by the issue agent based on the **issue templ
 
 All branches merge to `develop` via PR, except `release/*` which targets `main`.
 
-| Branch | CI |
-|--------|-----|
-| `main` | Builds signed release APK, creates GitHub Release on `vX.Y.Z` tag |
-| `develop`, `release/*` | Builds debug APK, creates pre-release on `vX.Y.Z-dev*` tags |
-| `feature/*`, `fix/*`, etc. | No CI (PR-only) |
+### CI Workflows
 
-**Release process:** Create a Release issue from the template. The agent creates `release/vX.Y.Z`, prepares changes, tags `vX.Y.Z-dev-NN` for pre-release builds. Merge to `main` → push `vX.Y.Z` tag → CI creates a signed GitHub Release with auto-generated changelog.
-
-**Pre-release updates:** Users on the Pre-release channel receive `-dev` builds. Users on the Release channel receive stable builds only. The channel is configurable in Settings.
+| Workflow | Trigger | Action |
+|----------|---------|--------|
+| `build.yml` | Push/PR to `main` | Validation: build release APK |
+| `build-develop.yml` | Push/PR to `develop`, `release/*` | Validation: build debug APK |
+| `build-pre-release.yml` | Tag `vX.Y.Z-dev-NN` | Build debug APK + GitHub pre-release |
+| `build-release.yml` | Tag `vX.Y.Z` | Build signed release APK + GitHub Release |
+| `sync-main-to-develop.yml` | Push to `main` | Merge `main` → `develop` (git-flow back-sync) |
+| `issue-agent.yml` | Issue opened / comment | Autonomous agent: branch, build, PR |
 
 All CI runs on **self-hosted WSL runners**.
+
+**Release process:** Create a Release issue from the template. The agent creates `release/vX.Y.Z`, prepares changes, and tags `vX.Y.Z-dev-NN`. The `build-pre-release.yml` workflow builds and publishes a pre-release for testing. When ready, `release/vX.Y.Z` is merged to `main`. Pushing the `vX.Y.Z` tag triggers `build-release.yml`, which builds a signed APK and creates the GitHub Release. The `sync-main-to-develop.yml` workflow automatically merges `main` back into `develop`, ensuring any last-minute release changes flow back.
+
+**Pre-release updates:** Users on the Pre-release channel receive `-dev` builds. Users on the Release channel receive stable builds only. The channel is configurable in Settings.
 
 ## License
 

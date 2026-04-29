@@ -1,0 +1,33 @@
+name: Sync Main → Develop
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  merge-to-develop:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge main into develop
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout develop
+          git merge main --no-edit
+
+          if git diff --cached --quiet && git diff --quiet; then
+            echo "Nothing to merge — develop already up to date with main"
+            exit 0
+          fi
+
+          git push origin develop
