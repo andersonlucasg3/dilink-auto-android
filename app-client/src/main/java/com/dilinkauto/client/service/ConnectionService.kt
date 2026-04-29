@@ -515,13 +515,25 @@ class ConnectionService : Service() {
                     AdbKeyPair.generate(privKey, pubKey)
                 }
                 val keyPair = AdbKeyPair.read(privKey, pubKey)
-                val dadb = withTimeoutOrNull(15_000) {
-                    Dadb.create(carIp, 5555, keyPair)
+
+                val dadbExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+                val dadb: Dadb? = try {
+                    val future = dadbExecutor.submit<Dadb> {
+                        Dadb.create(carIp, 5555, keyPair)
+                    }
+                    try {
+                        future.get(15, java.util.concurrent.TimeUnit.SECONDS)
+                    } catch (e: java.util.concurrent.TimeoutException) {
+                        FileLog.w(TAG, "Auto-update Dadb.create() timed out — will retry in 5min")
+                        null
+                    }
+                } finally {
+                    dadbExecutor.shutdownNow()
                 }
+
                 if (dadb == null) {
                     _installStatusStatic.value = getString(R.string.car_install_status_auth_needed)
                     autoUpdateFailedAt = System.currentTimeMillis()
-                    FileLog.w(TAG, "Auto-update ADB connect timed out — will retry in 5min")
                     return@launch
                 }
 
@@ -661,16 +673,31 @@ class ConnectionService : Service() {
                     AdbKeyPair.generate(privKey, pubKey)
                 }
                 val keyPair = AdbKeyPair.read(privKey, pubKey)
-                val dadb = withTimeoutOrNull(15_000) {
-                    Dadb.create(carIp, 5555, keyPair)
+
+                // Dadb.create() does blocking socket I/O that coroutine cancellation
+                // cannot interrupt. Use Future.get(timeout) for reliable timeout.
+                FileLog.d(TAG, "Attempting Dadb.create() (15s timeout)...")
+                val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+                val dadb: Dadb? = try {
+                    val future = executor.submit<Dadb> {
+                        Dadb.create(carIp, 5555, keyPair)
+                    }
+                    try {
+                        future.get(15, java.util.concurrent.TimeUnit.SECONDS)
+                    } catch (e: java.util.concurrent.TimeoutException) {
+                        FileLog.w(TAG, "Dadb.create() timed out after 15s — likely waiting for car auth dialog")
+                        null
+                    }
+                } finally {
+                    executor.shutdownNow()
                 }
 
                 if (dadb == null) {
                     _installStatus.value = getString(R.string.car_install_status_auth_needed)
                     keepStatus = true
-                    FileLog.w(TAG, "ADB connection timed out — user may need to accept auth dialog on car")
                     return@launch
                 }
+                FileLog.d(TAG, "Dadb.create() succeeded")
 
                 try {
                     _installStatus.value = getString(R.string.car_install_status_checking_version)
