@@ -17,6 +17,7 @@ DiLink-Auto mirrors your phone apps onto your car's display with full touch inte
 |--------|-------|
 | Xiaomi 17 Pro Max (HyperOS 3, Chinese ROM) | No Android Auto — no Google Play Services |
 | BYD Destroyer 05 / King (Brazil market) | Only Android Auto on head unit |
+| Samsung Galaxy (One UI 5+) | Auto Blocker blocks USB ADB, aggressive battery restrictions |
 | Any Android 10+ phone | Works regardless of ROM or Play Services |
 
 ## Requirements
@@ -74,6 +75,9 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 **Coming:** audio streaming, media controls, navigation widgets
 
 **Known limitations:**
+- Samsung Auto Blocker must be disabled for USB ADB (Settings → Security → Auto Blocker → Off).
+- Samsung battery management requires explicit exemption (see [Setup Guide](./setup.md#samsung-one-ui-tips)).
+- Samsung Knox may show security prompts on first virtual display access.
 - VD server process restarts on USB disconnect (reconnects automatically).
 - Hotspot must be enabled manually (Android 16 limitation).
 - Occasional visual artifacts — decoder restart race, recovers at next keyframe (~1s).
