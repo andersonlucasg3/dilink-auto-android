@@ -382,9 +382,17 @@ elif [ "$EVENT" = "issue_comment" ]; then
     write_initial_prompt
     write_resume_prompt "$COMMENT_BODY"
 
+    # Build prompt with user's comment included directly so Claude sees it on resume
+    cat > "/tmp/resume-msg-${ISSUE_NUM}.txt" << EOFMSG
+The user posted this follow-up comment on issue #${ISSUE_NUM}:
+
+${COMMENT_BODY}
+
+Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt for full context, then complete only the user's request above.
+EOFMSG
     log_step "Claude: $CLAUDE_BIN --resume $SESSION_ID"
     set +e
-    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "$(cat /tmp/resume-msg-${ISSUE_NUM}.txt)" 2>&1)
     CLAUDE_EXIT=$?
     set -e
     echo "--- Claude output (resume) ---"
