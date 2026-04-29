@@ -1,13 +1,19 @@
 # Progress Tracker
 
-Current version: **v0.16.0-dev** (pre-release)
+Current version: **v0.16.0** (stable)
 Last updated: 2026-04-29
 
 ## Milestones
 
-### v0.16.0 (in progress)
+### v0.16.0 (2026-04-29)
 
-- Pre-release version `v0.16.0-dev` tagged.
+- **Shizuku**: App now appears in Shizuku authorized apps list (added ShizukuProvider ContentProvider). Settings card opens Shizuku app directly for permission management.
+- **Shizuku exec fix**: Fixed EBADF from ParcelFileDescriptors in binder transactions by dup'ing FDs before reading. `pm install` via Shizuku for silent self-update.
+- **Shizuku mode on car**: Car connection no longer stuck on "Waiting for WiFi" when Shizuku is active — gateway IP retry loop no longer breaks after first attempt.
+- **Version check switched to versionName**: Car app updates now compare versionName strings (semver-aware) instead of versionCode integers, enabling pre-release car updates.
+- **Security hardening**: Removed unused `RECORD_AUDIO` and `SYSTEM_ALERT_WINDOW` permissions. Accessibility service no longer listens for `typeAllMask` events (only uses `dispatchGesture`).
+- **App grid performance**: Fixed crash during fast scroll on car display. `GridCells.Adaptive` → `GridCells.Fixed` with calculated columns. Per-tile lazy bitmap decode with `inSampleSize=2` + `RGB_565`.
+- **Network stability**: Phone-side `NetworkCallback` now filtered to `TRANSPORT_WIFI` only, ignoring 3G/4G mobile data fluctuations.
 
 ### v0.15.0 (2026-04-28)
 
