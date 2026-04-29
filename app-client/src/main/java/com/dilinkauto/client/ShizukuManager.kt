@@ -127,13 +127,24 @@ object ShizukuManager {
         return try {
             val service = getService() ?: return null
             val process = service.newProcess(arrayOf("sh", "-c", command), null, null)
-            val stdoutFd: ParcelFileDescriptor = process.outputStream
-            val stderrFd: ParcelFileDescriptor = process.errorStream
 
-            val stdout = FileInputStream(stdoutFd.fileDescriptor).bufferedReader().readText()
-            val stderr = FileInputStream(stderrFd.fileDescriptor).bufferedReader().readText()
+            // Duplicate FDs — ParcelFileDescriptors from binder transactions
+            // can become invalid (EBADF) when the original is garbage collected
+            val stdoutOrig = process.outputStream
+            val stderrOrig = process.errorStream
+            val stdoutFd = ParcelFileDescriptor.dup(stdoutOrig.fileDescriptor)
+            val stderrFd = ParcelFileDescriptor.dup(stderrOrig.fileDescriptor)
+            stdoutOrig.close()
+            stderrOrig.close()
+
+            val stdout = try {
+                FileInputStream(stdoutFd.fileDescriptor).bufferedReader().use { it.readText() }
+            } catch (_: Exception) { "" }
+            val stderr = try {
+                FileInputStream(stderrFd.fileDescriptor).bufferedReader().use { it.readText() }
+            } catch (_: Exception) { "" }
+
             process.waitFor()
-
             stdoutFd.close()
             stderrFd.close()
 
@@ -146,10 +157,14 @@ object ShizukuManager {
 
     /**
      * Execute a shell command in the background (fire and forget).
-     * Appends "&" to the command so sh returns immediately.
      */
-    fun execBackground(command: String): Boolean {
-        val result = execAndWait("$command &")
-        return result != null
+    fun execBackground(command: String) {
+        if (!isAvailable) return
+        try {
+            val service = getService() ?: return
+            service.newProcess(arrayOf("sh", "-c", "$command &"), null, null)
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Shizuku execBackground failed: ${e.message}")
+        }
     }
 }
