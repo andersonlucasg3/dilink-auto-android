@@ -32,10 +32,12 @@
     <!-- How to Connect -->
     <string name="how_to_connect_title">How to connect</string>
 
-    <!-- Development Mode -->
-    <string name="dev_mode_title">Development Mode</string>
-    <string name="dev_mode_desc_on">TCP ADB instead of USB (emulator testing)</string>
-    <string name="dev_mode_desc_off">Use USB ADB (car connection)</string>
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">WiFi Direct Mode</string>
+    <string name="dev_mode_desc_on">WiFi ADB (car connects to phone over WiFi — no USB cable needed)</string>
+    <string name="dev_mode_desc_off">USB ADB (car connects to phone via USB cable)</string>
+    <string name="wifi_adb_setup_title">WiFi ADB Setup</string>
+    <string name="wifi_adb_setup_desc">To use WiFi Direct Mode, you must first enable ADB over WiFi on your phone. Connect your phone to a computer via USB and run:\n\nadb tcpip 5555\n\nThis only needs to be done once. After that, the car can connect to your phone over WiFi without a USB cable.</string>
 
     <!-- Manual Connect -->
     <string name="manual_connect_label">Or connect manually by IP</string>

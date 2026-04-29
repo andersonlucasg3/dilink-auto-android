@@ -182,6 +182,7 @@
     <string name="car_install_status_failed">Muvaffaqiyatsiz: %s</string>
     <string name="car_install_status_error">Xato: %s</string>
     <string name="car_install_status_car_apk_not_found">Avtomobil APK topilmadi</string>
+    <string name="car_install_status_auth_needed">Avtorizatsiya talab qilinadi — Avtomobil ekranidagi USB nosozliklarni tuzatish dialogini qabul qiling, so\'ngra Qayta urinish uchun Davom etish tugmasini bosing</string>
 
     <!-- Auto-Update Status -->
     <string name="status_auto_update">Avtomobil ilovasi yangilanmoqda (v%1$s → v%2$s)…</string>

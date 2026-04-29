@@ -61,8 +61,7 @@ class CarConnectionService : Service() {
             .edit().putBoolean("user_disconnected", value).apply()
 
     var devMode: Boolean
-        get() = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0 &&
-                getSharedPreferences("dilinkauto", MODE_PRIVATE)
+        get() = getSharedPreferences("dilinkauto", MODE_PRIVATE)
                     .getBoolean("dev_mode", false)
         set(value) = getSharedPreferences("dilinkauto", MODE_PRIVATE)
             .edit().putBoolean("dev_mode", value).apply()

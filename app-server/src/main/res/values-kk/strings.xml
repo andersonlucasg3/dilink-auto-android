@@ -32,10 +32,12 @@
     <!-- How to Connect -->
     <string name="how_to_connect_title">Қалай қосылуға болады</string>
 
-    <!-- Development Mode -->
-    <string name="dev_mode_title">Әзірлеу режимі</string>
-    <string name="dev_mode_desc_on">USB орнына TCP ADB (эмулятор тестілеу)</string>
-    <string name="dev_mode_desc_off">USB ADB пайдалану (автокөлік қосылымы)</string>
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">Тікелей Wi-Fi режимі</string>
+    <string name="dev_mode_desc_on">WiFi ADB (автокөлік телефонға Wi-Fi арқылы қосылады — USB кабелі қажет емес)</string>
+    <string name="dev_mode_desc_off">USB ADB (автокөлік телефонға USB кабелі арқылы қосылады)</string>
+    <string name="wifi_adb_setup_title">WiFi ADB баптау</string>
+    <string name="wifi_adb_setup_desc">Тікелей Wi-Fi режимін пайдалану үшін алдымен телефонда ADB Wi-Fi арқылы қосу керек. Телефонды компьютерге USB арқылы қосып, келесіні орындаңыз:\n\nadb tcpip 5555\n\nМұны тек бір рет жасау керек. Осыдан кейін автокөлік телефонға Wi-Fi арқылы USB кабелінсіз қосыла алады.</string>
 
     <!-- Manual Connect -->
     <string name="manual_connect_label">Немесе IP арқылы қолмен қосылыңыз</string>

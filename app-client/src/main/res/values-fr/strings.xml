@@ -182,6 +182,7 @@
     <string name="car_install_status_failed">Échec : %s</string>
     <string name="car_install_status_error">Erreur : %s</string>
     <string name="car_install_status_car_apk_not_found">APK voiture introuvable</string>
+    <string name="car_install_status_auth_needed">Autorisation requise — Acceptez la boîte de dialogue de débogage USB sur l\'écran de la voiture, puis appuyez sur Continuer pour réessayer</string>
 
     <!-- Auto-Update Status -->
     <string name="status_auto_update">Mise à jour de l\'appli voiture (v%1$s → v%2$s)…</string>
