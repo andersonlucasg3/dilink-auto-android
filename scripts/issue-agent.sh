@@ -591,8 +591,6 @@ EOFCOMMENT
   fi
 fi
 
-# Stop Gradle daemon to free resources for the next job
-./gradlew --stop 2>/dev/null || true
 echo "=========================================="
 echo " Done"
 echo "=========================================="
