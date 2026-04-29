@@ -63,14 +63,14 @@ class RemoteAdbController(
             ?.trim()
 
         return if (component != null) {
-            shell(
+            shellInternal(
                 "am start --display $virtualDisplayId -n $component",
                 "launchApp($packageName → $component)"
             )
         } else {
             // Fallback: try am start with package name only
             Log.w(TAG, "Could not resolve activity for $packageName, trying direct launch")
-            shell(
+            shellInternal(
                 "am start --display $virtualDisplayId " +
                     "-a android.intent.action.MAIN " +
                     "-c android.intent.category.LAUNCHER " +
@@ -84,7 +84,7 @@ class RemoteAdbController(
      * Sends a tap event to the virtual display.
      */
     fun tap(x: Int, y: Int): Boolean {
-        return shell(
+        return shellInternal(
             "input -d $virtualDisplayId tap $x $y",
             "tap($x, $y)"
         )
@@ -94,7 +94,7 @@ class RemoteAdbController(
      * Sends a swipe event to the virtual display.
      */
     fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Boolean {
-        return shell(
+        return shellInternal(
             "input -d $virtualDisplayId swipe $x1 $y1 $x2 $y2 $durationMs",
             "swipe"
         )
@@ -104,7 +104,7 @@ class RemoteAdbController(
      * Sends a BACK key event to the virtual display.
      */
     fun back(): Boolean {
-        return shell(
+        return shellInternal(
             "input -d $virtualDisplayId keyevent 4",
             "back"
         )
@@ -114,7 +114,7 @@ class RemoteAdbController(
      * Sends a HOME key event to the virtual display.
      */
     fun home(): Boolean {
-        return shell(
+        return shellInternal(
             "input -d $virtualDisplayId keyevent 3",
             "home"
         )
@@ -187,7 +187,15 @@ class RemoteAdbController(
         }
     }
 
-    private fun shell(command: String, label: String): Boolean {
+    fun shell(command: String): Boolean = shellInternal(command, command.take(80))
+
+    fun shellNoWait(command: String): Boolean {
+        if (dadb == null) return false
+        shellAsync(command)
+        return true
+    }
+
+    private fun shellInternal(command: String, label: String): Boolean {
         val connection = dadb ?: run {
             Log.w(TAG, "$label: not connected")
             return false

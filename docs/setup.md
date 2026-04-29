@@ -64,7 +64,7 @@ When the phone is connected to the car:
 7. **Phone deploys VD server** — extracts vd-server.jar to `/sdcard/DiLinkAuto/`, starts `app_process` as shell UID with FPS arg
 8. **VD server reverse-connects** to phone on localhost:19637 (NIO non-blocking)
 9. **VD server creates VirtualDisplay** at phone's native DPI (480dpi) with GPU downscale and periodic re-draw
-10. **Video streams** over WiFi TCP (video connection 9638) — H.264, High profile, 12Mbps CBR, 60fps
+10. **Video streams** over WiFi TCP (video connection 9638) — H.264, Main profile, 8Mbps CBR, configurable up to 60fps
 
 ## Troubleshooting
 

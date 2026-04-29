@@ -1,0 +1,25 @@
+name: New Feature
+description: Request a new feature to be implemented by the development agent
+labels: [feature, agent]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: Describe the feature to implement. Be specific.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: '- [ ] The feature works as described'
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      placeholder: References, design ideas, or anything that helps.
+    validations:
+      required: false

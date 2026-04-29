@@ -12,9 +12,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dilinkauto.protocol.NotificationData
+import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -41,7 +43,7 @@ fun NotificationContent(service: CarConnectionService, onAppLaunch: (String) -> 
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "No notifications",
+                    stringResource(R.string.no_notifications),
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.Gray
                 )

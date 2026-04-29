@@ -25,4 +25,66 @@
     <!-- Айна -->
     <string name="status_updating">Автокөлік қолданбасы жаңартылуда…</string>
     <string name="status_please_wait">Күте тұрыңыз</string>
+
+    <!-- Бағдар -->
+    <string name="landscape_app_note">Қолданбалар өз бағдарын өздері басқарады. Тек портреттік қолданбалар жолақтармен көрсетілуі мүмкін.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Қалай қосылуға болады</string>
+
+    <!-- Development Mode -->
+    <string name="dev_mode_title">Әзірлеу режимі</string>
+    <string name="dev_mode_desc_on">USB орнына TCP ADB (эмулятор тестілеу)</string>
+    <string name="dev_mode_desc_off">USB ADB пайдалану (автокөлік қосылымы)</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Немесе IP арқылы қолмен қосылыңыз</string>
+    <string name="manual_connect_ip_label">Телефон IP мекенжайы</string>
+    <string name="manual_connect_button">Қосу</string>
+
+    <!-- Branding -->
+    <string name="branding_title">DiLink Auto</string>
+    <string name="branding_tagline">Телефон қолданбаларын автокөлік экранында пайдаланыңыз</string>
+
+    <!-- Connection Status -->
+    <string name="status_ready_to_connect">Қосылуға дайын</string>
+    <string name="status_connecting">Қосылуда…</string>
+    <string name="status_connected">Қосылды</string>
+    <string name="status_streaming">Трансляция</string>
+
+    <!-- How to Connect Steps -->
+    <string name="how_to_step_1">Телефондағы WiFi хотспотты қосыңыз</string>
+    <string name="how_to_step_2">Телефонды автокөліктің USB портына жалғаңыз</string>
+    <string name="how_to_step_3">Телефондағы DiLink Auto қолданбасын ашыңыз</string>
+    <string name="how_to_step_4">Автокөліктің автоматты түрде қосылуын күтіңіз</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_eject">Шығару</string>
+    <string name="nav_alerts">Ескертулер</string>
+
+    <!-- Network -->
+    <string name="network_connected">Қосылды</string>
+    <string name="network_offline">Офлайн</string>
+
+    <!-- Recent Apps -->
+    <string name="recent_app_fallback">Қолданба</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">Хабарландырулар жоқ</string>
+
+    <!-- Connection Status Messages -->
+    <string name="status_deploying_vd">Виртуалды дисплейді орналастыру…</string>
+    <string name="status_waiting_usb">USB күту…</string>
+    <string name="status_waiting_wifi">WiFi күту…</string>
+    <string name="status_tcp_adb_failed">TCP ADB қосылымы сәтсіз аяқталды</string>
+    <string name="status_tcp_adb_connected">TCP ADB қосылды</string>
+    <string name="status_connecting_usb">USB қосылуда… Телефондағы авторизация диалогын тексеріңіз</string>
+    <string name="status_usb_failed">USB қосылымы сәтсіз — телефондағы авторизация диалогын тексеріңіз</string>
+    <string name="status_usb_connected">USB қосылды</string>
+    <string name="status_updating_car">Автокөлік қолданбасы жаңартылуда…</string>
+    <string name="status_preparing_vd">Виртуалды дисплей дайындалуда…</string>
+    <string name="status_starting_vd">Виртуалды дисплей іске қосылуда…</string>
+    <string name="status_vd_failed">VD сервері сәтсіз аяқталды</string>
+    <string name="status_waiting_video">Бейне ағынын күту…</string>
+    <string name="status_updating_please_wait">Автокөлік қолданбасы жаңартылуда… Күте тұрыңыз</string>
 </resources>

@@ -25,4 +25,66 @@
     <!-- Aks ettirish -->
     <string name="status_updating">Avtomobil ilovasi yangilanmoqda…</string>
     <string name="status_please_wait">Iltimos, kuting</string>
+
+    <!-- Yo\'nalish -->
+    <string name="landscape_app_note">Ilovalar o\'z yo\'nalishini o\'zi boshqaradi. Faqat portret ilovalar chiziqlar bilan ko\'rsatilishi mumkin.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Qanday ulanish kerak</string>
+
+    <!-- Development Mode -->
+    <string name="dev_mode_title">Ishlab chiqish rejimi</string>
+    <string name="dev_mode_desc_on">USB o\'rniga TCP ADB (emulyator sinovi)</string>
+    <string name="dev_mode_desc_off">USB ADB ishlatish (avtomobil ulanishi)</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Yoki IP orqali qo\'lda ulaning</string>
+    <string name="manual_connect_ip_label">Telefon IP manzili</string>
+    <string name="manual_connect_button">Ulanish</string>
+
+    <!-- Branding -->
+    <string name="branding_title">DiLink Auto</string>
+    <string name="branding_tagline">Telefon ilovalaringizni avtomobil ekranida ishlating</string>
+
+    <!-- Connection Status -->
+    <string name="status_ready_to_connect">Ulanishga tayyor</string>
+    <string name="status_connecting">Ulanmoqda…</string>
+    <string name="status_connected">Ulandi</string>
+    <string name="status_streaming">Translatsiya</string>
+
+    <!-- How to Connect Steps -->
+    <string name="how_to_step_1">Telefoningizdagi WiFi hotspotni yoqing</string>
+    <string name="how_to_step_2">Telefoningizni avtomobil USB portiga ulang</string>
+    <string name="how_to_step_3">Telefoningizda DiLink Auto ilovasini oching</string>
+    <string name="how_to_step_4">Avtomobil avtomatik ulanishini kuting</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_eject">Chiqarish</string>
+    <string name="nav_alerts">Ogohlantirishlar</string>
+
+    <!-- Network -->
+    <string name="network_connected">Ulandi</string>
+    <string name="network_offline">Oflayn</string>
+
+    <!-- Recent Apps -->
+    <string name="recent_app_fallback">Ilova</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">Bildirishnomalar yo\'q</string>
+
+    <!-- Connection Status Messages -->
+    <string name="status_deploying_vd">Virtual displey joylashtirilmoqda…</string>
+    <string name="status_waiting_usb">USB kutilmoqda…</string>
+    <string name="status_waiting_wifi">WiFi kutilmoqda…</string>
+    <string name="status_tcp_adb_failed">TCP ADB ulanishi muvaffaqiyatsiz tugadi</string>
+    <string name="status_tcp_adb_connected">TCP ADB ulandi</string>
+    <string name="status_connecting_usb">USB ulanmoqda… Telefonda avtorizatsiya dialogini tekshiring</string>
+    <string name="status_usb_failed">USB ulanishi muvaffaqiyatsiz — telefonda avtorizatsiya dialogini tekshiring</string>
+    <string name="status_usb_connected">USB ulandi</string>
+    <string name="status_updating_car">Avtomobil ilovasi yangilanmoqda…</string>
+    <string name="status_preparing_vd">Virtual displey tayyorlanmoqda…</string>
+    <string name="status_starting_vd">Virtual displey ishga tushirilmoqda…</string>
+    <string name="status_vd_failed">VD server muvaffaqiyatsiz tugadi</string>
+    <string name="status_waiting_video">Video oqimi kutilmoqda…</string>
+    <string name="status_updating_please_wait">Avtomobil ilovasi yangilanmoqda… Iltimos, kuting</string>
 </resources>

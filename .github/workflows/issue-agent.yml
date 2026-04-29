@@ -6,9 +6,16 @@ on:
   issue_comment:
     types: [created]
 
+# Only one agent per issue at a time. Subsequent triggers queue up
+# and run in sequence, avoiding worktree conflicts and duplicate work.
+concurrency:
+  group: agent-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   issues: write
+  pull-requests: write
 
 jobs:
   agent:
@@ -63,15 +70,16 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_ID: ${{ github.event.comment.id }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         if: hashFiles('app-client/build/outputs/apk/debug/app-client-debug.apk') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: issue-${{ github.event.issue.number }}-debug
           path: app-client/build/outputs/apk/debug/app-client-debug.apk
-          if-no-files-found: ignore
+          archive: false

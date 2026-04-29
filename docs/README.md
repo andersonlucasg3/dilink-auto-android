@@ -1,6 +1,6 @@
 # DiLink-Auto
 
-**v0.13.1** — Use your phone apps on your car's built-in screen. Open-source, no Google Services required.
+Use your phone apps on your car's built-in screen. Open-source, no Google Services required.
 
 An open-source alternative to Android Auto for **any Android 10+ phone** paired with **BYD DiLink 3.0+** infotainment systems. Originally motivated by the Xiaomi HyperOS / Chinese ROM gap, but works universally.
 
@@ -9,7 +9,7 @@ An open-source alternative to Android Auto for **any Android 10+ phone** paired 
 
 ## What It Does
 
-DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at 60fps, 12Mbps, with the phone's screen turned off to save battery.
+DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at up to 60fps, 8Mbps CBR, with the phone's screen turned off to save battery.
 
 **Original motivation:** bridging the gap when your phone can't run Android Auto (Chinese ROM, no Google Play Services) but your car only supports Android Auto (no CarWith, CarPlay, or Carlife). But DiLink-Auto works with any Android phone — Google Services or not.
 
@@ -61,7 +61,7 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 ## Current Status
 
 **Working:**
-- 60fps H.264 video streaming (12Mbps CBR, High profile)
+- 60fps H.264 video streaming (8Mbps CBR, Main profile, configurable via handshake)
 - Full touch input (multi-touch, pinch-to-zoom)
 - App launcher with search, alphabetical sort, 64dp icons
 - Notifications on car screen with progress bars, tap to open
@@ -69,7 +69,7 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 - Auto-update: phone detects outdated car app and updates it over WiFi ADB
 - Phone screen off during streaming (battery saving)
 - Guided onboarding for all required permissions
-- Internationalization: English, Portuguese, Russian, Belarusian, Kazakh, Ukrainian, Uzbek
+- Internationalization: English, Portuguese, Russian, Belarusian, French, Kazakh, Ukrainian, Uzbek
 - Display restore after USB disconnect (v0.14.0+)
 - Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
 
@@ -79,7 +79,7 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 - VD server process restarts on USB disconnect (reconnects automatically).
 - Hotspot must be enabled manually (Android 16 limitation).
 - Occasional visual artifacts — decoder restart race, recovers at next keyframe (~1s).
-- Streaming latency ~100-200ms under load. CBR 12Mbps.
+- Streaming latency ~100-200ms under load. CBR 8Mbps.
 - Display may stay off after abrupt USB disconnect (fixed in v0.14.0).
 
 ## Documentation
@@ -115,19 +115,37 @@ This project is developed independently and relies on community support. Every c
 
 PRs welcome. See [Architecture](./architecture.md) and [Protocol](./protocol.md) for technical context. Build with `./gradlew :app-client:assembleDebug` (JDK 17+, Android SDK 34).
 
-### Branching Model (Git-Flow)
+### Branching Model (Git-Flow + Issue Types)
 
-| Branch | Purpose | CI |
-|--------|---------|----|
-| `main` | Stable releases | Builds signed release APK, auto-creates release on version tag |
-| `develop` | Active development | Builds debug APK, updates prerelease for in-app dev updates |
-| `feature/*` | New features | Merge to `develop` via PR |
-| `fix/*` | Bug fixes | Merge to `develop` via PR |
-| `release/*` | Release preparation | Merge to `main` → triggers release |
+Branches are created automatically by the issue agent based on the **issue template** used:
 
-**Release process:** Create a `release/vX.Y.Z` branch from `develop`, bump version, merge into `main`. Push a `vX.Y.Z` tag and CI creates a signed GitHub Release. Then merge `main` back into `develop` to sync the release version and any hotfixes.
+| Template | Label | Branch Pattern | Purpose |
+|----------|-------|---------------|---------|
+| Bug Fix | `bug` | `fix/N-agent` | Bug fixes |
+| New Feature | `feature` | `feature/N-agent` | New features |
+| Investigation | `investigation` | `investigate/N-agent` | Codebase investigation |
+| Documentation | `documentation` | `docs/N-agent` | Documentation updates |
+| Release | `release` | `release/vX.Y.Z` | Release preparation |
+| Agent Task (generic) | — | `issue/N-agent` | Catch-all |
 
-**Debug build updates:** Debug builds check for the latest prerelease from `develop`. To push a dev update, merge your changes to `develop` — CI creates a prerelease that debug builds detect as an update.
+All branches merge to `develop` via PR, except `release/*` which targets `main`.
+
+### CI Workflows
+
+| Workflow | Trigger | Action |
+|----------|---------|--------|
+| `build.yml` | Push/PR to `main` | Validation: build release APK |
+| `build-develop.yml` | Push/PR to `develop`, `release/*` | Validation: build debug APK |
+| `build-pre-release.yml` | Tag `vX.Y.Z-dev-NN` | Build debug APK + GitHub pre-release |
+| `build-release.yml` | Tag `vX.Y.Z` | Build signed release APK + GitHub Release |
+| `sync-main-to-develop.yml` | Push to `main` | Merge `main` → `develop` (git-flow back-sync) |
+| `issue-agent.yml` | Issue opened / comment | Autonomous agent: branch, build, PR |
+
+All CI runs on **self-hosted WSL runners**.
+
+**Release process:** Create a Release issue from the template. The agent creates `release/vX.Y.Z`, prepares changes, and tags `vX.Y.Z-dev-NN`. Pushing the release branch triggers `build-pre-release.yml`, which finds the `-dev` tag on the commit via `git tag --points-at HEAD` and publishes a pre-release. When ready, `release/vX.Y.Z` is merged to `main` with a `vX.Y.Z` tag on the merge commit. The push to `main` triggers `build-release.yml` (builds signed APK + creates GitHub Release) and `sync-main-to-develop.yml` (auto-merges `main` back into `develop`).
+
+**Pre-release updates:** Users on the Pre-release channel receive `-dev` builds. Users on the Release channel receive stable builds only. The channel is configurable in Settings.
 
 ## License
 

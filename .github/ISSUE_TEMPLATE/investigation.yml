@@ -1,0 +1,25 @@
+name: Investigation
+description: Ask the development agent to investigate something in the codebase
+labels: [investigation, agent]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: Describe what to investigate. Be specific about what you want to learn.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: '- [ ] Findings are documented'
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      placeholder: File paths, areas of interest, or anything that helps.
+    validations:
+      required: false

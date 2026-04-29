@@ -53,6 +53,11 @@
     <string name="updates_ready">Telefon: v%1$s tayyor</string>
     <string name="updates_install_btn">Yangilanishni o\'rnatish</string>
     <string name="updates_retry">Qayta urinish</string>
+    <string name="updates_available_title">Yangilanish mavjud</string>
+    <string name="updates_update_btn">Yangilash</string>
+    <string name="updates_dismiss_btn">O‘tkazib yuborish</string>
+    <string name="updates_downloading_title">Yangilanish v%1$s yuklanmoqda</string>
+    <string name="updates_ready_title">O‘rnatishga tayyor</string>
     <string name="updates_car_title">Avtomobil ilovasi</string>
     <string name="updates_car_desc">Avtomobil ilovasini WiFi ADB orqali o\'rnating yoki yangilang</string>
     <string name="updates_car_install">O\'rnatish</string>
@@ -99,14 +104,30 @@
     <string name="onboarding_accessibility_desc">Avtomobilning sensorli ekrani telefoningizni boshqarishiga imkon beradi. Busiz ekranni ko\'rasiz, lekin tegina olmaysiz.</string>
     <string name="onboarding_notification_title">Bildirishnomalarga kirish</string>
     <string name="onboarding_notification_desc">Telefon bildirishnomalarini avtomobil displeyida ko\'rsatadi. Busiz haydash paytida qo\'ng\'iroqlar va xabarlarni o\'tkazib yuborasiz.</string>
+    <string name="onboarding_car_setup_title">Ulanishdan oldin</string>
+    <string name="onboarding_car_setup_desc">Ulanishdan oldin hammasi tayyorligiga ishonch hosil qiling:</string>
+    <string name="onboarding_car_prereq_wifi_adb">Avtomobilda Wi-Fi ADB yoqilgan</string>
+    <string name="onboarding_car_prereq_hotspot">Telefon hotspoti yoqilgan</string>
+    <string name="onboarding_car_prereq_connected">Avtomobil hotspotga ulangan</string>
+    <string name="onboarding_car_prereq_installed">Avtomobil ilovasi o\'rnatilgan</string>
+    <string name="onboarding_car_install_btn">Avtomobilga o\'rnatish</string>
+    <string name="onboarding_car_installing">Avtomobil ilovasi o\'rnatilmoqda…</string>
+    <string name="onboarding_car_installed">Avtomobil ilovasi o\'rnatildi!</string>
     <string name="onboarding_done_title">Hammasi tayyor</string>
-    <string name="onboarding_done_desc">Hammasi tayyor. Boshlash uchun telefonni avtomobilning USB portiga ulang.</string>
+    <string name="onboarding_done_desc">Hammasi tayyor. Boshlash uchun pastga teging.</string>
     <string name="onboarding_grant">Ruxsat berish</string>
     <string name="onboarding_skip">O\'tkazib yuborish</string>
     <string name="onboarding_continue">Davom etish</string>
     <string name="onboarding_start">DiLink-Auto dan foydalanishni boshlash</string>
     <string name="onboarding_skip_btn">Hozircha o\'tkazib yuborish</string>
     <string name="onboarding_granted_label">Berilgan</string>
+
+    <!-- Loglarni ulashish -->
+    <string name="share_logs_title">Loglarni ulashish</string>
+    <string name="share_logs_desc">Loglarni ZIP-ga joylab, muammolarni xabar qilish uchun GitHub-da vazifa ochish</string>
+    <string name="share_logs_button">Ulashish</string>
+    <string name="share_logs_zipped">Loglar %s ichiga joylandi</string>
+    <string name="share_logs_no_logs">Log fayllari topilmadi</string>
 
     <!-- Avtomobilga o'rnatish (Sozlamalar) -->
     <string name="car_install_title">Avtomobilga o\'rnatish</string>
@@ -116,4 +137,68 @@
     <string name="car_install_button">Avtomobilga o\'rnatish</string>
     <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
     <string name="about_dev_github">github.com/andersonlucasg3</string>
+
+    <!-- Car App -->
+    <string name="car_app_title">Avtomobil ilovasi</string>
+    <string name="car_app_desc">Avtomobil ilovasini WiFi ADB orqali o\'rnating yoki yangilang</string>
+    <string name="car_app_install">O\'rnatish</string>
+    <string name="car_app_retry">Qayta urinish</string>
+    <string name="car_app_installed">Avtomobil ilovasi o\'rnatildi</string>
+
+    <!-- Donation -->
+    <string name="donation_title">Rivojlantirishni qo\'llab-quvvatlash</string>
+    <string name="donation_desc">DiLink-Auto faoliyatini qo\'llab-quvvatlang. Har bir hissa muhim!</string>
+    <string name="donation_github">GitHub homiysi</string>
+    <string name="donation_pix">Pix (Braziliya)</string>
+
+    <!-- Distribution Channel -->
+    <string name="channel_title">Tarqatish kanali</string>
+    <string name="channel_release">Reliz</string>
+    <string name="channel_prerelease">Oldindan reliz</string>
+    <string name="channel_release_desc">Barqaror relizlar — kundalik foydalanish uchun tavsiya etiladi</string>
+    <string name="channel_prerelease_desc">Ishlab chiqish yig\'imi — eng so\'nggi xususiyatlar, beqaror bo\'lishi mumkin</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_distribution">Tarqatish</string>
+
+    <!-- Install on Car Status -->
+    <string name="car_install_status_searching">Avtomobil qidirilmoqda</string>
+    <string name="car_install_status_connecting">Avtomobilga ulanilmoqda</string>
+    <string name="car_install_status_checking_version">Versiya tekshirilmoqda</string>
+    <string name="car_install_status_pushing">APK yuborilmoqda</string>
+    <string name="car_install_status_installing_stage">O\'rnatilmoqda</string>
+    <string name="car_install_status_launching">Ishga tushirilmoqda</string>
+    <string name="car_install_title_installed">Avtomobil ilovasi o\'rnatildi</string>
+    <string name="car_install_title_failed">O\'rnatish muvaffaqiyatsiz tugadi</string>
+    <string name="car_install_title_installing">Avtomobilga o\'rnatilmoqda</string>
+    <string name="car_install_status_connecting_to">%s ga ulanilmoqda…</string>
+    <string name="car_install_status_not_reachable">%s 5555-portda mavjud emas</string>
+    <string name="car_install_status_car_not_found">Avtomobil topilmadi. USB orqali ulang yoki WiFi ADB-ni tekshiring.</string>
+    <string name="car_install_status_already_up_to_date">Eng so\'nggi versiya (v%s)</string>
+    <string name="car_install_status_pushing_apk">APK yuborilmoqda (%d MB)…</string>
+    <string name="car_install_status_installing_version">v%s o\'rnatilmoqda…</string>
+    <string name="car_install_status_launching_car_app">Avtomobil ilovasi ishga tushirilmoqda…</string>
+    <string name="car_install_status_car_installed">Avtomobil ilovasi v%s o\'rnatildi!</string>
+    <string name="car_install_status_failed">Muvaffaqiyatsiz: %s</string>
+    <string name="car_install_status_error">Xato: %s</string>
+    <string name="car_install_status_car_apk_not_found">Avtomobil APK topilmadi</string>
+
+    <!-- Auto-Update Status -->
+    <string name="status_auto_update">Avtomobil ilovasi yangilanmoqda (v%1$s → v%2$s)…</string>
+    <string name="status_auto_update_complete">Avtomobil ilovasi yangilandi! Qayta ishga tushirilmoqda…</string>
+    <string name="status_update_failed">Yangilash muvaffaqiyatsiz: %s</string>
+    <string name="status_auto_update_failed">Avto-yangilash muvaffaqiyatsiz: %s</string>
+
+    <!-- Notification Actions -->
+    <string name="notification_action_stop">To\'xtatish</string>
+
+    <!-- Update Manager Errors -->
+    <string name="update_no_release">Reliz topilmadi</string>
+    <string name="update_no_version">Joriy versiyani aniqlab bo\'lmadi</string>
+    <string name="update_download_http_error">Yuklab olishda xato: HTTP %d</string>
+    <string name="update_invalid_apk">Yuklab olingan APK yaroqsiz</string>
+    <string name="update_download_failed">Yuklab olishda xato: %s</string>
+    <string name="update_file_not_found">Yangilash fayli topilmadi</string>
+    <string name="update_installer_error">O\'rnatuvchini ochib bo\'lmadi: %s</string>
+    <string name="update_rate_limit">GitHub so\'rov chegarasiga yetildi. Keyinroq urinib ko\'ring.</string>
 </resources>

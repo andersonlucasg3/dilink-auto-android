@@ -53,6 +53,11 @@
     <string name="updates_ready">Phone: v%1$s ready</string>
     <string name="updates_install_btn">Install Update</string>
     <string name="updates_retry">Retry</string>
+    <string name="updates_available_title">Update Available</string>
+    <string name="updates_update_btn">Update</string>
+    <string name="updates_dismiss_btn">Dismiss</string>
+    <string name="updates_downloading_title">Downloading Update v%1$s</string>
+    <string name="updates_ready_title">Ready to Install</string>
     <string name="updates_car_title">Car App</string>
     <string name="updates_car_desc">Install or update the car app over WiFi ADB</string>
     <string name="updates_car_install">Install</string>
@@ -103,8 +108,17 @@
     <string name="onboarding_accessibility_desc">Lets the car\'s touchscreen control your phone. Without this, you\'ll see the screen but can\'t tap anything.</string>
     <string name="onboarding_notification_title">Notification Access</string>
     <string name="onboarding_notification_desc">Shows phone notifications on the car display. Without this, you\'ll miss calls and messages while driving.</string>
+    <string name="onboarding_car_setup_title">Before You Connect</string>
+    <string name="onboarding_car_setup_desc">Make sure everything is ready before connecting:</string>
+    <string name="onboarding_car_prereq_wifi_adb">Wi-Fi ADB enabled on car</string>
+    <string name="onboarding_car_prereq_hotspot">Phone hotspot turned on</string>
+    <string name="onboarding_car_prereq_connected">Car connected to your hotspot</string>
+    <string name="onboarding_car_prereq_installed">Car app must be installed</string>
+    <string name="onboarding_car_install_btn">Install on Car</string>
+    <string name="onboarding_car_installing">Installing car app…</string>
+    <string name="onboarding_car_installed">Car app installed!</string>
     <string name="onboarding_done_title">You\'re All Set</string>
-    <string name="onboarding_done_desc">Everything\'s ready. Plug your phone into the car\'s USB port to get started.</string>
+    <string name="onboarding_done_desc">Everything\'s ready. Tap below to get started.</string>
     <string name="onboarding_grant">Grant</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_continue">Continue</string>
@@ -112,10 +126,81 @@
     <string name="onboarding_skip_btn">Skip for now</string>
     <string name="onboarding_granted_label">Granted</string>
 
+    <!-- Share Logs -->
+    <string name="share_logs_title">Share Logs</string>
+    <string name="share_logs_desc">Zip log files and open a GitHub issue to report problems</string>
+    <string name="share_logs_button">Share</string>
+    <string name="share_logs_zipped">Logs zipped to %s</string>
+    <string name="share_logs_no_logs">No log files found</string>
+
     <!-- Install on Car (Settings) -->
     <string name="car_install_title">Install on Car</string>
     <string name="car_install_desc">Car ADB must be enabled (port 5555)</string>
     <string name="car_install_ip_label">Car IP address</string>
     <string name="car_install_ip_hint">Leave empty to auto-detect</string>
     <string name="car_install_button">Install on Car</string>
+
+    <!-- Car App -->
+    <string name="car_app_title">Car App</string>
+    <string name="car_app_desc">Install or update the car app over WiFi ADB</string>
+    <string name="car_app_install">Install</string>
+    <string name="car_app_retry">Retry</string>
+    <string name="car_app_installed">Car App Installed</string>
+
+    <!-- Donation -->
+    <string name="donation_title">Support Development</string>
+    <string name="donation_desc">Help keep DiLink-Auto going. Every contribution helps!</string>
+    <string name="donation_github">GitHub Sponsor</string>
+    <string name="donation_pix">Pix (Brazil)</string>
+
+    <!-- Distribution Channel -->
+    <string name="channel_title">Distribution Channel</string>
+    <string name="channel_release">Release</string>
+    <string name="channel_prerelease">Pre-release</string>
+    <string name="channel_release_desc">Stable releases — recommended for daily use</string>
+    <string name="channel_prerelease_desc">Development builds — latest features, may be unstable</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_distribution">Distribution</string>
+
+    <!-- Install on Car Status -->
+    <string name="car_install_status_searching">Searching for car</string>
+    <string name="car_install_status_connecting">Connecting to car</string>
+    <string name="car_install_status_checking_version">Checking version</string>
+    <string name="car_install_status_pushing">Pushing APK</string>
+    <string name="car_install_status_installing_stage">Installing</string>
+    <string name="car_install_status_launching">Launching</string>
+    <string name="car_install_title_installed">Car App Installed</string>
+    <string name="car_install_title_failed">Installation Failed</string>
+    <string name="car_install_title_installing">Installing on Car</string>
+    <string name="car_install_status_connecting_to">Connecting to %s…</string>
+    <string name="car_install_status_not_reachable">%s not reachable on port 5555</string>
+    <string name="car_install_status_car_not_found">Car not found. Plug into USB or check WiFi ADB.</string>
+    <string name="car_install_status_already_up_to_date">Already up-to-date (v%s)</string>
+    <string name="car_install_status_pushing_apk">Pushing APK (%dMB)…</string>
+    <string name="car_install_status_installing_version">Installing v%s…</string>
+    <string name="car_install_status_launching_car_app">Launching car app…</string>
+    <string name="car_install_status_car_installed">Car app v%s installed!</string>
+    <string name="car_install_status_failed">Failed: %s</string>
+    <string name="car_install_status_error">Error: %s</string>
+    <string name="car_install_status_car_apk_not_found">Car APK not found</string>
+
+    <!-- Auto-Update Status -->
+    <string name="status_auto_update">Updating car app (v%1$s → v%2$s)…</string>
+    <string name="status_auto_update_complete">Car app updated! Restarting…</string>
+    <string name="status_update_failed">Update failed: %s</string>
+    <string name="status_auto_update_failed">Auto-update failed: %s</string>
+
+    <!-- Notification Actions -->
+    <string name="notification_action_stop">Stop</string>
+
+    <!-- Update Manager Errors -->
+    <string name="update_no_release">No release found</string>
+    <string name="update_no_version">Could not determine current version</string>
+    <string name="update_download_http_error">Download failed: HTTP %d</string>
+    <string name="update_invalid_apk">Downloaded APK is invalid</string>
+    <string name="update_download_failed">Download failed: %s</string>
+    <string name="update_file_not_found">Update file not found</string>
+    <string name="update_installer_error">Could not open installer: %s</string>
+    <string name="update_rate_limit">GitHub rate limit reached. Try again later.</string>
 </resources>

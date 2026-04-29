@@ -1,11 +1,31 @@
 # Progress Tracker
 
-Current version: **v0.14.3-dev** (development)
-Last updated: 2026-04-26
+Current version: **v0.15.0** (stable)
+Last updated: 2026-04-28
 
 ## Milestones
 
-### v0.14.0 (in development)
+### v0.15.0 (2026-04-28)
+
+- **Phone service auto-start**: `ConnectionService` auto-starts when the phone app is opened (e.g. via car USB ADB), removing the need to manually press Start. ✅ Done
+- **Car no longer clears phone task**: Removed `--activity-clear-task` from car's USB ADB phone launch. If the phone app is already open, the car moves forward without disrupting it. ✅ Done
+- **Share Logs button**: "Share Logs" button on the main screen zips all `*.log` files from `/sdcard/DiLinkAuto/` and shares via Android share sheet. `FileLog.zipLogs()` creates a `dilinkauto-logs.zip`. ✅ Done
+- **Encoder configuration**: Adjusted to 8Mbps CBR Main profile for broader device compatibility. Added backpressure (drops non-keyframes when write queue exceeds 6 frames). ✅ Done
+- **VideoDecoder catchup**: Four graduated speedup zones (normal, gentle 1.5x, medium 2x, aggressive 3x) for smoother latency recovery. ✅ Done
+- **French translation**: Added French (fr) to the existing 7 languages (now 8 total). ✅ Done
+- **Update check on app open**: Self-update check runs immediately when the app opens, with update notification and re-check button. ✅ Done
+- **Distribution channel selector**: Settings card to choose between stable releases and dev prereleases for self-update. ✅ Done
+- **CarLaunchScreen redesign**: Two-column layout optimized for wide car displays. ✅ Done
+- **Phone app UI refactor**: Reorganized main screen, fixed install flow bugs. ✅ Done
+- **Onboarding improvements**: Car setup prerequisites, enhanced install progress UI, improved How to Connect card. ✅ Done
+- **Car UI two-mode separation**: Launch screen (full-screen, connection-focused) and streaming mode (nav bar + content). Smooth transition when app list arrives. ✅ Done
+- **Video artifact fixes**: Smart decoder drops + graduated catchup + encoder backpressure eliminate visual artifacts. ✅ Done
+- **Touch input fixes**: Correct coordinate mapping at fixed 480dpi VD server DPI, incremental touch dispatch on MOVE, tap gesture and manual IP fixes. ✅ Done
+- **Screen restore and network stability**: Display restore after USB disconnect, network callback improvements. ✅ Done
+- **Internationalization**: All new UI strings translated to 8 languages (en, pt-BR, ru, be, fr, kk, uk, uz). ✅ Done
+- **CI/CD automation**: 6 dedicated workflows — validation (`build.yml`, `build-develop.yml`), pre-release on `-dev` tags (`build-pre-release.yml`), release on `vX.Y.Z` tags (`build-release.yml`), main→develop back-sync (`sync-main-to-develop.yml`), and autonomous issue-agent (`issue-agent.yml`). ✅ Done
+
+### v0.14.0
 
 - **Shared version source**: Version code/name now in gradle.properties — single edit for both apps.
 - **MAX_PAYLOAD_SIZE 2MB → 128MB**: App list with 136+ PNG icons exceeded 2MB causing ProtocolException and connection drops.
@@ -22,10 +42,10 @@ Last updated: 2026-04-26
 - **USB + WiFi install on car**: Parallel subnet scanner probes all 254 IPs for car ADB. Combined with ARP/neighbor/gateway discovery. USB host attempted but car USB-A is host-only.
 - **VD server now Kotlin Gradle module**: Depends on :protocol and kotlinx-coroutines. Shares NioReader, FrameCodec.writeAll.
 - **Performance**: Eliminated intermediate ByteArray allocation per frame in encoder. NioReader initial capacity 256KB. isKeyFrame cached in FrameData.
-- **Encoder**: CBR 12Mbps, High profile, 60fps, PRIORITY 0 (real-time). I_FRAME_INTERVAL=1s.
+- **Encoder**: CBR 8Mbps, Main profile, configurable FPS (default 30, car requests 60), PRIORITY 0 (real-time). I_FRAME_INTERVAL=1s. `repeat-previous-frame-after`=500ms for static content.
 - **Donations**: GitHub Sponsors and Pix (Brazil) badges in README and app settings.
 - **Adaptive vector icon**: Car silhouette with wireless signals, applied to both phone and car apps.
-- **Internationalization**: String resources in English, Portuguese (pt-BR), and Russian (ru). Onboarding and main UI localized.
+- **Internationalization**: String resources in English, Portuguese (pt-BR), Russian (ru), Belarusian (be), French (fr), Kazakh (kk), Ukrainian (uk), and Uzbek (uz).
 - **Release signing**: Fixed keystore with strong password. CI builds signed release APKs via GitHub Secrets.
 
 ### v0.13.0 — USB ADB Auth Fix (2026-04-25)
@@ -51,7 +71,7 @@ Root cause found and fixed: `Signature.getInstance("SHA1withRSA")` double-hashes
 - **Touch input fixed**: `handleInputFrame` dispatched on `Dispatchers.IO` (was Main, caused `NetworkOnMainThreadException` on localhost socket write)
 - **VD server NIO command reader**: Fixed infinite loop — `break` inside switch only broke out of switch, not the parse loop. Now uses `break parseLoop;` labeled break.
 - **App launch dedup**: Removed `--activity-clear-task` from `am start`. Existing apps resume instead of restarting.
-- **Bitrate**: Increased from 8Mbps to 12Mbps CBR for better image quality.
+- **Bitrate**: Set to 8Mbps CBR (adjusted from 12Mbps in later releases for device compatibility).
 - **FPS configurable**: Added `targetFps` field to HandshakeRequest. Car requests 60fps. VD server accepts FPS as command-line arg, uses it for encoder `KEY_FRAME_RATE` and `FRAME_INTERVAL_MS`.
 - **Nav bar**: 72dp → 76dp, icons 32dp → 40dp, row height 52dp → 60dp, text 12sp → 14sp.
 - **Launcher app icons**: 40dp → 64dp, grid cells 140dp → 160dp, text bodyMedium → bodyLarge.
@@ -328,7 +348,7 @@ Comprehensive review performed 2026-04-23 covering performance, stability, and f
 
 ---
 
-## Architecture (Current — v0.13.1)
+## Architecture (Current)
 
 ```
 Phone (Xiaomi 17 Pro Max, HyperOS 3, Android 16)
@@ -354,8 +374,8 @@ Phone (Xiaomi 17 Pro Max, HyperOS 3, Android 16)
 │   ├── IInputManager injection (ServiceManager → injectInputEvent)
 │   ├── Multi-touch: pre-allocated PointerProperties/Coords pools (10 slots)
 │   ├── VirtualDisplay (TRUSTED + OWN_DISPLAY_GROUP + OWN_FOCUS)
-│   ├── SurfaceScaler (EGL/GLES GPU downscale, periodic re-draw every frameIntervalMs)
-│   ├── H.264 encoder (12Mbps CBR, High profile, configurable FPS)
+│   ├── SurfaceScaler (EGL/GLES GPU downscale, skips GL work on idle, encoder repeat-previous-frame)
+│   ├── H.264 encoder (8Mbps CBR, Main profile, configurable FPS, backpressure at 6 frames)
 │   ├── Screen power-off (background thread, proximity/lift disabled)
 │   └── Reverse NIO connection to phone on localhost:19637
 │
@@ -370,7 +390,7 @@ Car (BYD DiLink 3.0, Android 10)
 │   │   ├── Early decoder start: offscreen surface on first CONFIG
 │   │   ├── carLogSend() + logSink callbacks → phone FileLog
 │   │   └── Eject state persisted to SharedPreferences
-│   ├── VideoDecoder (queue=30, early start, logSink, 60fps target)
+│   ├── VideoDecoder (queue=15, early start, logSink, 4-zone catchup)
 │   ├── PersistentNavBar (76dp, 40dp icons, 14sp text, recent apps pruned)
 │   ├── LauncherScreen (64dp icons, 160dp grid, imePadding search)
 │   ├── NotificationScreen (progress bars, tap-to-launch, dedup by ID)

@@ -36,6 +36,7 @@ class InputInjectionService : AccessibilityService() {
         virtualDisplayId = -1
         vdWidth = 0
         vdHeight = 0
+        activePaths.clear()
         Log.i(TAG, "Virtual display cleared")
     }
 
@@ -65,50 +66,53 @@ class InputInjectionService : AccessibilityService() {
 
         when (event.action) {
             InputMsg.TOUCH_DOWN -> {
+                // Release any stuck pointers from an interrupted previous session.
+                val stuck = activePaths.keys.filter { it != event.pointerId }.toList()
+                for (id in stuck) {
+                    dispatchTap(activePaths[id]!!.first().x, activePaths[id]!!.first().y)
+                }
+                activePaths.clear()
                 activePaths[event.pointerId] = mutableListOf(
-                    PointRecord(pixelX, pixelY, 0)
+                    Point(pixelX, pixelY, 0L)
                 )
             }
             InputMsg.TOUCH_MOVE -> {
                 val points = activePaths[event.pointerId] ?: return
-                val elapsed = (points.size * 16L).coerceAtLeast(0) // ~16ms per sample at 60fps
-                points.add(PointRecord(pixelX, pixelY, elapsed))
+                points.add(Point(pixelX, pixelY, (points.size * 16L).coerceAtLeast(1)))
             }
             InputMsg.TOUCH_UP -> {
-                val points = activePaths.remove(event.pointerId) ?: run {
+                val points = activePaths.remove(event.pointerId)
+                if (points == null || points.size < 2) {
                     dispatchTap(pixelX, pixelY)
-                    return
+                } else {
+                    points.add(Point(pixelX, pixelY, (points.size * 16L).coerceAtLeast(1)))
+                    dispatchSwipe(points)
                 }
-                points.add(
-                    PointRecord(pixelX, pixelY, (points.size * 16L).coerceAtLeast(1))
-                )
-                dispatchSwipe(points)
             }
         }
     }
 
-    private fun dispatchTap(x: Float, y: Float) {
-        val path = Path().apply { moveTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 50)
-        val gesture = buildGesture(stroke)
-        dispatchGesture(gesture, null, null)
-    }
-
-    private fun dispatchSwipe(points: List<PointRecord>) {
-        if (points.size < 2) {
-            dispatchTap(points.first().x, points.first().y)
-            return
-        }
-
+    private fun dispatchSwipe(points: List<Point>) {
         val path = Path().apply {
             moveTo(points.first().x, points.first().y)
             for (i in 1 until points.size) {
                 lineTo(points[i].x, points[i].y)
             }
         }
-
-        val totalDuration = points.last().durationMs.coerceIn(1, 5000)
+        val totalDuration = points.last().elapsedMs.coerceIn(1, 5000)
         val stroke = GestureDescription.StrokeDescription(path, 0, totalDuration)
+        val gesture = buildGesture(stroke)
+        dispatchGesture(gesture, null, null)
+    }
+
+    private fun dispatchTap(x: Float, y: Float) {
+        // Accessibility gestures require a non-zero-length path.
+        // A 1px micro-swipe is indistinguishable from a tap at car-display scale.
+        val path = Path().apply {
+            moveTo(x, y)
+            lineTo(x + 1f, y)
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 80)
         val gesture = buildGesture(stroke)
         dispatchGesture(gesture, null, null)
     }
@@ -126,9 +130,8 @@ class InputInjectionService : AccessibilityService() {
         return builder.build()
     }
 
-    private data class PointRecord(val x: Float, val y: Float, val durationMs: Long)
-
-    private val activePaths = mutableMapOf<Int, MutableList<PointRecord>>()
+    private data class Point(val x: Float, val y: Float, val elapsedMs: Long)
+    private val activePaths = mutableMapOf<Int, MutableList<Point>>()
 
     companion object {
         private const val TAG = "InputInjectionService"
