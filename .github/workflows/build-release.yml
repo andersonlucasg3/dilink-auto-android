@@ -1,16 +1,16 @@
-name: Build (Main)
+name: Build (Release)
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags:
+      - 'v*.*.*'
+      - '!*dev*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
+  release:
     runs-on: self-hosted
 
     steps:
@@ -24,8 +24,6 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Set up Android SDK
         run: |
@@ -59,3 +57,12 @@ jobs:
         with:
           name: dilink-auto-client-release
           path: app-client/build/outputs/apk/release/app-client-release.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app-client/build/outputs/apk/release/app-client-release.apk
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

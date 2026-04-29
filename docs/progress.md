@@ -23,7 +23,7 @@ Last updated: 2026-04-28
 - **Touch input fixes**: Correct coordinate mapping at fixed 480dpi VD server DPI, incremental touch dispatch on MOVE, tap gesture and manual IP fixes. ✅ Done
 - **Screen restore and network stability**: Display restore after USB disconnect, network callback improvements. ✅ Done
 - **Internationalization**: All new UI strings translated to 8 languages (en, pt-BR, ru, be, fr, kk, uk, uz). ✅ Done
-- **CI/CD automation**: Autonomous issue-agent workflow with auto-build, status comments, and PR creation. ✅ Done
+- **CI/CD automation**: 6 dedicated workflows — validation (`build.yml`, `build-develop.yml`), pre-release on `-dev` tags (`build-pre-release.yml`), release on `vX.Y.Z` tags (`build-release.yml`), main→develop back-sync (`sync-main-to-develop.yml`), and autonomous issue-agent (`issue-agent.yml`). ✅ Done
 
 ### v0.14.0
 

@@ -3,12 +3,11 @@ name: Build (Develop)
 on:
   push:
     branches: [develop, 'release/**']
-    tags: ['v[0-9]+.[0-9]+.[0-9]+-dev*']
   pull_request:
     branches: [develop, 'release/**']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -16,8 +15,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # needed for tag-based pre-releases and changelog
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -36,15 +33,17 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-          mkdir -p $ANDROID_HOME/cmdline-tools/latest
-          unzip -q cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools/latest
-          mv $ANDROID_HOME/cmdline-tools/latest/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/ 2>/dev/null || true
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
-            > /dev/null
+          if [ ! -f "$ANDROID_HOME/platforms/android-34/build.prop" ]; then
+            wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/cmdline-tools.zip
+            mkdir -p $ANDROID_HOME/cmdline-tools/latest
+            unzip -q /tmp/cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools/latest
+            mv $ANDROID_HOME/cmdline-tools/latest/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/ 2>/dev/null || true
+            yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+              "platforms;android-34" \
+              "build-tools;34.0.0" \
+              > /dev/null
+          fi
 
       - name: Build Debug APK
         run: |
@@ -60,55 +59,3 @@ jobs:
         with:
           name: dilink-auto-client-debug
           path: app-client/build/outputs/apk/debug/app-client-debug.apk
-
-      - name: Update Dev Prerelease
-        if: github.event_name == 'push'
-        run: |
-          git fetch --tags origin 2>/dev/null || true
-          # Find the matching dev tag on this commit (not the branch ref)
-          TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-dev' | head -1)
-          if [ -z "$TAG" ]; then
-            echo "No dev tag on this commit — skipping pre-release"
-            exit 0
-          fi
-          echo "Found dev tag: $TAG"
-          VERSION_NAME="${TAG#v}"
-
-          # Strip -NN suffix from both tag and gradle.properties for comparison.
-          TAG_BASE=$(echo "$VERSION_NAME" | sed -E 's/-dev-[0-9]+$/-dev/')
-          FILE_VERSION=$(grep 'app.versionName' gradle.properties | sed 's/.*=//')
-          FILE_BASE=$(echo "$FILE_VERSION" | sed -E 's/-dev-[0-9]+$/-dev/')
-
-          if [ "$TAG_BASE" != "$FILE_BASE" ]; then
-            echo "ERROR: Tag base ($TAG_BASE) does not match gradle.properties base ($FILE_BASE)"
-            exit 1
-          fi
-
-          VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
-
-          # Generate changelog from commits since the last tag
-          PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tail -1)
-          if [ -n "$PREV_TAG" ]; then
-            echo "## Commits since $PREV_TAG" > /tmp/changelog.md
-            echo "" >> /tmp/changelog.md
-            git log "$PREV_TAG..HEAD" --pretty=format:"* %s (%h)" --no-merges >> /tmp/changelog.md
-            echo "" >> /tmp/changelog.md
-            echo "---" >> /tmp/changelog.md
-            echo "**versionCode:** $VERSION_CODE | **versionName:** $VERSION_NAME" >> /tmp/changelog.md
-          else
-            echo "## Initial development build" > /tmp/changelog.md
-            echo "" >> /tmp/changelog.md
-            echo "**versionCode:** $VERSION_CODE | **versionName:** $VERSION_NAME" >> /tmp/changelog.md
-          fi
-
-          # Delete old dev prerelease if it exists
-          gh release delete "$TAG" --yes 2>/dev/null || true
-
-          # Create new dev prerelease
-          gh release create "$TAG" \
-            --prerelease \
-            --title "$TAG — Development Build" \
-            --notes-file /tmp/changelog.md \
-            app-client/build/outputs/apk/debug/app-client-debug.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
