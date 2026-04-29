@@ -63,13 +63,20 @@ jobs:
           # --- Network diagnostics (before any gh call) ---
           echo "=== DNS ==="
           cat /etc/resolv.conf 2>/dev/null || echo "(no resolv.conf)"
-          echo "=== api.github.com ==="
-          nslookup api.github.com 2>&1 || dig api.github.com 2>&1 || echo "(dns lookup failed)"
-          echo "=== curl test ==="
-          curl -sI --max-time 10 https://api.github.com 2>&1 | head -5 || echo "curl FAILED"
+          echo "=== resolve api.github.com vs github.com ==="
+          getent hosts api.github.com 2>&1 || echo "getent failed"
+          getent hosts github.com 2>&1 || echo "getent failed"
+          echo "=== curl -v api.github.com (5s timeout) ==="
+          curl -sv --max-time 5 https://api.github.com 2>&1 | head -20 || echo "curl FAILED (exit=$?)"
+          echo "=== curl -v github.com (5s timeout) ==="
+          curl -sv --max-time 5 https://github.com 2>&1 | head -20 || echo "curl FAILED (exit=$?)"
+          echo "=== traceroute ==="
+          timeout 5 traceroute -n -m 5 api.github.com 2>&1 || echo "(traceroute failed)"
+          echo "=== ip route ==="
+          ip route 2>&1 || echo "(ip route failed)"
           echo "=== gh auth ==="
-          gh auth status 2>&1 || true
-          echo "=== env ==="
+          timeout 5 gh auth status 2>&1 || echo "gh auth FAILED (exit=$?)"
+          echo "=== GITHUB_TOKEN ==="
           echo "GITHUB_TOKEN=${#GITHUB_TOKEN}chars"
 
           # Prefer tag from trigger, fall back to git tag --points-at HEAD
