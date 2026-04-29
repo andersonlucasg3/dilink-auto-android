@@ -3,11 +3,9 @@ package com.dilinkauto.server.ui.screen
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -18,7 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,6 +28,9 @@ import com.dilinkauto.protocol.*
 import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
+import kotlin.math.max
+import kotlin.math.min
+import kotlinx.coroutines.launch
 
 /**
  * Car-optimized home screen — similar to Android Auto / CarPlay.
@@ -221,6 +224,7 @@ fun AppGrid(
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    val gridState = rememberLazyGridState()
 
     val filteredApps = remember(apps, searchQuery) {
         val sorted = apps.sortedBy { it.appName.lowercase() }
@@ -229,24 +233,52 @@ fun AppGrid(
     }
 
     Column(modifier = modifier) {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 160.dp),
-            modifier = Modifier.weight(1f).padding(start = 24.dp, end = 24.dp, top = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(filteredApps) { app ->
-                AppTile(app = app, onClick = { onAppClick(app.packageName) })
+        // Grid + scrollbar row
+        Row(modifier = Modifier.weight(1f)) {
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Adaptive(minSize = 100.dp),
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredApps, key = { it.packageName }) { app ->
+                    AppTile(app = app, onClick = { onAppClick(app.packageName) })
+                }
             }
+
+            // Wide draggable scrollbar on the right
+            GridScrollbar(
+                state = gridState,
+                totalItems = filteredApps.size,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(28.dp)
+                    .padding(vertical = 24.dp)
+            )
         }
 
         // Search bar at the bottom
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = { searchQuery = it },
+            onValueChange = { newValue ->
+                searchQuery = newValue
+            },
             placeholder = { Text("Search apps…") },
             singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Clear search",
+                            tint = Color.Gray
+                        )
+                    }
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 12.dp)
@@ -269,6 +301,73 @@ fun AppGrid(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 4.dp)
+        )
+    }
+}
+
+/**
+ * Wide draggable scrollbar for the app grid.
+ * Lightweight — avoids heavy recomposition during scroll.
+ */
+@Composable
+private fun GridScrollbar(
+    state: LazyGridState,
+    totalItems: Int,
+    modifier: Modifier = Modifier
+) {
+    if (totalItems == 0) return
+
+    val needsScroll by remember { derivedStateOf { state.canScrollForward || state.canScrollBackward } }
+    if (!needsScroll) return
+
+    val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
+    val layout by remember { derivedStateOf { state.layoutInfo } }
+
+    val viewportHeight = layout.viewportEndOffset - layout.viewportStartOffset
+    if (viewportHeight <= 0) return
+
+    val itemsPerRow = remember(layout) {
+        if (layout.visibleItemsInfo.isEmpty()) 1
+        else {
+            val firstOffset = layout.visibleItemsInfo.first().offset.y
+            layout.visibleItemsInfo.count { it.offset.y == firstOffset }
+        }
+    }
+
+    val totalRows = (totalItems + itemsPerRow - 1) / itemsPerRow
+    if (totalRows <= 1) return
+
+    val thumbHeight = max(40f, viewportHeight.toFloat() / totalRows.toFloat())
+    val maxThumbOffset = viewportHeight.toFloat() - thumbHeight
+    val thumbOffset = if (totalRows > 1) {
+        ((firstVisibleIndex / itemsPerRow).toFloat() / (totalRows - 1).toFloat()) * maxThumbOffset
+    } else 0f
+
+    val scope = rememberCoroutineScope()
+
+    Box(
+        modifier = modifier
+            .padding(end = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF2A2F3A).copy(alpha = 0.3f))
+            .pointerInput(totalRows, itemsPerRow) {
+                detectVerticalDragGestures { _, dragAmount ->
+                    val currentRow = state.firstVisibleItemIndex / itemsPerRow
+                    val rowDelta = ((dragAmount / max(1f, maxThumbOffset)) * totalRows).toInt()
+                    val targetRow = (currentRow + rowDelta).coerceIn(0, totalRows - 1)
+                    val targetIndex = (targetRow * itemsPerRow).coerceAtMost(totalItems - 1)
+                    scope.launch { state.scrollToItem(targetIndex) }
+                }
+            }
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(with(androidx.compose.ui.platform.LocalDensity.current) { thumbHeight.toDp() })
+                .offset(y = with(androidx.compose.ui.platform.LocalDensity.current) { thumbOffset.toDp() })
+                .padding(horizontal = 4.dp, vertical = 2.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
         )
     }
 }
@@ -298,45 +397,38 @@ fun AppTile(app: AppInfo, onClick: () -> Unit) {
         } else null
     }
 
-    Card(
-        onClick = onClick,
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1.2f),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (iconBitmap != null) {
-                Image(
-                    bitmap = iconBitmap,
-                    contentDescription = app.appName,
-                    modifier = Modifier.size(64.dp)
-                )
-            } else {
-                Icon(
-                    categoryIcon,
-                    contentDescription = null,
-                    tint = categoryColor,
-                    modifier = Modifier.size(64.dp)
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = app.appName,
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+        if (iconBitmap != null) {
+            Image(
+                bitmap = iconBitmap,
+                contentDescription = app.appName,
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
+        } else {
+            Icon(
+                categoryIcon,
+                contentDescription = null,
+                tint = categoryColor,
+                modifier = Modifier.size(64.dp)
             )
         }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = app.appName,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
