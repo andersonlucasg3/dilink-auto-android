@@ -151,6 +151,11 @@
     <string name="donation_github">Sponsor GitHub</string>
     <string name="donation_pix">Pix (Brésil)</string>
 
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Appareil Samsung détecté</string>
+    <string name="samsung_warning_desc">Samsung One UI nécessite une configuration supplémentaire : désactivez Auto Blocker (bloque USB ADB), accordez un accès illimité à la batterie et autorisez l\'accès à tous les fichiers. Voir Paramètres pour plus de détails.</string>
+    <string name="samsung_settings_guide">Guide de configuration Samsung</string>
+
     <!-- Distribution Channel -->
     <string name="channel_title">Canal de Distribution</string>
     <string name="channel_release">Stable</string>
