@@ -74,6 +74,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
 
       - name: Upload APK
         if: hashFiles('app-client/build/outputs/apk/debug/app-client-debug.apk') != ''

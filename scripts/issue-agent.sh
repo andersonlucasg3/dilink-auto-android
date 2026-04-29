@@ -336,14 +336,23 @@ fi
 cd "$FIXED_WORKSPACE" || exit 1
 echo "[workspace] Working directory: $(pwd -P)"
 
-# Fix git remote — the clone may have a stale file:// origin or expired token
+# Fix git remote — the clone may have a stale file:// origin or expired token.
+# Prefer PUSH_TOKEN (PAT) for git push — it triggers downstream workflows.
+# GITHUB_TOKEN pushes do NOT trigger other workflows (by GitHub design).
+PUSH_TOKEN="${PUSH_TOKEN:-}"
 GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-log_step "Setting git remote: GH_TOKEN=${#GH_TOKEN}chars"
-if [ -n "$GH_TOKEN" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
-  git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" || log_err "remote set-url failed"
+if [ -n "$PUSH_TOKEN" ]; then
+  PUSH_AUTH_TOKEN="$PUSH_TOKEN"
+  log_step "Using PUSH_TOKEN for git (triggers workflows): ${#PUSH_TOKEN}chars"
+else
+  PUSH_AUTH_TOKEN="$GH_TOKEN"
+  log_step "Using GITHUB_TOKEN for git (will NOT trigger downstream workflows): ${#PUSH_AUTH_TOKEN}chars"
+fi
+if [ -n "$PUSH_AUTH_TOKEN" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  git remote set-url origin "https://x-access-token:${PUSH_AUTH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" || log_err "remote set-url failed"
   log_ok "git remote updated"
 else
-  log_err "GH_TOKEN is empty — push will fail"
+  log_err "No auth token available — push will fail"
 fi
 
 # Record which conversations exist before the run (to detect the new one)
