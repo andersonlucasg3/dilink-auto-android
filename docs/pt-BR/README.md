@@ -47,6 +47,8 @@ O DiLink-Auto espelha os aplicativos do seu celular na tela do carro com intera�
 
 **O hotspot do celular deve estar ativado** — o carro se conecta ao hotspot WiFi do seu celular. Sem códigos de pareamento, sem necessidade de conta Google.
 
+**Nenhuma conexão com a internet é necessária.** O DiLink-Auto transmite tudo localmente pelo hotspot WiFi do seu telefone — o carro e o telefone se comunicam diretamente. Uma conexão com a internet é necessária apenas para os aplicativos em execução no seu telefone (ex.: navegação, streaming de música), não para o DiLink-Auto em si.
+
 ## Como Funciona
 
 1. **Ative o hotspot** — Ligue o hotspot WiFi do seu celular. O carro se conecta a ele.

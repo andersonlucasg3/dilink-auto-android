@@ -48,6 +48,8 @@ DiLink-Auto mirrors your phone apps onto your car's display with full touch inte
 
 **Phone hotspot must be enabled** — the car connects to your phone's WiFi hotspot. No pairing codes, no Google account needed.
 
+**No internet connection required.** DiLink-Auto streams everything locally over your phone's WiFi hotspot — the car and phone talk directly to each other. An internet connection is only needed for the apps running on your phone (e.g., navigation, music streaming), not for DiLink-Auto itself.
+
 ## How It Works
 
 1. **Enable hotspot** — Turn on your phone's WiFi hotspot. The car connects to it.
@@ -70,7 +72,7 @@ Download the latest release or build from source:
 4. **Open DiLink-Auto** on the phone and grant All Files Access when prompted
 5. **Enable hotspot, then plug into car USB** — the car app auto-installs on first run over WiFi ADB
 
-The car APK and VD server JAR are bundled inside the phone APK — you never install anything on the car yourself.
+The car APK and VD server JAR are bundled inside the phone APK — you never install anything on the car yourself, and no internet connection is needed to install the car app. Just connect your phone to the car's USB port and tap "Install on Car."
 
 ## Current Status
 

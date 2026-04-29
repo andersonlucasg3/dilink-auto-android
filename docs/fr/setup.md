@@ -7,6 +7,8 @@
 - **Câble USB :** Câble du téléphone vers le port USB de la voiture
 - **Développement :** Android Studio ou Gradle, JDK 17
 
+**Aucune connexion Internet n'est requise** — DiLink-Auto diffuse tout localement via le point d'accès WiFi de votre téléphone (la voiture et le téléphone communiquent directement). Une connexion Internet n'est nécessaire que pour les applications exécutées sur votre téléphone (ex. : navigation, musique en streaming), pas pour DiLink-Auto lui-même.
+
 ## Configuration du téléphone (Unique)
 
 1. **Installez DiLink Auto Client** : `adb install app-client-debug.apk`
@@ -21,6 +23,8 @@
 C'est tout. Pas de Débogage sans fil, pas de codes d'appairage, pas de configuration WiFi spéciale.
 
 ## Configuration de la voiture
+
+**Aucune connexion Internet n'est requise.** L'APK de la voiture est intégré dans l'APK du téléphone — le téléphone le transfère vers la voiture via le WiFi local. Aucune connexion Internet n'est nécessaire à aucun moment de la configuration ou de la diffusion.
 
 Aucune installation manuelle sur la voiture n'est nécessaire. L'APK de la voiture est intégré dans l'APK du téléphone. Lors de la première connexion (ou en cas d'incompatibilité de version), le téléphone envoie `UPDATING_CAR` à la voiture (qui affiche le statut « Mise à jour... »), puis effectue l'installation automatique via dadb (WiFi ADB).
 
