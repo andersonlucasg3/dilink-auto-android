@@ -391,6 +391,7 @@ ${COMMENT_BODY}
 Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt for full context, then complete only the user's request above.
 EOFMSG
     log_step "Claude: $CLAUDE_BIN --resume $SESSION_ID"
+    echo "[resume prompt] $(cat /tmp/resume-msg-${ISSUE_NUM}.txt | head -1)"
     set +e
     OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "$(cat /tmp/resume-msg-${ISSUE_NUM}.txt)" 2>&1)
     CLAUDE_EXIT=$?
