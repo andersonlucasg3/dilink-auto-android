@@ -3,11 +3,9 @@ package com.dilinkauto.server.ui.screen
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -18,7 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,6 +28,9 @@ import com.dilinkauto.protocol.*
 import com.dilinkauto.server.R
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
+import kotlin.math.max
+import kotlin.math.min
+import kotlinx.coroutines.launch
 
 /**
  * Car-optimized home screen — similar to Android Auto / CarPlay.
@@ -221,6 +224,7 @@ fun AppGrid(
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    val gridState = rememberLazyGridState()
 
     val filteredApps = remember(apps, searchQuery) {
         val sorted = apps.sortedBy { it.appName.lowercase() }
@@ -229,24 +233,53 @@ fun AppGrid(
     }
 
     Column(modifier = modifier) {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 160.dp),
-            modifier = Modifier.weight(1f).padding(start = 24.dp, end = 24.dp, top = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(filteredApps) { app ->
-                AppTile(app = app, onClick = { onAppClick(app.packageName) })
+        // Grid + scrollbar row
+        Row(modifier = Modifier.weight(1f)) {
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Adaptive(minSize = 120.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(filteredApps) { app ->
+                    AppTile(app = app, onClick = { onAppClick(app.packageName) })
+                }
             }
+
+            // Wide draggable scrollbar on the right
+            GridScrollbar(
+                state = gridState,
+                totalItems = filteredApps.size,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(28.dp)
+                    .padding(vertical = 24.dp)
+            )
         }
 
         // Search bar at the bottom
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = { searchQuery = it },
+            onValueChange = { newValue ->
+                searchQuery = newValue
+            },
             placeholder = { Text("Search apps…") },
             singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Clear search",
+                            tint = Color.Gray
+                        )
+                    }
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 12.dp)
@@ -269,6 +302,98 @@ fun AppGrid(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 4.dp)
+        )
+    }
+}
+
+/**
+ * Wide draggable scrollbar for the app grid.
+ * Uses LazyGridState to show a proportional thumb that responds to drag gestures.
+ */
+@Composable
+private fun GridScrollbar(
+    state: LazyGridState,
+    totalItems: Int,
+    modifier: Modifier = Modifier
+) {
+    if (totalItems == 0) return
+
+    val layoutInfo by remember { derivedStateOf { state.layoutInfo } }
+    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+
+    // Estimate total height based on items per row and total items
+    val itemsPerRow = if (layoutInfo.visibleItemsInfo.isNotEmpty()) {
+        val firstItem = layoutInfo.visibleItemsInfo.first()
+        val lastInRow = layoutInfo.visibleItemsInfo
+            .takeWhile { it.offset.y == firstItem.offset.y }
+            .size
+        lastInRow
+    } else 1
+
+    val totalRows = (totalItems + itemsPerRow - 1) / itemsPerRow
+
+    // Estimated total scroll height (rows * approximate row height)
+    val visibleRows = layoutInfo.visibleItemsInfo
+        .map { it.offset.y + it.size.height }
+        .maxOrNull()?.let { maxY ->
+            layoutInfo.visibleItemsInfo.map { it.offset.y }.minOrNull()?.let { minY ->
+                maxY - minY
+            }
+        } ?: 1
+
+    if (visibleRows <= 0 || viewportHeight <= 0 || totalRows <= 1) return
+
+    val firstVisibleRow = if (layoutInfo.visibleItemsInfo.isNotEmpty()) {
+        layoutInfo.visibleItemsInfo.first().index / itemsPerRow
+    } else 0
+
+    val estimatedTotalHeight = if (visibleRows > 0) {
+        (totalRows.toFloat() / max(layoutInfo.visibleItemsInfo.size.toFloat() / itemsPerRow, 1f)) * viewportHeight
+    } else viewportHeight.toFloat()
+
+    val thumbFraction = min(1f, viewportHeight.toFloat() / max(estimatedTotalHeight, 1f))
+    val thumbHeight = max(40f, thumbFraction * viewportHeight)
+
+    val thumbOffset = if (totalRows > 1) {
+        val scrollFraction = firstVisibleRow.toFloat() / (totalRows - 1).coerceAtLeast(1)
+        scrollFraction * (viewportHeight - thumbHeight)
+    } else 0f
+
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val scope = rememberCoroutineScope()
+
+    Box(
+        modifier = modifier
+            .padding(end = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF2A2F3A).copy(alpha = 0.3f))
+            .pointerInput(totalItems, totalRows) {
+                detectVerticalDragGestures(
+                    onDragStart = { dragOffset = 0f },
+                    onDragEnd = { dragOffset = 0f },
+                    onDragCancel = { dragOffset = 0f },
+                    onVerticalDrag = { _, dragAmount ->
+                        dragOffset += dragAmount
+                        val fraction = dragOffset / (viewportHeight - thumbHeight)
+                        val targetRow = (firstVisibleRow + fraction * totalRows)
+                            .toInt()
+                            .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
+                        val targetIndex = (targetRow * itemsPerRow).coerceAtMost(totalItems - 1)
+                        scope.launch { state.animateScrollToItem(targetIndex) }
+                        dragOffset = 0f
+                    }
+                )
+            }
+    ) {
+        // Thumb
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(with(androidx.compose.ui.platform.LocalDensity.current) { thumbHeight.toDp() })
+                .offset(y = with(androidx.compose.ui.platform.LocalDensity.current) { thumbOffset.toDp() })
+                .padding(horizontal = 4.dp, vertical = 2.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
         )
     }
 }
@@ -302,14 +427,14 @@ fun AppTile(app: AppInfo, onClick: () -> Unit) {
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(1.2f),
-        shape = RoundedCornerShape(16.dp),
+            .aspectRatio(1.0f),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -327,10 +452,10 @@ fun AppTile(app: AppInfo, onClick: () -> Unit) {
                     modifier = Modifier.size(64.dp)
                 )
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 text = app.appName,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = Color.White,
                 textAlign = TextAlign.Center,
                 maxLines = 2,
