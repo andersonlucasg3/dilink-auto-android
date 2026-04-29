@@ -47,6 +47,8 @@ DiLink-Auto reflète les applications de votre téléphone sur l'écran de votre
 
 **Le point d'accès du téléphone doit être activé** — la voiture se connecte au point d'accès WiFi de votre téléphone. Aucun code d'appairage, aucun compte Google requis.
 
+**Aucune connexion Internet n'est requise.** DiLink-Auto diffuse tout localement via le point d'accès WiFi de votre téléphone — la voiture et le téléphone communiquent directement. Une connexion Internet n'est nécessaire que pour les applications exécutées sur votre téléphone (ex. : navigation, musique en streaming), pas pour DiLink-Auto lui-même.
+
 ## Comment Ça Marche
 
 1. **Activez le point d'accès** — Activez le point d'accès WiFi de votre téléphone. La voiture s'y connecte.

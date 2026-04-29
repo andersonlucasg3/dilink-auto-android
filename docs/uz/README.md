@@ -47,6 +47,8 @@ DiLink-Auto telefoningizdagi ilovalarni to'liq sensorli o'zaro ta'sir bilan avto
 
 **Telefon hotspoti yoqilgan bo'lishi kerak** — avtomobil telefoningizning WiFi hotspotiga ulanadi. Juftlashtirish kodlari kerak emas, Google hisobi kerak emas.
 
+**Internetga ulanish talab qilinmaydi.** DiLink-Auto hamma narsani telefoningizning WiFi kirish nuqtasi orqali mahalliy ravishda uzatadi — avtomobil va telefon bevosita muloqot qiladi. Internetga ulanish faqat telefoningizda ishlaydigan ilovalar uchun kerak (masalan, navigatsiya, musiqa), DiLink-Auto uchun emas.
+
 ## Qanday Ishlaydi
 
 1. **Hotspotni yoqing** — Telefoningizning WiFi hotspotini yoqing. Avtomobil unga ulanadi.

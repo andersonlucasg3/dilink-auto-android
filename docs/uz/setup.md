@@ -7,6 +7,8 @@
 - **USB kabeli:** Telefonni avtomobil USB portiga ulash
 - **Dasturlash:** Android Studio yoki Gradle, JDK 17
 
+**Internetga ulanish talab qilinmaydi** — DiLink-Auto hamma narsani telefoningizning WiFi kirish nuqtasi orqali mahalliy ravishda uzatadi (avtomobil va telefon bevosita muloqot qiladi). Internetga ulanish faqat telefoningizda ishlaydigan ilovalar uchun kerak (masalan, xaritalar, musiqa), DiLink-Auto uchun emas.
+
 ## Telefonni Sozlash (Bir Martalik)
 
 1. **DiLink Auto Client-ni o'rnating**: `adb install app-client-debug.apk`
@@ -21,6 +23,8 @@
 Hammasi shu. Simli disk raskadka, ulash kodlari, maxsus WiFi sozlamalari talab qilinmaydi.
 
 ## Avtomobilni Sozlash
+
+**Internetga ulanish talab qilinmaydi.** Avtomobil APK-si telefon APK-si ichiga joylashtirilgan — telefon uni avtomobilga mahalliy WiFi orqali yuboradi. Sozlash yoki oqimli uzatish paytida hech qanday internet ulanishi kerak emas.
 
 Avtomobilga qo'lda o'rnatish talab qilinmaydi. Avtomobil APK-si telefon APK-si ichiga joylashtirilgan. Birinchi ulanishda (yoki versiya mos kelmasligida) telefon avtomobilga `UPDATING_CAR` yuboradi (u "Yangilanmoqda..." holatini ko'rsatadi), so'ngra dadb (WiFi ADB) orqali avtomatik o'rnatadi.
 
