@@ -78,10 +78,10 @@ curl -s -X PATCH -H "Authorization: Bearer ${_token}" \\
   -d "\$(jq -n --arg body "MESSAGE" '{body: \$body}')" > /dev/null
 \`\`\`
 
-Required status updates (run the command above at each step):
-1. 📖 after reading docs → "📖 Reading documentation..."
-2. 🔍 after investigating code → "🔍 Investigating: <what you found>"
-3. ✏️ before modifying code → "✏️ Implementing: <what you are changing>"
+Required status updates — run the command BEFORE each action (not after):
+1. 📖 before reading docs → "📖 Reading documentation..."
+2. 🔍 before investigating code → "🔍 Investigating the codebase..."
+3. ✏️ before modifying code → "✏️ Implementing: <what you are about to change>"
 4. 🔨 before building → "🔨 Building APK..."
 5. ✅ after build passes → "✅ Build passed, pushing changes..."
 6. ❌ if build fails → "❌ Build failed, fixing..."
