@@ -134,14 +134,14 @@ All branches merge to `develop` via PR, except `release/*` which targets `main`.
 |----------|---------|--------|
 | `build.yml` | Push/PR to `main` | Validation: build release APK |
 | `build-develop.yml` | Push/PR to `develop`, `release/*` | Validation: build debug APK |
-| `build-pre-release.yml` | Tag `vX.Y.Z-dev-NN` | Build debug APK + GitHub pre-release |
-| `build-release.yml` | Tag `vX.Y.Z` | Build signed release APK + GitHub Release |
+| `build-pre-release.yml` | Push to `release/**` or tag `vX.Y.Z-dev-NN` | Build debug APK + GitHub pre-release |
+| `build-release.yml` | Push to `main` or tag `vX.Y.Z` | Build signed release APK + GitHub Release |
 | `sync-main-to-develop.yml` | Push to `main` | Merge `main` → `develop` (git-flow back-sync) |
 | `issue-agent.yml` | Issue opened / comment | Autonomous agent: branch, build, PR |
 
 All CI runs on **self-hosted WSL runners**.
 
-**Release process:** Create a Release issue from the template. The agent creates `release/vX.Y.Z`, prepares changes, and tags `vX.Y.Z-dev-NN`. The `build-pre-release.yml` workflow builds and publishes a pre-release for testing. When ready, `release/vX.Y.Z` is merged to `main`. Pushing the `vX.Y.Z` tag triggers `build-release.yml`, which builds a signed APK and creates the GitHub Release. The `sync-main-to-develop.yml` workflow automatically merges `main` back into `develop`, ensuring any last-minute release changes flow back.
+**Release process:** Create a Release issue from the template. The agent creates `release/vX.Y.Z`, prepares changes, and tags `vX.Y.Z-dev-NN`. Pushing the release branch triggers `build-pre-release.yml`, which builds and publishes a pre-release for testing. When ready, `release/vX.Y.Z` is merged to `main`. The push to `main` triggers `build-release.yml` (builds signed APK + creates GitHub Release) and `sync-main-to-develop.yml` (auto-merges `main` back into `develop`). Tags alone also trigger the corresponding workflow when pushed.
 
 **Pre-release updates:** Users on the Pre-release channel receive `-dev` builds. Users on the Release channel receive stable builds only. The channel is configurable in Settings.
 

@@ -2,6 +2,7 @@ name: Build (Pre-Release)
 
 on:
   push:
+    branches: ['release/**']
     tags: ['v[0-9]+.[0-9]+.[0-9]+-dev*']
 
 permissions:
@@ -60,9 +61,22 @@ jobs:
 
       - name: Create Pre-Release
         run: |
-          TAG="${{ github.ref_name }}"
-          VERSION_NAME="${TAG#v}"
+          # Prefer tag from trigger, fall back to git tag --points-at HEAD
+          REF="${{ github.ref_name }}"
+          if echo "$REF" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-dev'; then
+            TAG="$REF"
+          else
+            git fetch --tags origin 2>/dev/null || true
+            TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-dev' | head -1)
+          fi
+
+          if [ -z "$TAG" ]; then
+            echo "No dev tag on this commit — skipping pre-release"
+            exit 0
+          fi
+
           echo "Tag: $TAG"
+          VERSION_NAME="${TAG#v}"
 
           # Validate tag base against gradle.properties
           TAG_BASE=$(echo "$VERSION_NAME" | sed -E 's/-dev-[0-9]+$/-dev/')
@@ -93,7 +107,7 @@ jobs:
 
           # Delete old prerelease if it exists, then create new one
           gh release delete "$TAG" --yes 2>/dev/null || true
-          sleep 2  # let GitHub propagate the deletion
+          sleep 2
 
           gh release create "$TAG" \
             --prerelease \
