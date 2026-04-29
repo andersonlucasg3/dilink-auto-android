@@ -237,14 +237,13 @@ fun AppGrid(
         Row(modifier = Modifier.weight(1f)) {
             LazyVerticalGrid(
                 state = gridState,
-                columns = GridCells.Adaptive(minSize = 120.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                columns = GridCells.Adaptive(minSize = 100.dp),
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(filteredApps) { app ->
+                items(filteredApps, key = { it.packageName }) { app ->
                     AppTile(app = app, onClick = { onAppClick(app.packageName) })
                 }
             }
@@ -308,7 +307,7 @@ fun AppGrid(
 
 /**
  * Wide draggable scrollbar for the app grid.
- * Uses LazyGridState to show a proportional thumb that responds to drag gestures.
+ * Lightweight — avoids heavy recomposition during scroll.
  */
 @Composable
 private fun GridScrollbar(
@@ -318,48 +317,29 @@ private fun GridScrollbar(
 ) {
     if (totalItems == 0) return
 
-    val layoutInfo by remember { derivedStateOf { state.layoutInfo } }
-    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+    val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
+    val layout by remember { derivedStateOf { state.layoutInfo } }
 
-    // Estimate total height based on items per row and total items
-    val itemsPerRow = if (layoutInfo.visibleItemsInfo.isNotEmpty()) {
-        val firstItem = layoutInfo.visibleItemsInfo.first()
-        val lastInRow = layoutInfo.visibleItemsInfo
-            .takeWhile { it.offset.y == firstItem.offset.y }
-            .size
-        lastInRow
-    } else 1
+    val viewportHeight = layout.viewportEndOffset - layout.viewportStartOffset
+    if (viewportHeight <= 0) return
+
+    val itemsPerRow = remember(layout) {
+        if (layout.visibleItemsInfo.isEmpty()) 1
+        else {
+            val firstOffset = layout.visibleItemsInfo.first().offset.y
+            layout.visibleItemsInfo.count { it.offset.y == firstOffset }
+        }
+    }
 
     val totalRows = (totalItems + itemsPerRow - 1) / itemsPerRow
+    if (totalRows <= 1) return
 
-    // Estimated total scroll height (rows * approximate row height)
-    val visibleRows = layoutInfo.visibleItemsInfo
-        .map { it.offset.y + it.size.height }
-        .maxOrNull()?.let { maxY ->
-            layoutInfo.visibleItemsInfo.map { it.offset.y }.minOrNull()?.let { minY ->
-                maxY - minY
-            }
-        } ?: 1
-
-    if (visibleRows <= 0 || viewportHeight <= 0 || totalRows <= 1) return
-
-    val firstVisibleRow = if (layoutInfo.visibleItemsInfo.isNotEmpty()) {
-        layoutInfo.visibleItemsInfo.first().index / itemsPerRow
-    } else 0
-
-    val estimatedTotalHeight = if (visibleRows > 0) {
-        (totalRows.toFloat() / max(layoutInfo.visibleItemsInfo.size.toFloat() / itemsPerRow, 1f)) * viewportHeight
-    } else viewportHeight.toFloat()
-
-    val thumbFraction = min(1f, viewportHeight.toFloat() / max(estimatedTotalHeight, 1f))
-    val thumbHeight = max(40f, thumbFraction * viewportHeight)
-
+    val thumbHeight = max(40f, viewportHeight.toFloat() / totalRows.toFloat())
+    val maxThumbOffset = viewportHeight.toFloat() - thumbHeight
     val thumbOffset = if (totalRows > 1) {
-        val scrollFraction = firstVisibleRow.toFloat() / (totalRows - 1).coerceAtLeast(1)
-        scrollFraction * (viewportHeight - thumbHeight)
+        ((firstVisibleIndex / itemsPerRow).toFloat() / (totalRows - 1).toFloat()) * maxThumbOffset
     } else 0f
 
-    var dragOffset by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
 
     Box(
@@ -367,25 +347,16 @@ private fun GridScrollbar(
             .padding(end = 4.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFF2A2F3A).copy(alpha = 0.3f))
-            .pointerInput(totalItems, totalRows) {
-                detectVerticalDragGestures(
-                    onDragStart = { dragOffset = 0f },
-                    onDragEnd = { dragOffset = 0f },
-                    onDragCancel = { dragOffset = 0f },
-                    onVerticalDrag = { _, dragAmount ->
-                        dragOffset += dragAmount
-                        val fraction = dragOffset / (viewportHeight - thumbHeight)
-                        val targetRow = (firstVisibleRow + fraction * totalRows)
-                            .toInt()
-                            .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
-                        val targetIndex = (targetRow * itemsPerRow).coerceAtMost(totalItems - 1)
-                        scope.launch { state.animateScrollToItem(targetIndex) }
-                        dragOffset = 0f
-                    }
-                )
+            .pointerInput(totalRows, itemsPerRow) {
+                detectVerticalDragGestures { _, dragAmount ->
+                    val currentRow = state.firstVisibleItemIndex / itemsPerRow
+                    val rowDelta = ((dragAmount / max(1f, maxThumbOffset)) * totalRows).toInt()
+                    val targetRow = (currentRow + rowDelta).coerceIn(0, totalRows - 1)
+                    val targetIndex = (targetRow * itemsPerRow).coerceAtMost(totalItems - 1)
+                    scope.launch { state.scrollToItem(targetIndex) }
+                }
             }
     ) {
-        // Thumb
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -423,45 +394,36 @@ fun AppTile(app: AppInfo, onClick: () -> Unit) {
         } else null
     }
 
-    Card(
-        onClick = onClick,
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1.0f),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (iconBitmap != null) {
-                Image(
-                    bitmap = iconBitmap,
-                    contentDescription = app.appName,
-                    modifier = Modifier.size(64.dp)
-                )
-            } else {
-                Icon(
-                    categoryIcon,
-                    contentDescription = null,
-                    tint = categoryColor,
-                    modifier = Modifier.size(64.dp)
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = app.appName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+        if (iconBitmap != null) {
+            Image(
+                bitmap = iconBitmap,
+                contentDescription = app.appName,
+                modifier = Modifier.size(64.dp)
+            )
+        } else {
+            Icon(
+                categoryIcon,
+                contentDescription = null,
+                tint = categoryColor,
+                modifier = Modifier.size(64.dp)
             )
         }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = app.appName,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
