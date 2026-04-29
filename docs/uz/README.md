@@ -87,7 +87,7 @@ Avtomobil APK va VD server JAR telefon APK ichiga joylashtirilgan — avtomobilg
 - Barcha kerakli ruxsatlar uchun yo'naltirilgan onboarding
 - Internatsionalizatsiya: ingliz, portugal, rus, belarus, fransuz, qozoq, ukrain, o'zbek
 - USB uzilgandan keyin displeyni tiklash (v0.14.0+)
-- BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 da sinovdan o'tkazilgan
+- BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 + Galaxy S24 da sinovdan o'tkazilgan
 
 **Yaqinda:** audio oqimi, media boshqaruvi, navigatsiya vidjetlari
 

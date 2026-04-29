@@ -87,7 +87,7 @@ L'APK voiture et le JAR du serveur VD sont intégrés dans l'APK du téléphone 
 - Intégration guidée pour toutes les autorisations requises
 - Internationalisation : anglais, portugais, russe, biélorusse, français, kazakh, ukrainien, ouzbek
 - Restauration de l'affichage après déconnexion USB (v0.14.0+)
-- Testé sur BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
+- Testé sur BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 + Galaxy S24
 
 **À venir :** streaming audio, contrôles multimédia, widgets de navigation
 

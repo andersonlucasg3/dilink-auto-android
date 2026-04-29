@@ -87,7 +87,7 @@ O APK do carro e o JAR do servidor VD já vêm empacotados dentro do APK do celu
 - Onboarding guiado para todas as permissões necessárias
 - Internacionalização: Inglês, Português, Russo, Bielorrusso, Francês, Cazaque, Ucraniano, Uzbeque
 - Restauração do display após desconexão USB (v0.14.0+)
-- Testado no BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
+- Testado no BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 + Galaxy S24
 
 **Em breve:** streaming de áudio, controles de mídia, widgets de navegação
 
