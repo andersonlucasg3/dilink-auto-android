@@ -96,6 +96,7 @@ Avtomobil APK va VD server JAR telefon APK ichiga joylashtirilgan — avtomobilg
 - Ba'zida vizual artefaktlar — dekoderni qayta ishga tushirish poygasi, keyingi kalit kadrda tiklanadi (~1 s).
 - Yuklama ostida oqim kechikishi ~100-200 ms. CBR 8 Mbit/s.
 - To'satdan USB uzilgandan keyin displey o'chirilgan holda qolishi mumkin (v0.14.0 da tuzatilgan).
+- **Ba'zi ilovalar ekranni to'ldirmaydi (letterbox/faqat portret).** DiLink-Auto landshaft yo'nalishidagi virtual displeyni avtomobil ekraniga ko'zgusidek aks ettiradi. Landshaft yo'nalishini qo'llab-quvvatlamaydigan ilovalar chiziqlar bilan yoki tor holda ko'rsatiladi — bu DiLink-Auto tomonidan emas, balki har bir ilovaning o'zi tomonidan boshqariladi. Ko'zgulash tomonidan hech narsa qilish mumkin emas.
 
 ## Hujjatlar
 

@@ -96,6 +96,7 @@ O APK do carro e o JAR do servidor VD já vêm empacotados dentro do APK do celu
 - Artefatos visuais ocasionais — corrida de reinicialização do decodificador, recupera no próximo keyframe (~1s).
 - Latência de streaming de ~100-200ms sob carga. CBR 8Mbps.
 - O display pode permanecer desligado após desconexão USB abrupta (corrigido na v0.14.0).
+- **Alguns apps não preenchem a tela (letterbox/apenas retrato).** O DiLink-Auto espelha uma tela virtual em paisagem para o display do carro. Apps que não suportam orientação paisagem aparecerão com faixas laterais ou estreitos — isso é totalmente controlado por cada app, não pelo DiLink-Auto. Nada pode ser feito do lado do espelhamento.
 
 ## Documentação
 

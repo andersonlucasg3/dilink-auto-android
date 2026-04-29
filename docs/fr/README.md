@@ -96,6 +96,7 @@ L'APK voiture et le JAR du serveur VD sont intégrés dans l'APK du téléphone 
 - Artefacts visuels occasionnels — course au redémarrage du décodeur, récupération à la prochaine image clé (~1 s).
 - Latence de diffusion ~100-200 ms sous charge. CBR 8 Mbps.
 - L'écran peut rester éteint après une déconnexion USB brutale (corrigé dans la v0.14.0).
+- **Certaines applis ne remplissent pas l'écran (letterbox/portrait uniquement).** DiLink-Auto reflète un écran virtuel en paysage sur l'écran de la voiture. Les applis qui ne supportent pas l'orientation paysage apparaîtront avec des bandes ou étroites — ceci est entièrement contrôlé par chaque appli, pas par DiLink-Auto. Rien ne peut être fait du côté de la duplication d'écran.
 
 ## Documentation
 

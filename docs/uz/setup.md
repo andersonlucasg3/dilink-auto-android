@@ -107,6 +107,12 @@ Agar dialog yangilanishdan keyin birinchi ulanishda hali ham paydo bo'lsa, "Har 
 - Avtomobil jurnallari: protokolning DATA kanali orqali telefonning client.log fayliga yo'naltiriladi (teg: `CarLog`)
 - Jurnallarni olish: `adb shell "cat /sdcard/DiLinkAuto/client.log"`
 
+### Ilovalar chiziqlar bilan ko'rsatiladi yoki ekranni to'ldirmaydi
+
+Bu normal holat. DiLink-Auto ilovalarni avtomobil ekraniga mos keladigan landshaft yo'nalishidagi virtual displeyga ko'zgusidek aks ettiradi. Ba'zi ilovalar (ayniqsa asosan telefonlar uchun ishlab chiqilgan) faqat portret yo'nalishini qo'llab-quvvatlaydi. Bu ilovalar chiziqlar bilan, tor holda ko'rsatiladi yoki ekranning to'liq enini ishlatmasligi mumkin.
+
+**Bu DiLink-Auto emas, balki ilovalarning o'z cheklovi.** Telefon shunchaki ilova virtual displeyda chizgan narsani ko'zgusidek aks ettiradi — agar ilova landshaft yo'nalishini qo'llab-quvvatlamasa, DiLink-Auto uni ekranni to'ldirishga majburlay olmaydi. Landshaft yo'nalishini qo'llab-quvvatlashni so'rash uchun ilova ishlab chiqaruvchisiga murojaat qiling.
+
 ## HyperOS (Xiaomi) Bo'yicha Maslahatlar
 
 HyperOS da ishonchli ishlash uchun:
