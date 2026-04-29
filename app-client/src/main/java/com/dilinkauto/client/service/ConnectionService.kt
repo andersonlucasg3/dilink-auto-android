@@ -973,6 +973,70 @@ class ConnectionService : Service() {
         controlConnection = null
         activeConnection = null
         _serviceState.value = State.WAITING
+
+        // Force screen on after disconnection. VD server uses SurfaceControl-level
+        // display power-off which regular WakeLocks can't reverse. Launch our own
+        // activity with FLAG_TURN_SCREEN_ON — WindowManager wakes the display.
+        forceWakeScreen()
+    }
+
+    /**
+     * Multi-layered display wake after disconnection. The VD server shuts off the
+     * physical display at the SurfaceControl level (or via cmd display power-off),
+     * which puts it in a deeper off state than normal screen timeout. Regular
+     * WakeLocks can't recover from this — only system-level mechanisms can.
+     *
+     * Layers (tried in order, each is independent):
+     * 1. PowerManager.wakeUp() via reflection — system-level wake
+     * 2. FLAG_TURN_SCREEN_ON activity launch — WindowManager triggers display on
+     * 3. WakeLock with ACQUIRE_CAUSES_WAKEUP — framework-level
+     */
+    private fun forceWakeScreen() {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                FileLog.i(TAG, "Force-waking physical display")
+                val pm = getSystemService(POWER_SERVICE) as PowerManager
+
+                // Layer 1: PowerManager.wakeUp() — direct system call
+                try {
+                    val wakeUp = PowerManager::class.java.getDeclaredMethod(
+                        "wakeUp", Long::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType, String::class.java
+                    )
+                    wakeUp.invoke(pm, android.os.SystemClock.uptimeMillis(),
+                        5 /* WAKE_REASON_APPLICATION */, "DiLink:restore")
+                    FileLog.i(TAG, "Display wakeUp() succeeded from cleanupSession")
+                } catch (e: Exception) {
+                    FileLog.d(TAG, "wakeUp() not available from cleanupSession: ${e.message}")
+                }
+
+                // Layer 2: Launch MainActivity with FLAG_TURN_SCREEN_ON.
+                // WindowManager wakes the display as part of bringing the
+                // activity to the foreground, regardless of the display's
+                // current power state.
+                try {
+                    val intent = Intent(this@ConnectionService, Class.forName("com.dilinkauto.client.MainActivity"))
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    intent.addFlags(0x10000000) // FLAG_TURN_SCREEN_ON
+                    startActivity(intent)
+                    FileLog.i(TAG, "Launched MainActivity with FLAG_TURN_SCREEN_ON from cleanupSession")
+                } catch (e: Exception) {
+                    FileLog.d(TAG, "Activity launch for wake failed from cleanupSession: ${e.message}")
+                }
+
+                // Layer 3: WakeLock with ACQUIRE_CAUSES_WAKEUP
+                @Suppress("DEPRECATION")
+                val flags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    android.os.PowerManager.ON_AFTER_RELEASE
+                val wl = pm.newWakeLock(flags, "DiLink:display:restore2")
+                wl.acquire(3000)
+                wl.release()
+            } catch (e: Exception) {
+                FileLog.w(TAG, "forceWakeScreen error: ${e.message}")
+            }
+        }
     }
 
     private fun stopEverything() {
