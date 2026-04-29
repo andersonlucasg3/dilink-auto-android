@@ -134,8 +134,8 @@ All branches merge to `develop` via PR, except `release/*` which targets `main`.
 |----------|---------|--------|
 | `build.yml` | Push/PR to `main` | Validation: build release APK |
 | `build-develop.yml` | Push/PR to `develop`, `release/*` | Validation: build debug APK |
-| `build-pre-release.yml` | Push to `release/**` | Build debug APK + GitHub pre-release (finds `-dev` tag on commit) |
-| `build-release.yml` | Push to `main` | Build signed release APK + GitHub Release (finds semver tag on commit) |
+| `build-pre-release.yml` | Tag `vX.Y.Z-dev-NN` | Build debug APK + GitHub pre-release |
+| `build-release.yml` | Tag `vX.Y.Z` | Build signed release APK + GitHub Release |
 | `sync-main-to-develop.yml` | Push to `main` | Merge `main` → `develop` (git-flow back-sync) |
 | `issue-agent.yml` | Issue opened / comment | Autonomous agent: branch, build, PR |
 
