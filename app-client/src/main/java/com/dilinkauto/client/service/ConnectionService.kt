@@ -109,7 +109,7 @@ class ConnectionService : Service() {
     private fun registerNetworkCallback() {
         val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .build()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
