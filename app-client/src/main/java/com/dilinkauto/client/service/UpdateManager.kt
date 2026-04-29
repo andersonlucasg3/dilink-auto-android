@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.R
+import com.dilinkauto.client.ShizukuManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +27,8 @@ sealed class UpdateState {
     data class Available(val version: String, val sizeBytes: Long) : UpdateState()
     data class Downloading(val progress: Int, val version: String) : UpdateState()
     data class ReadyToInstall(val file: File, val version: String) : UpdateState()
+    data class Installing(val version: String) : UpdateState()
+    data object Installed : UpdateState()
     data class UpToDate(val version: String) : UpdateState()
     data class Error(val message: String) : UpdateState()
 }
@@ -212,20 +215,47 @@ object UpdateManager {
             return
         }
 
-        try {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                apkFile
-            )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+        val version = latestRelease?.versionName ?: ""
+
+        if (ShizukuManager.isAvailable) {
+            // Silent install via Shizuku — no system confirmation dialog
+            _updateState.value = UpdateState.Installing(version)
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val result = ShizukuManager.execAndWait("pm install -r ${apkFile.absolutePath}")
+                    if (result != null && result.contains("Success")) {
+                        FileLog.i(TAG, "Shizuku install succeeded: $result")
+                        _updateState.value = UpdateState.Installed
+                        downloadedFile?.delete()
+                        downloadedFile = null
+                        latestRelease = null
+                    } else {
+                        val msg = result ?: "Shizuku command returned null"
+                        FileLog.w(TAG, "Shizuku install failed: $msg")
+                        _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, msg.take(120)))
+                    }
+                } catch (e: Exception) {
+                    FileLog.e(TAG, "Shizuku install error", e)
+                    _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
+                }
             }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            FileLog.e(TAG, "Install intent failed", e)
-            _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
+        } else {
+            // Fallback to system package installer
+            try {
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    apkFile
+                )
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                FileLog.e(TAG, "Install intent failed", e)
+                _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
+            }
         }
     }
 
