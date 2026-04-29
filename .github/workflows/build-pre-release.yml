@@ -52,47 +52,10 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: dilink-auto-client-debug
-          path: app-client/build/outputs/apk/debug/app-client-debug.apk
-
-      - name: Create Pre-Release
+      - name: Generate Release Notes
+        id: notes
         run: |
-          # --- Network diagnostics (before any gh call) ---
-          echo "=== DNS ==="
-          cat /etc/resolv.conf 2>/dev/null || echo "(no resolv.conf)"
-          echo "=== resolve api.github.com vs github.com ==="
-          getent hosts api.github.com 2>&1 || echo "getent failed"
-          getent hosts github.com 2>&1 || echo "getent failed"
-          echo "=== curl -v api.github.com (5s timeout) ==="
-          curl -sv --max-time 5 https://api.github.com 2>&1 | head -20 || echo "curl FAILED (exit=$?)"
-          echo "=== curl -v github.com (5s timeout) ==="
-          curl -sv --max-time 5 https://github.com 2>&1 | head -20 || echo "curl FAILED (exit=$?)"
-          echo "=== traceroute ==="
-          timeout 5 traceroute -n -m 5 api.github.com 2>&1 || echo "(traceroute failed)"
-          echo "=== ip route ==="
-          ip route 2>&1 || echo "(ip route failed)"
-          echo "=== gh auth ==="
-          timeout 5 gh auth status 2>&1 || echo "gh auth FAILED (exit=$?)"
-          echo "=== GITHUB_TOKEN ==="
-          echo "GITHUB_TOKEN=${#GITHUB_TOKEN}chars"
-
-          # Prefer tag from trigger, fall back to git tag --points-at HEAD
-          REF="${{ github.ref_name }}"
-          if echo "$REF" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-dev'; then
-            TAG="$REF"
-          else
-            git fetch --tags origin 2>/dev/null || true
-            TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-dev' | head -1)
-          fi
-
-          if [ -z "$TAG" ]; then
-            echo "No dev tag on this commit — skipping pre-release"
-            exit 0
-          fi
-
+          TAG="${{ github.ref_name }}"
           echo "Tag: $TAG"
           VERSION_NAME="${TAG#v}"
 
@@ -109,31 +72,31 @@ jobs:
           VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
 
           # Generate changelog since previous tag
+          git fetch --tags origin 2>/dev/null || true
           PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tail -1)
           if [ -n "$PREV_TAG" ]; then
-            echo "## Commits since $PREV_TAG" > /tmp/changelog.md
-            echo "" >> /tmp/changelog.md
-            git log "$PREV_TAG..HEAD" --pretty=format:"* %s (%h)" --no-merges >> /tmp/changelog.md
-            echo "" >> /tmp/changelog.md
-            echo "---" >> /tmp/changelog.md
-            echo "**versionCode:** $VERSION_CODE | **versionName:** $VERSION_NAME" >> /tmp/changelog.md
+            echo "## Commits since $PREV_TAG" > /tmp/release-notes.md
+            echo "" >> /tmp/release-notes.md
+            git log "$PREV_TAG..HEAD" --pretty=format:"* %s (%h)" --no-merges >> /tmp/release-notes.md
+            echo "" >> /tmp/release-notes.md
+            echo "---" >> /tmp/release-notes.md
+            echo "**versionCode:** $VERSION_CODE | **versionName:** $VERSION_NAME" >> /tmp/release-notes.md
           else
-            echo "## Initial development build" > /tmp/changelog.md
-            echo "" >> /tmp/changelog.md
-            echo "**versionCode:** $VERSION_CODE | **versionName:** $VERSION_NAME" >> /tmp/changelog.md
+            echo "## Initial development build" > /tmp/release-notes.md
+            echo "" >> /tmp/release-notes.md
+            echo "**versionCode:** $VERSION_CODE | **versionName:** $VERSION_NAME" >> /tmp/release-notes.md
           fi
 
-          # Delete old prerelease if it exists, then create new one
-          echo "=== Deleting old release (if any) ==="
-          gh release delete "$TAG" --yes 2>&1 || true
-          sleep 2
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          cat /tmp/release-notes.md
 
-          echo "=== Creating release ==="
-          gh release create "$TAG" \
-            --prerelease \
-            --title "$TAG — Development Build" \
-            --notes-file /tmp/changelog.md \
-            app-client/build/outputs/apk/debug/app-client-debug.apk 2>&1
-          echo "=== Done ==="
+      - name: Create Pre-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.notes.outputs.tag }}
+          name: ${{ steps.notes.outputs.tag }} — Development Build
+          body_path: /tmp/release-notes.md
+          files: app-client/build/outputs/apk/debug/app-client-debug.apk
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
