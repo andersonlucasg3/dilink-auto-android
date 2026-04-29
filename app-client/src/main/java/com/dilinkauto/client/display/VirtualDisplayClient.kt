@@ -7,6 +7,7 @@ import com.dilinkauto.protocol.FrameCodec
 import com.dilinkauto.protocol.NioReader
 import com.dilinkauto.protocol.VideoMsg
 import kotlinx.coroutines.*
+import android.os.PowerManager
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.ServerSocketChannel
@@ -285,14 +286,31 @@ class VirtualDisplayClient(
         try { channel?.close() } catch (_: Exception) {}
 
         // Restore physical display — VD server cleanup may not run if process was killed.
-        // SCREEN_BRIGHT_WAKE_LOCK + ON_AFTER_RELEASE forces the screen on at the
-        // framework level, which works even when SurfaceControl is held by shell UID.
-        // cmd display power-on is a stronger fallback that operates below SurfaceFlinger.
+        // The VD server uses SurfaceControl / cmd display power-off (hardware-level off).
+        // Regular WakeLocks can't recover from this state — we need multiple fallbacks:
+        // 1. PowerManager.wakeUp() via reflection (system-level wake)
+        // 2. SCREEN_BRIGHT_WAKE_LOCK + ACQUIRE_CAUSES_WAKEUP (framework-level)
+        // 3. Start MainActivity with FLAG_TURN_SCREEN_ON (WindowManager-level)
+        // 4. Shell command fallback (cmd display power-on + keyevent)
         scope.launch(Dispatchers.IO) {
             try {
                 FileLog.i(TAG, "Restoring physical display after VD disconnect")
                 val pm = appContext.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-                // Force screen on — ACQUIRE_CAUSES_WAKEUP turns on, ON_AFTER_RELEASE keeps it on
+
+                // Layer 1: PowerManager.wakeUp() — system-level wake, most direct
+                try {
+                    val wakeUp = PowerManager::class.java.getDeclaredMethod(
+                        "wakeUp", Long::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType, String::class.java
+                    )
+                    wakeUp.invoke(pm, android.os.SystemClock.uptimeMillis(),
+                        5 /* WAKE_REASON_APPLICATION */, "DiLink:restore")
+                    FileLog.i(TAG, "Display wakeUp() succeeded")
+                } catch (e: Exception) {
+                    FileLog.d(TAG, "wakeUp() not available: ${e.message}")
+                }
+
+                // Layer 2: Strong WakeLock with ACQUIRE_CAUSES_WAKEUP
                 @Suppress("DEPRECATION")
                 val flags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
                     android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
@@ -300,7 +318,21 @@ class VirtualDisplayClient(
                 val wl = pm.newWakeLock(flags, "DiLink:display:restore")
                 wl.acquire(3000)
                 wl.release()
-                // Fallback: cmd-level power-on (bypasses SurfaceControl restrictions)
+
+                // Layer 3: Launch activity with FLAG_TURN_SCREEN_ON — WindowManager
+                // wakes the display when bringing this activity to the foreground
+                try {
+                    val intent = android.content.Intent(appContext, Class.forName("com.dilinkauto.client.MainActivity"))
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    intent.addFlags(0x10000000) // FLAG_TURN_SCREEN_ON
+                    appContext.startActivity(intent)
+                    FileLog.i(TAG, "Launched MainActivity with FLAG_TURN_SCREEN_ON")
+                } catch (e: Exception) {
+                    FileLog.d(TAG, "Activity launch for wake failed: ${e.message}")
+                }
+
+                // Layer 4: Shell fallback (may work on some devices)
                 try {
                     Runtime.getRuntime().exec(arrayOf("sh", "-c", "cmd display power-on 2>/dev/null; input keyevent 224 2>/dev/null")).waitFor()
                 } catch (_: Exception) {}
