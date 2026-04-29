@@ -515,7 +515,15 @@ class ConnectionService : Service() {
                     AdbKeyPair.generate(privKey, pubKey)
                 }
                 val keyPair = AdbKeyPair.read(privKey, pubKey)
-                val dadb = Dadb.create(carIp, 5555, keyPair)
+                val dadb = withTimeoutOrNull(15_000) {
+                    Dadb.create(carIp, 5555, keyPair)
+                }
+                if (dadb == null) {
+                    _installStatusStatic.value = getString(R.string.car_install_status_auth_needed)
+                    autoUpdateFailedAt = System.currentTimeMillis()
+                    FileLog.w(TAG, "Auto-update ADB connect timed out — will retry in 5min")
+                    return@launch
+                }
 
                 try {
                     _installStatusStatic.value = "Pushing car APK..."
@@ -621,6 +629,7 @@ class ConnectionService : Service() {
 
     fun installCarApp(explicitIp: String? = null) {
         serviceScope.launch(Dispatchers.IO) {
+            var keepStatus = false
             try {
                 ensureAssetsReady()
                 val apkFile = java.io.File(filesDir, "app-server.apk")
@@ -652,7 +661,16 @@ class ConnectionService : Service() {
                     AdbKeyPair.generate(privKey, pubKey)
                 }
                 val keyPair = AdbKeyPair.read(privKey, pubKey)
-                val dadb = Dadb.create(carIp, 5555, keyPair)
+                val dadb = withTimeoutOrNull(15_000) {
+                    Dadb.create(carIp, 5555, keyPair)
+                }
+
+                if (dadb == null) {
+                    _installStatus.value = getString(R.string.car_install_status_auth_needed)
+                    keepStatus = true
+                    FileLog.w(TAG, "ADB connection timed out — user may need to accept auth dialog on car")
+                    return@launch
+                }
 
                 try {
                     _installStatus.value = getString(R.string.car_install_status_checking_version)
@@ -693,8 +711,10 @@ class ConnectionService : Service() {
                 _installStatus.value = getString(R.string.car_install_status_error, e.message ?: "unknown")
                 FileLog.e(TAG, "Car app install failed", e)
             } finally {
-                delay(5000)
-                _installStatus.value = ""
+                if (!keepStatus) {
+                    delay(5000)
+                    _installStatus.value = ""
+                }
             }
         }
     }
