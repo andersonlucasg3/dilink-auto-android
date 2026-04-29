@@ -32,10 +32,12 @@
     <!-- How to Connect -->
     <string name="how_to_connect_title">Qanday ulanish kerak</string>
 
-    <!-- Development Mode -->
-    <string name="dev_mode_title">Ishlab chiqish rejimi</string>
-    <string name="dev_mode_desc_on">USB o\'rniga TCP ADB (emulyator sinovi)</string>
-    <string name="dev_mode_desc_off">USB ADB ishlatish (avtomobil ulanishi)</string>
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">To\'g\'ridan-to\'g\'ri Wi-Fi rejimi</string>
+    <string name="dev_mode_desc_on">WiFi ADB (avtomobil telefonga Wi-Fi orqali ulanadi — USB kabel kerak emas)</string>
+    <string name="dev_mode_desc_off">USB ADB (avtomobil telefonga USB kabel orqali ulanadi)</string>
+    <string name="wifi_adb_setup_title">WiFi ADB sozlash</string>
+    <string name="wifi_adb_setup_desc">To\'g\'ridan-to\'g\'ri Wi-Fi rejimidan foydalanish uchun avval telefoningizda ADB ni Wi-Fi orqali yoqing. Telefoningizni kompyuterga USB orqali ulang va quyidagilarni bajaring:\n\nadb tcpip 5555\n\nBuni faqat bir marta qilish kerak. Shundan so\'ng avtomobil telefoningizga Wi-Fi orqali USB kabelsiz ulana oladi.</string>
 
     <!-- Manual Connect -->
     <string name="manual_connect_label">Yoki IP orqali qo\'lda ulaning</string>

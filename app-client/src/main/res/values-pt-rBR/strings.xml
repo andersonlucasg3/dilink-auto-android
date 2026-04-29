@@ -182,6 +182,7 @@
     <string name="car_install_status_failed">Falhou: %s</string>
     <string name="car_install_status_error">Erro: %s</string>
     <string name="car_install_status_car_apk_not_found">APK do carro não encontrado</string>
+    <string name="car_install_status_auth_needed">Autorização necessária — Aceite o diálogo de depuração USB na tela do carro e toque em Continuar para tentar novamente</string>
 
     <!-- Auto-Update Status -->
     <string name="status_auto_update">Atualizando app do carro (v%1$s → v%2$s)…</string>

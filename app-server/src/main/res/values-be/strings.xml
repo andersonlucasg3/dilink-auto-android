@@ -32,10 +32,12 @@
     <!-- How to Connect -->
     <string name="how_to_connect_title">Як падключыцца</string>
 
-    <!-- Development Mode -->
-    <string name="dev_mode_title">Рэжым распрацоўніка</string>
-    <string name="dev_mode_desc_on">TCP ADB замест USB (тэсціраванне эмулятара)</string>
-    <string name="dev_mode_desc_off">Выкарыстоўваць USB ADB (падключэнне да аўто)</string>
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">Рэжым прамога Wi-Fi</string>
+    <string name="dev_mode_desc_on">WiFi ADB (аўто падключаецца да тэлефона праз Wi-Fi — USB-кабель не патрэбны)</string>
+    <string name="dev_mode_desc_off">USB ADB (аўто падключаецца да тэлефона праз USB-кабель)</string>
+    <string name="wifi_adb_setup_title">Налада WiFi ADB</string>
+    <string name="wifi_adb_setup_desc">Каб выкарыстоўваць рэжым прамога Wi-Fi, спачатку ўключыце ADB праз Wi-Fi на тэлефоне. Падключыце тэлефон да камп\'ютара праз USB і выканайце:\n\nadb tcpip 5555\n\nГэта трэба зрабіць толькі адзін раз. Пасля гэтага аўто зможа падключацца да тэлефона праз Wi-Fi без USB-кабеля.</string>
 
     <!-- Manual Connect -->
     <string name="manual_connect_label">Або падключыцца ўручную па IP</string>

@@ -182,6 +182,7 @@
     <string name="car_install_status_failed">Помилка: %s</string>
     <string name="car_install_status_error">Помилка: %s</string>
     <string name="car_install_status_car_apk_not_found">APK авто не знайдено</string>
+    <string name="car_install_status_auth_needed">Потрібна авторизація — Прийміть діалог налагодження USB на екрані авто, потім натисніть Продовжити для повтору</string>
 
     <!-- Auto-Update Status -->
     <string name="status_auto_update">Оновлення застосунку авто (v%1$s → v%2$s)…</string>

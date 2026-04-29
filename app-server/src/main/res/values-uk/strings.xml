@@ -32,10 +32,12 @@
     <!-- How to Connect -->
     <string name="how_to_connect_title">Як підключитися</string>
 
-    <!-- Development Mode -->
-    <string name="dev_mode_title">Режим розробника</string>
-    <string name="dev_mode_desc_on">TCP ADB замість USB (тестування емулятора)</string>
-    <string name="dev_mode_desc_off">Використовувати USB ADB (підключення до авто)</string>
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">Режим прямого Wi-Fi</string>
+    <string name="dev_mode_desc_on">WiFi ADB (авто підключається до телефону через Wi-Fi — USB-кабель не потрібен)</string>
+    <string name="dev_mode_desc_off">USB ADB (авто підключається до телефону через USB-кабель)</string>
+    <string name="wifi_adb_setup_title">Налаштування WiFi ADB</string>
+    <string name="wifi_adb_setup_desc">Щоб використовувати режим прямого Wi-Fi, спочатку увімкніть ADB через Wi-Fi на телефоні. Підключіть телефон до комп\'ютера через USB і виконайте:\n\nadb tcpip 5555\n\nЦе потрібно зробити лише один раз. Після цього авто зможе підключатися до телефону через Wi-Fi без USB-кабеля.</string>
 
     <!-- Manual Connect -->
     <string name="manual_connect_label">Або підключитися вручну за IP</string>
