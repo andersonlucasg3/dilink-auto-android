@@ -3,8 +3,10 @@ package com.dilinkauto.vdserver
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
+import android.os.SystemClock
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.Surface
 import com.dilinkauto.protocol.FrameCodec
@@ -51,6 +53,10 @@ class VirtualDisplayServer(
     private val writeQueue = ConcurrentLinkedQueue<ByteBuffer>()
     @Volatile private var writerThread: Thread? = null
 
+    // Approximate queue depth for encoder backpressure — avoids O(n) ConcurrentLinkedQueue.size()
+    @Volatile private var writeQueueDepth = 0
+    private val BACKPRESSURE_THRESHOLD = 6 // skip non-keyframes when queue exceeds 6 frames (~100ms at 60fps)
+
     private var scaler: SurfaceScaler? = null
     private var scalerThread: Thread? = null
     @Volatile private var running = true
@@ -93,7 +99,7 @@ class VirtualDisplayServer(
         private const val CMD_INPUT_TOUCH = 0x32
         private const val CMD_STOP = 0xFF
 
-        private const val BITRATE = 12_000_000
+        private const val BITRATE = 8_000_000
         private const val I_FRAME_INTERVAL = 1
         private const val MAX_POINTERS = 10
 
@@ -200,13 +206,18 @@ class VirtualDisplayServer(
             ch.socket().sendBufferSize = 262144
             ch.socket().receiveBufferSize = 262144
 
-            // Tell client the display is ready (direct write before threads start)
-            val readyBuf = ByteBuffer.allocate(5)
+            // Tell client the display is ready (direct write before threads start).
+            // Format: MSG_DISPLAY_READY (1) + displayId (4) + flags (1)
+            // flags bit 0 = IInputManager.injectInputEvent actually works
+            val hasInjection = checkDirectInjectionWorks()
+            val flags: Byte = if (hasInjection) 1 else 0
+            val readyBuf = ByteBuffer.allocate(6)
             readyBuf.put(MSG_DISPLAY_READY)
             readyBuf.putInt(displayId)
+            readyBuf.put(flags)
             readyBuf.flip()
             writeAllBlocking(ch, readyBuf)
-            log("Display ready: id=$displayId ${width}x${height}@${dpi}")
+            log("Display ready: id=$displayId ${width}x${height}@${dpi} injectInput=$hasInjection")
 
             // Launch home activity on VD so the encoder has content
             execShell("am start --display $displayId -a android.intent.action.MAIN -c android.intent.category.HOME")
@@ -258,6 +269,7 @@ class VirtualDisplayServer(
         buf.put(msgType)
         buf.flip()
         writeQueue.add(buf)
+        writeQueueDepth++
         val wt = writerThread
         if (wt != null) LockSupport.unpark(wt)
     }
@@ -271,10 +283,11 @@ class VirtualDisplayServer(
                 LockSupport.parkNanos(frameIntervalMs * 1_000_000L)
                 continue
             }
+            writeQueueDepth--
             FrameCodec.writeAll(ch, buf)
             writeCount++
             if (writeCount % 60 == 0L) {
-                log("Writer: wrote $writeCount messages, queue=${writeQueue.size}")
+                log("Writer: wrote $writeCount messages, queueDepth=$writeQueueDepth")
             }
         }
     }
@@ -288,16 +301,16 @@ class VirtualDisplayServer(
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
         format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
+        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
         format.setInteger(MediaFormat.KEY_LATENCY, 1)
         format.setInteger(MediaFormat.KEY_PRIORITY, 0) // real-time — ensures P-frames between keyframes
-        format.setLong("repeat-previous-frame-after", 1_000_000L)
+        format.setLong("repeat-previous-frame-after", 500_000L)
 
         try {
             encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).also {
                 it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
-            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps High low-latency")
+            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps Main low-latency")
         } catch (e: Exception) {
             throw IOException("Failed to create encoder: ${e.message}", e)
         }
@@ -312,6 +325,7 @@ class VirtualDisplayServer(
         var noOutputCount = 0L
         var lastFrameTime = System.currentTimeMillis()
         var lastKeyFrameAt = 0L
+        var skippedFrameCount = 0L
 
         while (running) {
             try {
@@ -343,6 +357,19 @@ class VirtualDisplayServer(
                         lastKeyFrameAt = now
                     }
 
+                    // Encoder backpressure: when the write queue is backed up (TCP send buffer
+                    // congested, WiFi dropped, etc.), skip non-keyframe, non-config frames at the
+                    // source. This prevents frame piling that causes catchup cascades downstream.
+                    // Keyframes and CONFIG always go through — they are essential for decoding.
+                    if (!isConfig && !isKeyFrame && writeQueueDepth > BACKPRESSURE_THRESHOLD) {
+                        enc.releaseOutputBuffer(outputIndex, false)
+                        skippedFrameCount++
+                        if (skippedFrameCount <= 3 || skippedFrameCount % 60 == 0L) {
+                            log("Encoder backpressure: skip P-frame (queueDepth=$writeQueueDepth threshold=$BACKPRESSURE_THRESHOLD skipped=$skippedFrameCount)")
+                        }
+                        continue
+                    }
+
                     // Single allocation: encode header + payload directly into ByteBuffer
                     val buf = ByteBuffer.allocate(1 + 4 + size)
                     buf.put(msgType)
@@ -351,6 +378,7 @@ class VirtualDisplayServer(
                     buf.position(buf.limit())  // advance position past payload
                     buf.flip()
                     writeQueue.add(buf)
+                    writeQueueDepth++
                     val wt = writerThread
                     if (wt != null) LockSupport.unpark(wt)
 
@@ -893,6 +921,40 @@ class VirtualDisplayServer(
         } catch (e: Exception) {
             err("InputManager init failed: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace()
+        }
+    }
+
+    /** Returns true if IInputManager.injectInputEvent actually works (has INJECT_EVENTS). */
+    private fun checkDirectInjectionWorks(): Boolean {
+        if (inputManager == null || injectInputEventMethod == null) return false
+        try {
+            val displayId = this.displayId
+            if (displayId < 0) return false
+            val downTime = SystemClock.uptimeMillis()
+            val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0 })
+            val coords = arrayOf(MotionEvent.PointerCoords().apply { x = 0f; y = 0f; pressure = 1.0f })
+            val event = MotionEvent.obtain(downTime, downTime,
+                MotionEvent.ACTION_DOWN, 1, props, coords, 0, 0, 1.0f, 1.0f,
+                0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+            try {
+                setDisplayIdMethod?.invoke(event, displayId)
+            } catch (_: Exception) {}
+            injectInputEventMethod!!.invoke(inputManager, event, 0)
+            // Send UP to release the test pointer
+            val upEvent = MotionEvent.obtain(downTime, downTime + 1,
+                MotionEvent.ACTION_UP, 1, props, coords, 0, 0, 1.0f, 1.0f,
+                0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+            try {
+                setDisplayIdMethod?.invoke(upEvent, displayId)
+            } catch (_: Exception) {}
+            injectInputEventMethod!!.invoke(inputManager, upEvent, 0)
+            event.recycle()
+            upEvent.recycle()
+            log("Direct injection verified — INJECT_EVENTS available")
+            return true
+        } catch (e: Exception) {
+            log("Direct injection not available: ${e.javaClass.simpleName}")
+            return false
         }
     }
 

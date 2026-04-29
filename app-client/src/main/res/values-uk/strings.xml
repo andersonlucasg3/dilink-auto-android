@@ -53,6 +53,11 @@
     <string name="updates_ready">Телефон: v%1$s готова</string>
     <string name="updates_install_btn">Встановити оновлення</string>
     <string name="updates_retry">Повторити</string>
+    <string name="updates_available_title">Доступне оновлення</string>
+    <string name="updates_update_btn">Оновити</string>
+    <string name="updates_dismiss_btn">Пропустити</string>
+    <string name="updates_downloading_title">Завантаження оновлення v%1$s</string>
+    <string name="updates_ready_title">Готово до встановлення</string>
     <string name="updates_car_title">Застосунок авто</string>
     <string name="updates_car_desc">Встановіть або оновіть застосунок авто через WiFi ADB</string>
     <string name="updates_car_install">Встановити</string>
@@ -99,14 +104,30 @@
     <string name="onboarding_accessibility_desc">Дозволяє сенсорному екрану автомобіля керувати телефоном. Без цього ви бачитимете екран, але не зможете торкатися.</string>
     <string name="onboarding_notification_title">Доступ до сповіщень</string>
     <string name="onboarding_notification_desc">Показує сповіщення телефона на дисплеї автомобіля. Без цього ви пропускатимете дзвінки й повідомлення під час водіння.</string>
+    <string name="onboarding_car_setup_title">Перед підключенням</string>
+    <string name="onboarding_car_setup_desc">Переконайтеся, що все готово до підключення:</string>
+    <string name="onboarding_car_prereq_wifi_adb">Wi-Fi ADB увімкнено на авто</string>
+    <string name="onboarding_car_prereq_hotspot">Точка доступу телефону ввімкнена</string>
+    <string name="onboarding_car_prereq_connected">Авто підключено до точки доступу</string>
+    <string name="onboarding_car_prereq_installed">Додаток авто встановлено</string>
+    <string name="onboarding_car_install_btn">Встановити в авто</string>
+    <string name="onboarding_car_installing">Встановлення додатку авто…</string>
+    <string name="onboarding_car_installed">Додаток авто встановлено!</string>
     <string name="onboarding_done_title">Усе готово</string>
-    <string name="onboarding_done_desc">Усе налаштовано. Підключіть телефон до USB-порту автомобіля, щоб почати.</string>
+    <string name="onboarding_done_desc">Усе налаштовано. Натисніть нижче, щоб почати.</string>
     <string name="onboarding_grant">Надати</string>
     <string name="onboarding_skip">Пропустити</string>
     <string name="onboarding_continue">Продовжити</string>
     <string name="onboarding_start">Почати користуватися DiLink-Auto</string>
     <string name="onboarding_skip_btn">Поки пропустити</string>
     <string name="onboarding_granted_label">Надано</string>
+
+    <!-- Поділитися логами -->
+    <string name="share_logs_title">Поділитися логами</string>
+    <string name="share_logs_desc">Запакувати логи в ZIP і відкрити задачу на GitHub для звіту про проблеми</string>
+    <string name="share_logs_button">Поділитися</string>
+    <string name="share_logs_zipped">Логи запаковано в %s</string>
+    <string name="share_logs_no_logs">Файли логів не знайдено</string>
 
     <!-- Встановлення в авто (Налаштування) -->
     <string name="car_install_title">Встановлення в автомобіль</string>
@@ -116,4 +137,74 @@
     <string name="car_install_button">Встановити в автомобіль</string>
     <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
     <string name="about_dev_github">github.com/andersonlucasg3</string>
+
+    <!-- Car App -->
+    <string name="car_app_title">Застосунок авто</string>
+    <string name="car_app_desc">Встановити або оновити застосунок авто через WiFi ADB</string>
+    <string name="car_app_install">Встановити</string>
+    <string name="car_app_retry">Повторити</string>
+    <string name="car_app_installed">Застосунок авто встановлено</string>
+
+    <!-- Donation -->
+    <string name="donation_title">Підтримати розробку</string>
+    <string name="donation_desc">Допоможіть підтримувати DiLink-Auto. Кожен внесок важливий!</string>
+    <string name="donation_github">Спонсор GitHub</string>
+    <string name="donation_pix">Pix (Бразилія)</string>
+
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Виявлено пристрій Samsung</string>
+    <string name="samsung_warning_desc">Samsung One UI потребує додаткового налаштування: вимкніть Auto Blocker (блокує USB ADB), надайте необмежений доступ до батареї та дозвольте доступ до всіх файлів. Докладніше в Налаштуваннях.</string>
+    <string name="samsung_settings_guide">Посібник з налаштування Samsung</string>
+
+    <!-- Distribution Channel -->
+    <string name="channel_title">Канал розповсюдження</string>
+    <string name="channel_release">Реліз</string>
+    <string name="channel_prerelease">Пре-реліз</string>
+    <string name="channel_release_desc">Стабільні релізи — рекомендовано для щоденного використання</string>
+    <string name="channel_prerelease_desc">Збірки для розробників — найновіші функції, можуть бути нестабільними</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_distribution">Розповсюдження</string>
+
+    <!-- Install on Car Status -->
+    <string name="car_install_status_searching">Пошук автомобіля</string>
+    <string name="car_install_status_connecting">Підключення до автомобіля</string>
+    <string name="car_install_status_checking_version">Перевірка версії</string>
+    <string name="car_install_status_pushing">Надсилання APK</string>
+    <string name="car_install_status_installing_stage">Встановлення</string>
+    <string name="car_install_status_launching">Запуск</string>
+    <string name="car_install_title_installed">Застосунок авто встановлено</string>
+    <string name="car_install_title_failed">Помилка встановлення</string>
+    <string name="car_install_title_installing">Встановлення в автомобіль</string>
+    <string name="car_install_status_connecting_to">Підключення до %s…</string>
+    <string name="car_install_status_not_reachable">%s недоступний на порту 5555</string>
+    <string name="car_install_status_car_not_found">Автомобіль не знайдено. Підключіть через USB або перевірте WiFi ADB.</string>
+    <string name="car_install_status_already_up_to_date">Уже актуальна версія (v%s)</string>
+    <string name="car_install_status_pushing_apk">Надсилання APK (%d МБ)…</string>
+    <string name="car_install_status_installing_version">Встановлення v%s…</string>
+    <string name="car_install_status_launching_car_app">Запуск застосунку авто…</string>
+    <string name="car_install_status_car_installed">Застосунок авто v%s встановлено!</string>
+    <string name="car_install_status_failed">Помилка: %s</string>
+    <string name="car_install_status_error">Помилка: %s</string>
+    <string name="car_install_status_car_apk_not_found">APK авто не знайдено</string>
+    <string name="car_install_status_auth_needed">Потрібна авторизація — Прийміть діалог налагодження USB на екрані авто, потім натисніть Продовжити для повтору</string>
+
+    <!-- Auto-Update Status -->
+    <string name="status_auto_update">Оновлення застосунку авто (v%1$s → v%2$s)…</string>
+    <string name="status_auto_update_complete">Застосунок авто оновлено! Перезапуск…</string>
+    <string name="status_update_failed">Помилка оновлення: %s</string>
+    <string name="status_auto_update_failed">Помилка авто-оновлення: %s</string>
+
+    <!-- Notification Actions -->
+    <string name="notification_action_stop">Стоп</string>
+
+    <!-- Update Manager Errors -->
+    <string name="update_no_release">Реліз не знайдено</string>
+    <string name="update_no_version">Не вдалося визначити поточну версію</string>
+    <string name="update_download_http_error">Помилка завантаження: HTTP %d</string>
+    <string name="update_invalid_apk">Завантажений APK недійсний</string>
+    <string name="update_download_failed">Помилка завантаження: %s</string>
+    <string name="update_file_not_found">Файл оновлення не знайдено</string>
+    <string name="update_installer_error">Не вдалося відкрити встановник: %s</string>
+    <string name="update_rate_limit">Досягнуто ліміту запитів GitHub. Спробуйте пізніше.</string>
 </resources>

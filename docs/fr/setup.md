@@ -1,0 +1,169 @@
+# Guide d'installation
+
+## Prérequis
+
+- **Téléphone :** Tout appareil Android 10+ avec Débogage USB activé
+- **Voiture :** BYD DiLink 3.0+ (ou toute unité principale Android 10+ avec port hôte USB)
+- **Câble USB :** Câble du téléphone vers le port USB de la voiture
+- **Développement :** Android Studio ou Gradle, JDK 17
+
+**Aucune connexion Internet n'est requise** — DiLink-Auto diffuse tout localement via le point d'accès WiFi de votre téléphone (la voiture et le téléphone communiquent directement). Une connexion Internet n'est nécessaire que pour les applications exécutées sur votre téléphone (ex. : navigation, musique en streaming), pas pour DiLink-Auto lui-même.
+
+## Configuration du téléphone (Unique)
+
+1. **Installez DiLink Auto Client** : `adb install app-client-debug.apk`
+2. **Ouvrez l'application** — l'écran d'intégration vous guidera à travers chaque autorisation :
+   - **Accès à tous les fichiers** — déploie le serveur d'affichage virtuel sur le stockage
+   - **Optimisation de la batterie** — maintient le streaming actif lorsque l'écran est éteint
+   - **Service d'accessibilité** — active le contrôle de l'écran tactile de la voiture
+   - **Accès aux notifications** — transmet les notifications du téléphone à l'écran de la voiture
+3. Chaque étape ouvre les paramètres système correspondants. Accordez l'autorisation, puis appuyez sur Retour pour continuer.
+4. Vous pouvez sauter n'importe quelle étape et la configurer plus tard depuis l'écran principal.
+
+C'est tout. Pas de Débogage sans fil, pas de codes d'appairage, pas de configuration WiFi spéciale.
+
+## Configuration de la voiture
+
+**Aucune connexion Internet n'est requise.** L'APK de la voiture est intégré dans l'APK du téléphone — le téléphone le transfère vers la voiture via le WiFi local. Aucune connexion Internet n'est nécessaire à aucun moment de la configuration ou de la diffusion.
+
+Aucune installation manuelle sur la voiture n'est nécessaire. L'APK de la voiture est intégré dans l'APK du téléphone. Lors de la première connexion (ou en cas d'incompatibilité de version), le téléphone envoie `UPDATING_CAR` à la voiture (qui affiche le statut « Mise à jour... »), puis effectue l'installation automatique via dadb (WiFi ADB).
+
+Vous pouvez également utiliser le bouton « Installer sur la voiture » dans l'application du téléphone pour envoyer manuellement l'APK de la voiture.
+
+En cas d'installation manuelle : `adb install app-server-debug.apk` (nécessite un accès ADB à la voiture).
+
+## Utilisation quotidienne
+
+1. **Branchez le téléphone au port USB de la voiture** — l'application de la voiture se lance automatiquement (ou connectez-vous via WiFi sur le même réseau)
+2. La voiture et le téléphone se connectent automatiquement via les pistes parallèles WiFi + USB
+3. Le téléphone déploie le serveur VD et le streaming commence à 60fps
+4. Utilisez l'écran tactile de la voiture pour interagir avec les applications du téléphone
+
+## Compilation
+
+```bash
+# Compiler l'APK du téléphone (déclenche la compilation du serveur + intégration automatiquement)
+./gradlew :app-client:assembleDebug
+
+# Emplacement de l'APK :
+# app-client/build/outputs/apk/debug/app-client-debug.apk  (téléphone -- inclut l'APK de la voiture intégré)
+```
+
+Le système de compilation compile automatiquement app-server et l'intègre dans app-client, de sorte qu'un seul APK doit être installé manuellement.
+
+## Fonctionnement
+
+Lorsque le téléphone est connecté à la voiture :
+
+1. **La voiture démarre les pistes parallèles** — la découverte WiFi et la détection USB s'exécutent simultanément
+2. **Piste A (WiFi) :** IP de la passerelle + découverte mDNS → connexion NIO au port de contrôle du téléphone (9637)
+3. **Piste B (USB) :** analyse des périphériques → connexion USB ADB → lancement de l'application du téléphone via `am start`
+4. **Handshake :** la voiture envoie viewport + DPI + appVersionCode + targetFps ; le téléphone envoie les informations de l'appareil + vdServerJarPath
+5. **Vérification de version :** le téléphone compare appVersionCode — en cas d'incompatibilité, envoie le message UPDATING_CAR à la voiture, puis met à jour automatiquement via dadb
+6. **Configuration à 3 connexions :** la voiture ouvre les connexions vidéo (9638) + entrée (9639) après le handshake
+7. **Le téléphone déploie le serveur VD** — extrait vd-server.jar vers `/sdcard/DiLinkAuto/`, démarre `app_process` en tant qu'UID shell avec l'argument FPS
+8. **Le serveur VD se connecte en sens inverse** au téléphone sur localhost:19637 (NIO non bloquant)
+9. **Le serveur VD crée un VirtualDisplay** au DPI natif du téléphone (480dpi) avec réduction d'échelle GPU et redessin périodique
+10. **Streaming vidéo** via WiFi TCP (connexion vidéo 9638) — H.264, profil Main, 8Mbps CBR, configurable jusqu'à 60fps
+
+## Dépannage
+
+### La boîte de dialogue d'authentification ADB apparaît à chaque fois (CORRIGÉ dans la v0.13.1)
+Corrigé — le problème était le double hachage du AUTH_TOKEN. ADB envoie un jeton brut de 20 octets qui doit être traité comme un condensé SHA-1 pré-calculé. L'ancien code utilisait `SHA1withRSA` qui le hachait à nouveau. Il utilise maintenant `NONEwithRSA` avec le préfixe SHA-1 DigestInfo (pré-calculé), correspondant à `RSA_sign(NID_sha1)` d'AOSP. Le téléphone accepte AUTH_SIGNATURE lors de la reconnexion et « Toujours autoriser » persiste correctement.
+
+Si la boîte de dialogue apparaît encore lors de la première connexion après la mise à jour, cochez « Toujours autoriser » — elle ne devrait plus apparaître lors des connexions suivantes. Si elle persiste, vérifiez dans les Options pour développeurs du téléphone l'option « Désactiver le délai d'autorisation ADB » (Android 11+).
+
+### L'application du téléphone ne se lance pas
+- Assurez-vous que le Débogage USB est activé sur le téléphone
+- Vérifiez que le port USB de la voiture prend en charge le mode hôte (tous les ports ne le font pas)
+- Essayez un autre câble USB (certains câbles servent uniquement au chargement)
+
+### Autorisation d'accès à tous les fichiers refusée
+- L'application du téléphone a besoin de MANAGE_EXTERNAL_STORAGE pour déployer vd-server.jar vers `/sdcard/DiLinkAuto/`
+- Allez dans Paramètres -> Applications -> DiLink Auto -> Autorisations -> Accès à tous les fichiers -> ACTIVER
+
+### La vidéo ne diffuse pas / écran noir
+- Assurez-vous que le téléphone et la voiture sont sur le même réseau
+- Vérifiez que les deux applications sont en cours d'exécution (le téléphone affiche « Streaming », la voiture affiche la vidéo)
+- Le serveur VD peut avoir besoin d'un moment pour démarrer — attendez 5 à 10 secondes après la connexion
+- Le redessin périodique du SurfaceScaler devrait produire des images même sur du contenu statique
+- Vérifiez `/sdcard/DiLinkAuto/client.log` pour des informations de diagnostic
+
+### Coupures de connexion
+- Auparavant causé par des déconnexions réseau non liées (basculement des données mobiles) déclenchant une déconnexion proactive
+- Corrigé dans la v0.12.5 : le callback réseau intelligent ignore les déconnexions sur les réseaux qui ne transportent pas la connexion
+- Si le problème persiste, vérifiez `/sdcard/DiLinkAuto/client.log` pour les entrées « Network lost »
+
+### L'application de la voiture ne se met pas à jour
+- Le téléphone met automatiquement à jour l'application de la voiture lorsqu'une incompatibilité de version est détectée lors du handshake
+- La voiture affiche le statut « Mise à jour de l'application voiture... » pendant la mise à jour
+- Vous pouvez également déclencher manuellement une mise à jour avec le bouton « Installer sur la voiture » dans l'application du téléphone
+- Assurez-vous que dadb peut atteindre la voiture via WiFi ADB
+
+### Journaux
+- Journaux du téléphone : `/sdcard/DiLinkAuto/client.log` (session en cours)
+- Sessions précédentes : `/sdcard/DiLinkAuto/client-YYYYMMDD-HHmmss.log`
+- Journaux du serveur VD : `/data/local/tmp/vd-server.log` (sur le téléphone, lisibles via ADB)
+- Journaux de la voiture : acheminés vers client.log du téléphone via le canal DATA du protocole (tag : `CarLog`)
+- Récupérer les journaux : `adb shell "cat /sdcard/DiLinkAuto/client.log"`
+
+## Conseils pour HyperOS (Xiaomi)
+
+Pour un fonctionnement fiable sur HyperOS :
+1. Paramètres -> Applications -> DiLink Auto -> Démarrage automatique -> Activer
+2. Paramètres -> Batterie -> DiLink Auto -> Aucune restriction
+3. Épinglez l'application dans les Applications récentes (appui long sur la fiche -> Épingler)
+## Conseils pour Samsung One UI
+
+Les appareils Samsung sous One UI 5+ (Android 13+) disposent de fonctions de sécurité et d'économie d'énergie supplémentaires qui peuvent empêcher DiLink-Auto de fonctionner correctement. Cela s'applique aux séries Galaxy A, M, S, Z et Tab.
+
+### Désactiver Auto Blocker (critique pour USB ADB)
+
+**Auto Blocker** bloque les commandes USB et peut empêcher la voiture de se connecter à votre téléphone via USB ADB. C'est le problème le plus courant lié à Samsung.
+
+1. **Paramètres → Sécurité et confidentialité → Auto Blocker → Désactivé**
+2. Si vous préférez garder Auto Blocker activé, désactivez au moins l'option **"Bloquer les commandes par câble USB"**
+
+### Autoriser l'accès à tous les fichiers
+
+Le gestionnaire de permissions Samsung peut révoquer automatiquement les permissions des applications que vous n'avez pas ouvertes récemment :
+
+1. **Paramètres → Applications → DiLink Auto → Autorisations → Fichiers et médias → Autoriser la gestion de tous les fichiers**
+2. Activez **"Autoriser la gestion de tous les fichiers"**
+3. Vérifiez qu'il reste ACTIVÉ après avoir fermé les paramètres (Samsung peut afficher une confirmation)
+
+### Désactiver l'optimisation de la batterie
+
+La gestion de la batterie de Samsung est plus agressive que celle d'Android standard :
+
+1. **Paramètres → Applications → DiLink Auto → Batterie → Illimitée**
+2. **Paramètres → Batterie → Limites d'utilisation en arrière-plan → Applications jamais en veille → Ajouter DiLink Auto**
+3. **Paramètres → Batterie → Limites d'utilisation en arrière-plan → Applications en veille profonde → Supprimer DiLink Auto** si listée
+
+### Verrouiller l'application dans les Récentes
+
+One UI de Samsung peut tuer les applications en arrière-plan pour libérer de la mémoire :
+
+1. Ouvrez les Applications récentes (glissez vers le haut depuis le bas avec navigation à 3 boutons ou par gestes)
+2. Appuyez sur l'icône DiLink Auto en haut de sa carte
+3. Sélectionnez **"Garder ouvert"**
+
+### Désactiver l'optimisation automatique de Samsung Device Care
+
+Device Care de Samsung peut arrêter automatiquement les services en arrière-plan :
+
+1. **Paramètres → Batterie et entretien de l'appareil → Automatisation → Optimisation quotidienne automatique → Désactivé**
+2. **Paramètres → Batterie et entretien de l'appareil → Automatisation → Redémarrage automatique → Désactivé**
+
+### Si vous voyez un popup d'autorisation "DeX"
+
+Certains appareils Samsung affichent un popup concernant "Samsung DeX" ou les autorisations "d'affichage externe" lorsqu'une application tente de créer un affichage virtuel. Même si les séries Galaxy A/M ne prennent pas en charge DeX, la boîte de dialogue peut apparaître. Appuyez simplement sur **"Autoriser"** ou **"Démarrer maintenant"**. Si la boîte de dialogue réapparaît, allez dans **Paramètres → Appareils connectés → Samsung DeX** et désactivez "Démarrage automatique lorsque HDMI est connecté".
+
+### Considérations de sécurité Knox
+
+Samsung Knox peut afficher une notification de sécurité lorsque DiLink-Auto accède à :
+- La surface d'affichage virtuel (pour l'encodage vidéo)
+- Le pont de débogage USB (pour la connexion ADB de la voiture)
+- Le stockage de tous les fichiers (pour le déploiement du serveur VD)
+
+Ces comportements sont normaux. Appuyez sur "Autoriser" ou "OK" sur toute invite liée à Knox. Si les invites persistent, vous pouvez temporairement abaisser la protection Knox à "Moyen" sous **Paramètres → Sécurité et confidentialité → Samsung Knox**.

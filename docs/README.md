@@ -1,15 +1,30 @@
 # DiLink-Auto
 
-**v0.13.1** — Use your phone apps on your car's built-in screen. Open-source, no Google Services required.
+Use your phone apps on your car's built-in screen. Open-source, no Google Services required.
 
 An open-source alternative to Android Auto for **any Android 10+ phone** paired with **BYD DiLink 3.0+** infotainment systems. Originally motivated by the Xiaomi HyperOS / Chinese ROM gap, but works universally.
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/andersonlucasg3)
 [![Pix](https://img.shields.io/badge/Pix-Brazil-00C2A0)](https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d)
 
+## Documentation / Documentação / Документация / Documentatio / Hujjatlar
+
+GitHub does **not** automatically show documentation in the user's language. Select your language below:
+
+| Language | README | Setup | Architecture | Client | Server | Protocol | Progress |
+|----------|--------|-------|-------------|--------|--------|----------|----------|
+| English | [README](./README.md) | [Setup](./setup.md) | [Arch](./architecture.md) | [Client](./client.md) | [Server](./server.md) | [Proto](./protocol.md) | [Progress](./progress.md) |
+| Português (BR) | [README](./pt-BR/README.md) | [Setup](./pt-BR/setup.md) | [Arch](./pt-BR/architecture.md) | [Client](./pt-BR/client.md) | [Server](./pt-BR/server.md) | [Proto](./pt-BR/protocol.md) | [Progress](./pt-BR/progress.md) |
+| Français | [README](./fr/README.md) | [Setup](./fr/setup.md) | [Arch](./fr/architecture.md) | [Client](./fr/client.md) | [Server](./fr/server.md) | [Proto](./fr/protocol.md) | [Progress](./fr/progress.md) |
+| Русский | [README](./ru/README.md) | [Setup](./ru/setup.md) | [Arch](./ru/architecture.md) | [Client](./ru/client.md) | [Server](./ru/server.md) | [Proto](./ru/protocol.md) | [Progress](./ru/progress.md) |
+| Беларуская | [README](./be/README.md) | [Setup](./be/setup.md) | [Arch](./be/architecture.md) | [Client](./be/client.md) | [Server](./be/server.md) | [Proto](./be/protocol.md) | [Progress](./be/progress.md) |
+| Қазақша | [README](./kk/README.md) | [Setup](./kk/setup.md) | [Arch](./kk/architecture.md) | [Client](./kk/client.md) | [Server](./kk/server.md) | [Proto](./kk/protocol.md) | [Progress](./kk/progress.md) |
+| Українська | [README](./uk/README.md) | [Setup](./uk/setup.md) | [Arch](./uk/architecture.md) | [Client](./uk/client.md) | [Server](./uk/server.md) | [Proto](./uk/protocol.md) | [Progress](./uk/progress.md) |
+| Oʻzbekcha | [README](./uz/README.md) | [Setup](./uz/setup.md) | [Arch](./uz/architecture.md) | [Client](./uz/client.md) | [Server](./uz/server.md) | [Proto](./uz/protocol.md) | [Progress](./uz/progress.md) |
+
 ## What It Does
 
-DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at 60fps, 12Mbps, with the phone's screen turned off to save battery.
+DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at up to 60fps, 8Mbps CBR, with the phone's screen turned off to save battery.
 
 **Original motivation:** bridging the gap when your phone can't run Android Auto (Chinese ROM, no Google Play Services) but your car only supports Android Auto (no CarWith, CarPlay, or Carlife). But DiLink-Auto works with any Android phone — Google Services or not.
 
@@ -17,6 +32,7 @@ DiLink-Auto mirrors your phone apps onto your car's display with full touch inte
 |--------|-------|
 | Xiaomi 17 Pro Max (HyperOS 3, Chinese ROM) | No Android Auto — no Google Play Services |
 | BYD Destroyer 05 / King (Brazil market) | Only Android Auto on head unit |
+| Samsung Galaxy (One UI 5+) | Auto Blocker blocks USB ADB, aggressive battery restrictions |
 | Any Android 10+ phone | Works regardless of ROM or Play Services |
 
 ## Requirements
@@ -31,6 +47,8 @@ DiLink-Auto mirrors your phone apps onto your car's display with full touch inte
 - One free USB-A port
 
 **Phone hotspot must be enabled** — the car connects to your phone's WiFi hotspot. No pairing codes, no Google account needed.
+
+**No internet connection required.** DiLink-Auto streams everything locally over your phone's WiFi hotspot — the car and phone talk directly to each other. An internet connection is only needed for the apps running on your phone (e.g., navigation, music streaming), not for DiLink-Auto itself.
 
 ## How It Works
 
@@ -54,12 +72,12 @@ Download the latest release or build from source:
 4. **Open DiLink-Auto** on the phone and grant All Files Access when prompted
 5. **Enable hotspot, then plug into car USB** — the car app auto-installs on first run over WiFi ADB
 
-The car APK and VD server JAR are bundled inside the phone APK — you never install anything on the car yourself.
+The car APK and VD server JAR are bundled inside the phone APK — you never install anything on the car yourself, and no internet connection is needed to install the car app. Just connect your phone to the car's USB port and tap "Install on Car."
 
 ## Current Status
 
 **Working:**
-- 60fps H.264 video streaming (12Mbps CBR, High profile)
+- 60fps H.264 video streaming (8Mbps CBR, Main profile, configurable via handshake)
 - Full touch input (multi-touch, pinch-to-zoom)
 - App launcher with search, alphabetical sort, 64dp icons
 - Notifications on car screen with progress bars, tap to open
@@ -67,17 +85,20 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 - Auto-update: phone detects outdated car app and updates it over WiFi ADB
 - Phone screen off during streaming (battery saving)
 - Guided onboarding for all required permissions
-- Internationalization: English, Portuguese, Russian, Belarusian, Kazakh, Ukrainian, Uzbek
+- Internationalization: English, Portuguese, Russian, Belarusian, French, Kazakh, Ukrainian, Uzbek
 - Display restore after USB disconnect (v0.14.0+)
 - Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
 
 **Coming:** audio streaming, media controls, navigation widgets
 
 **Known limitations:**
+- Samsung Auto Blocker must be disabled for USB ADB (Settings → Security → Auto Blocker → Off).
+- Samsung battery management requires explicit exemption (see [Setup Guide](./setup.md#samsung-one-ui-tips)).
+- Samsung Knox may show security prompts on first virtual display access.
 - VD server process restarts on USB disconnect (reconnects automatically).
 - Hotspot must be enabled manually (Android 16 limitation).
 - Occasional visual artifacts — decoder restart race, recovers at next keyframe (~1s).
-- Streaming latency ~100-200ms under load. CBR 12Mbps.
+- Streaming latency ~100-200ms under load. CBR 8Mbps.
 - Display may stay off after abrupt USB disconnect (fixed in v0.14.0).
 - **Some apps don't fill the screen (letterboxed/portrait-only).** DiLink-Auto mirrors a landscape virtual display to the car screen. Apps that don't support landscape orientation will appear letterboxed or narrow — this is entirely controlled by each app, not by DiLink-Auto. Nothing can be done from the mirroring side.
 
@@ -114,19 +135,37 @@ This project is developed independently and relies on community support. Every c
 
 PRs welcome. See [Architecture](./architecture.md) and [Protocol](./protocol.md) for technical context. Build with `./gradlew :app-client:assembleDebug` (JDK 17+, Android SDK 34).
 
-### Branching Model (Git-Flow)
+### Branching Model (Git-Flow + Issue Types)
 
-| Branch | Purpose | CI |
-|--------|---------|----|
-| `main` | Stable releases | Builds signed release APK, auto-creates release on version tag |
-| `develop` | Active development | Builds debug APK, updates prerelease for in-app dev updates |
-| `feature/*` | New features | Merge to `develop` via PR |
-| `fix/*` | Bug fixes | Merge to `develop` via PR |
-| `release/*` | Release preparation | Merge to `main` → triggers release |
+Branches are created automatically by the issue agent based on the **issue template** used:
 
-**Release process:** Create a `release/vX.Y.Z` branch from `develop`, bump version, merge into `main`. Push a `vX.Y.Z` tag and CI creates a signed GitHub Release. Then merge `main` back into `develop` to sync the release version and any hotfixes.
+| Template | Label | Branch Pattern | Purpose |
+|----------|-------|---------------|---------|
+| Bug Fix | `bug` | `fix/N-agent` | Bug fixes |
+| New Feature | `feature` | `feature/N-agent` | New features |
+| Investigation | `investigation` | `investigate/N-agent` | Codebase investigation |
+| Documentation | `documentation` | `docs/N-agent` | Documentation updates |
+| Release | `release` | `release/vX.Y.Z` | Release preparation |
+| Agent Task (generic) | — | `issue/N-agent` | Catch-all |
 
-**Debug build updates:** Debug builds check for the latest prerelease from `develop`. To push a dev update, merge your changes to `develop` — CI creates a prerelease that debug builds detect as an update.
+All branches merge to `develop` via PR, except `release/*` which targets `main`.
+
+### CI Workflows
+
+| Workflow | Trigger | Action |
+|----------|---------|--------|
+| `build.yml` | Push/PR to `main` | Validation: build release APK |
+| `build-develop.yml` | Push/PR to `develop`, `release/*` | Validation: build debug APK |
+| `build-pre-release.yml` | Tag `vX.Y.Z-dev-NN` | Build debug APK + GitHub pre-release |
+| `build-release.yml` | Tag `vX.Y.Z` | Build signed release APK + GitHub Release |
+| `sync-main-to-develop.yml` | Push to `main` | Merge `main` → `develop` (git-flow back-sync) |
+| `issue-agent.yml` | Issue opened / comment | Autonomous agent: branch, build, PR |
+
+All CI runs on **self-hosted WSL runners**.
+
+**Release process:** Create a Release issue from the template. The agent creates `release/vX.Y.Z`, prepares changes, and tags `vX.Y.Z-dev-NN`. Pushing the release branch triggers `build-pre-release.yml`, which finds the `-dev` tag on the commit via `git tag --points-at HEAD` and publishes a pre-release. When ready, `release/vX.Y.Z` is merged to `main` with a `vX.Y.Z` tag on the merge commit. The push to `main` triggers `build-release.yml` (builds signed APK + creates GitHub Release) and `sync-main-to-develop.yml` (auto-merges `main` back into `develop`).
+
+**Pre-release updates:** Users on the Pre-release channel receive `-dev` builds. Users on the Release channel receive stable builds only. The channel is configurable in Settings.
 
 ## License
 

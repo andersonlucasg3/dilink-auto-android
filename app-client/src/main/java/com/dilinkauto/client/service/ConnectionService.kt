@@ -41,7 +41,9 @@ class ConnectionService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var connectionLoopJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var networkChangeDebounce: Job? = null
     private var autoUpdateAttempted = false
+    private var autoUpdateFailedAt = 0L
 
     enum class State { IDLE, WAITING, CONNECTED, STREAMING }
 
@@ -59,12 +61,25 @@ class ConnectionService : Service() {
         UpdateManager.checkForUpdate(force = false)
     }
 
+    @Volatile
+    private var assetsReady = false
+
     private fun deployAssets() {
         serviceScope.launch(Dispatchers.IO) {
             val dir = java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
             dir.mkdirs()
             extractAsset("vd-server.jar", java.io.File(dir, "vd-server.jar"))
             extractAsset("app-server.apk", java.io.File(filesDir, "app-server.apk"))
+            assetsReady = true
+        }
+    }
+
+    private suspend fun ensureAssetsReady() {
+        if (assetsReady) return
+        val apkFile = java.io.File(filesDir, "app-server.apk")
+        repeat(50) {
+            if (apkFile.exists()) return
+            delay(100)
         }
     }
 
@@ -98,6 +113,7 @@ class ConnectionService : Service() {
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 FileLog.i(TAG, "Network available: $network")
+                networkChangeDebounce?.cancel()
                 val state = _serviceState.value
                 if (state == State.WAITING) {
                     FileLog.i(TAG, "New network while WAITING — restarting listen loop")
@@ -113,14 +129,23 @@ class ConnectionService : Service() {
                 if (conn != null && conn.isConnected) {
                     val cm2 = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
                     val activeNet = cm2.activeNetwork
-                    // If the active network is still up, our connection is fine
+                    // If another network is still active and our connection has it, ignore
                     if (activeNet != null && activeNet != network) {
                         FileLog.i(TAG, "Network lost: $network (not our active network $activeNet — ignoring)")
                         return
                     }
                 }
-                FileLog.i(TAG, "Network lost: $network — affects our connection")
-                resetConnectionForNetworkChange()
+                FileLog.i(TAG, "Network lost: $network — debouncing before reacting")
+                // Debounce: delay 3s before reacting to transient network flaps.
+                // 4G changes can cause brief hotspot resets that recover immediately.
+                networkChangeDebounce?.cancel()
+                networkChangeDebounce = serviceScope.launch {
+                    delay(3000)
+                    if (controlConnection?.isConnected != true) {
+                        FileLog.i(TAG, "Network lost confirmed — resetting connection")
+                    }
+                    resetConnectionForNetworkChange()
+                }
             }
         }
         cm.registerNetworkCallback(request, callback)
@@ -169,6 +194,9 @@ class ConnectionService : Service() {
     // ─── Connection Loop ───
 
     private fun startConnectionLoop() {
+        // Reset auto-update state on explicit start — gives user a fresh chance
+        autoUpdateAttempted = false
+        autoUpdateFailedAt = 0L
         connectionLoopJob?.cancel()
         connectionLoopJob = serviceScope.launch {
             // Register mDNS in background — don't block the listen loop.
@@ -316,10 +344,9 @@ class ConnectionService : Service() {
         FileLog.i(TAG, "Car display: ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi fps=${request.targetFps}")
         targetFps = request.targetFps
 
-        val phoneDpi = resources.displayMetrics.densityDpi
+        val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
         val dpiScale = phoneDpi.toFloat() / 160f
-        val targetSwDp = 600
-        val minHeightPx = (targetSwDp * dpiScale).toInt()
+        val minHeightPx = (VideoConfig.TARGET_SW_DP * dpiScale).toInt()
         val carAspect = request.screenWidth.toFloat() / request.screenHeight
         val scaledH = minHeightPx and 0x7FFFFFFE.toInt()
         val scaledW = ((scaledH * carAspect).toInt()) and 0x7FFFFFFE.toInt()
@@ -348,7 +375,10 @@ class ConnectionService : Service() {
             val carVersion = request.appVersionCode
             @Suppress("DEPRECATION")
             val myVersion = packageManager.getPackageInfo(packageName, 0).versionCode
-            val needsUpdate = carVersion < myVersion && !autoUpdateAttempted
+            // Skip auto-update if a previous attempt failed recently (5min cooldown)
+            val updateCooldown = autoUpdateFailedAt > 0L &&
+                System.currentTimeMillis() - autoUpdateFailedAt < 5 * 60 * 1000L
+            val needsUpdate = carVersion < myVersion && !autoUpdateAttempted && !updateCooldown
 
             if (needsUpdate) {
                 // ─── UPDATE FLOW ───
@@ -370,7 +400,7 @@ class ConnectionService : Service() {
                 // Do NOT start VD wait or send app list — the car will restart after update.
                 autoUpdateAttempted = true
                 FileLog.i(TAG, "Car app outdated (v$carVersion < v$myVersion) — updating, then waiting for reconnect")
-                _installStatusStatic.value = "Updating car app (v$carVersion → v$myVersion)..."
+                _installStatusStatic.value = getString(R.string.status_auto_update, carVersion.toString(), myVersion.toString())
                 autoUpdateCarApp(conn)
                 // autoUpdateCarApp restarts the car app — it will reconnect with the new version.
                 // We disconnect and go back to WAITING.
@@ -435,6 +465,10 @@ class ConnectionService : Service() {
             if (client.acceptConnection(port)) {
                 vdClient = client
                 FileLog.i(TAG, "VD server connected (displayId=${client.displayId})")
+                // Configure accessibility service for direct touch injection on the VD.
+                // The VD server's IInputManager.injectInputEvent requires INJECT_EVENTS
+                // permission, which shell UID (2000) lacks on many production devices.
+                InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
                 withContext(Dispatchers.Main) {
                     _serviceState.value = State.STREAMING
                     updateNotification(R.string.notification_streaming)
@@ -457,6 +491,7 @@ class ConnectionService : Service() {
     private fun autoUpdateCarApp(@Suppress("UNUSED_PARAMETER") conn: Connection) {
         serviceScope.launch(Dispatchers.IO) {
             try {
+                ensureAssetsReady()
                 val apkFile = java.io.File(filesDir, "app-server.apk")
                 if (!apkFile.exists()) {
                     FileLog.w(TAG, "Auto-update: car APK not found")
@@ -472,7 +507,7 @@ class ConnectionService : Service() {
                 }
 
                 FileLog.i(TAG, "Auto-updating car app at $carIp:5555...")
-                _installStatusStatic.value = "Connecting to car ADB..."
+                _installStatusStatic.value = getString(R.string.car_install_status_connecting_to, carIp)
                 val privKey = java.io.File(filesDir, "adbkey")
                 val pubKey = java.io.File(filesDir, "adbkey.pub")
                 if (!privKey.exists()) {
@@ -480,7 +515,27 @@ class ConnectionService : Service() {
                     AdbKeyPair.generate(privKey, pubKey)
                 }
                 val keyPair = AdbKeyPair.read(privKey, pubKey)
-                val dadb = Dadb.create(carIp, 5555, keyPair)
+
+                val dadbExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+                val dadb: Dadb? = try {
+                    val future = dadbExecutor.submit<Dadb> {
+                        Dadb.create(carIp, 5555, keyPair)
+                    }
+                    try {
+                        future.get(15, java.util.concurrent.TimeUnit.SECONDS)
+                    } catch (e: java.util.concurrent.TimeoutException) {
+                        FileLog.w(TAG, "Auto-update Dadb.create() timed out — will retry in 5min")
+                        null
+                    }
+                } finally {
+                    dadbExecutor.shutdownNow()
+                }
+
+                if (dadb == null) {
+                    _installStatusStatic.value = getString(R.string.car_install_status_auth_needed)
+                    autoUpdateFailedAt = System.currentTimeMillis()
+                    return@launch
+                }
 
                 try {
                     _installStatusStatic.value = "Pushing car APK..."
@@ -490,18 +545,21 @@ class ConnectionService : Service() {
                     val result = dadb.shell("pm install -r $remotePath").allOutput
                     FileLog.i(TAG, "Auto-update result: ${result.trim()}")
                     if (result.contains("Success")) {
-                        _installStatusStatic.value = "Car app updated! Restarting..."
+                        _installStatusStatic.value = getString(R.string.status_auto_update_complete)
                         FileLog.i(TAG, "Car app auto-updated — restarting")
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
                     } else {
-                        _installStatusStatic.value = "Update failed: ${result.trim()}"
+                        _installStatusStatic.value = getString(R.string.status_update_failed, result.trim())
+                        autoUpdateFailedAt = System.currentTimeMillis()
+                        FileLog.w(TAG, "Auto-update failed: ${result.trim()} — will retry in 5min")
                     }
                 } finally {
                     dadb.close()
                 }
             } catch (e: Exception) {
-                _installStatusStatic.value = "Auto-update failed: ${e.message}"
-                FileLog.e(TAG, "Auto-update failed: ${e.message}")
+                _installStatusStatic.value = getString(R.string.status_auto_update_failed, e.message ?: "unknown")
+                autoUpdateFailedAt = System.currentTimeMillis()
+                FileLog.e(TAG, "Auto-update failed: ${e.message} — will retry in 5min")
             }
         }
     }
@@ -528,35 +586,52 @@ class ConnectionService : Service() {
             FileLog.i(TAG, "handleInputFrame #$inputFrameCount type=0x${frame.messageType.toString(16)} vdClient=${client != null} connected=${client?.isConnected}")
         }
 
-        // Batched MOVE: all pointers in one message
-        if (frame.messageType == InputMsg.TOUCH_MOVE_BATCH) {
-            if (client != null && client.isConnected) {
+        // Use VD server direct injection if IInputManager is available (low latency),
+        // otherwise fall back to accessibility gestures (guaranteed to work).
+        val useDirect = client != null && client.isConnected && client.hasDirectInjection
+        val cl = if (useDirect) client!! else null
+
+        try {
+            if (frame.messageType == InputMsg.TOUCH_MOVE_BATCH) {
                 val batch = TouchMoveBatch.decode(frame.payload)
+                if (cl != null) {
+                    val w = vdWidth
+                    val h = vdHeight
+                    for (p in batch.pointers) {
+                        cl.touch(1, p.pointerId, (p.x * w).toInt(), (p.y * h).toInt(), p.pressure)
+                    }
+                } else {
+                    for (p in batch.pointers) {
+                        InputInjectionService.instance?.injectTouch(TouchEvent(
+                            action = InputMsg.TOUCH_MOVE,
+                            pointerId = p.pointerId,
+                            x = p.x, y = p.y,
+                            pressure = p.pressure,
+                            timestamp = p.timestamp
+                        ))
+                    }
+                }
+                return
+            }
+
+            val event = TouchEvent.decode(frame.payload)
+            if (cl != null) {
                 val w = vdWidth
                 val h = vdHeight
-                for (p in batch.pointers) {
-                    client.touch(1, p.pointerId, (p.x * w).toInt(), (p.y * h).toInt(), p.pressure)
+                val pixelX = (event.x * w).toInt()
+                val pixelY = (event.y * h).toInt()
+                val action = when (event.action) {
+                    InputMsg.TOUCH_DOWN -> 0
+                    InputMsg.TOUCH_MOVE -> 1
+                    InputMsg.TOUCH_UP -> 2
+                    else -> return
                 }
+                cl.touch(action, event.pointerId, pixelX, pixelY, event.pressure)
+            } else {
+                InputInjectionService.instance?.injectTouch(event)
             }
-            return
-        }
-
-        val event = TouchEvent.decode(frame.payload)
-        if (client != null && client.isConnected) {
-            val w = vdWidth
-            val h = vdHeight
-            val pixelX = (event.x * w).toInt()
-            val pixelY = (event.y * h).toInt()
-
-            val action = when (event.action) {
-                InputMsg.TOUCH_DOWN -> 0
-                InputMsg.TOUCH_MOVE -> 1
-                InputMsg.TOUCH_UP -> 2
-                else -> return
-            }
-            client.touch(action, event.pointerId, pixelX, pixelY, event.pressure)
-        } else {
-            InputInjectionService.instance?.injectTouch(event)
+        } catch (e: Exception) {
+            FileLog.e(TAG, "handleInputFrame error type=0x${frame.messageType.toString(16)}: ${e.message}", e)
         }
     }
 
@@ -566,28 +641,30 @@ class ConnectionService : Service() {
 
     fun installCarApp(explicitIp: String? = null) {
         serviceScope.launch(Dispatchers.IO) {
+            var keepStatus = false
             try {
+                ensureAssetsReady()
                 val apkFile = java.io.File(filesDir, "app-server.apk")
                 if (!apkFile.exists()) {
-                    _installStatus.value = "Car APK not found"
+                    _installStatus.value = getString(R.string.car_install_status_car_apk_not_found)
                     FileLog.w(TAG, "No embedded car APK")
                     return@launch
                 }
 
-                _installStatus.value = if (explicitIp != null) "Connecting to $explicitIp..." else "Searching for car..."
+                _installStatus.value = if (explicitIp != null) getString(R.string.car_install_status_connecting_to, explicitIp) else getString(R.string.car_install_status_searching)
                 val carIp = if (!explicitIp.isNullOrBlank()) {
                     if (probePort(explicitIp, 5555)) explicitIp else {
-                        _installStatus.value = "$explicitIp not reachable on port 5555"
+                        _installStatus.value = getString(R.string.car_install_status_not_reachable, explicitIp)
                         null
                     }
                 } else findCarAdb()
                 if (carIp == null) {
-                    _installStatus.value = "Car not found. Plug into USB or check WiFi ADB."
+                    _installStatus.value = getString(R.string.car_install_status_car_not_found)
                     FileLog.w(TAG, "Could not find car ADB on USB or network")
                     return@launch
                 }
 
-                _installStatus.value = "Connecting to $carIp..."
+                _installStatus.value = getString(R.string.car_install_status_connecting_to, carIp)
                 FileLog.i(TAG, "Connecting to car ADB at $carIp:5555")
                 val privKey = java.io.File(filesDir, "adbkey")
                 val pubKey = java.io.File(filesDir, "adbkey.pub")
@@ -596,10 +673,34 @@ class ConnectionService : Service() {
                     AdbKeyPair.generate(privKey, pubKey)
                 }
                 val keyPair = AdbKeyPair.read(privKey, pubKey)
-                val dadb = Dadb.create(carIp, 5555, keyPair)
+
+                // Dadb.create() does blocking socket I/O that coroutine cancellation
+                // cannot interrupt. Use Future.get(timeout) for reliable timeout.
+                FileLog.d(TAG, "Attempting Dadb.create() (15s timeout)...")
+                val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+                val dadb: Dadb? = try {
+                    val future = executor.submit<Dadb> {
+                        Dadb.create(carIp, 5555, keyPair)
+                    }
+                    try {
+                        future.get(15, java.util.concurrent.TimeUnit.SECONDS)
+                    } catch (e: java.util.concurrent.TimeoutException) {
+                        FileLog.w(TAG, "Dadb.create() timed out after 15s — likely waiting for car auth dialog")
+                        null
+                    }
+                } finally {
+                    executor.shutdownNow()
+                }
+
+                if (dadb == null) {
+                    _installStatus.value = getString(R.string.car_install_status_auth_needed)
+                    keepStatus = true
+                    return@launch
+                }
+                FileLog.d(TAG, "Dadb.create() succeeded")
 
                 try {
-                    _installStatus.value = "Checking version..."
+                    _installStatus.value = getString(R.string.car_install_status_checking_version)
                     val versionOutput = dadb.shell(
                         "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionCode"
                     ).allOutput
@@ -610,32 +711,37 @@ class ConnectionService : Service() {
                     FileLog.i(TAG, "Car app: installed=v$installedVersion, embedded=v$myVersion")
 
                     if (installedVersion >= myVersion) {
-                        _installStatus.value = "Already up-to-date (v$installedVersion)"
+                        _installStatus.value = getString(R.string.car_install_status_already_up_to_date, installedVersion.toString())
                         return@launch
                     }
 
-                    _installStatus.value = "Pushing APK (${apkFile.length() / 1024 / 1024}MB)..."
+                    _installStatus.value = getString(R.string.car_install_status_pushing_apk, apkFile.length() / 1024 / 1024)
                     val remotePath = "/data/local/tmp/app-server.apk"
                     dadb.push(apkFile, remotePath)
                     FileLog.i(TAG, "Car APK pushed (${apkFile.length()} bytes)")
 
-                    _installStatus.value = "Installing v$myVersion..."
+                    _installStatus.value = getString(R.string.car_install_status_installing_version, myVersion.toString())
                     val result = dadb.shell("pm install -r $remotePath").allOutput
                     FileLog.i(TAG, "Install result: ${result.trim()}")
 
                     if (result.contains("Success")) {
-                        _installStatus.value = "Launching car app..."
+                        _installStatus.value = getString(R.string.car_install_status_launching_car_app)
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
-                        _installStatus.value = "Car app v$myVersion installed!"
+                        _installStatus.value = getString(R.string.car_install_status_car_installed, myVersion.toString())
                     } else {
-                        _installStatus.value = "Failed: ${result.trim()}"
+                        _installStatus.value = getString(R.string.car_install_status_failed, result.trim())
                     }
                 } finally {
                     dadb.close()
                 }
             } catch (e: Exception) {
-                _installStatus.value = "Error: ${e.message}"
+                _installStatus.value = getString(R.string.car_install_status_error, e.message ?: "unknown")
                 FileLog.e(TAG, "Car app install failed", e)
+            } finally {
+                if (!keepStatus) {
+                    delay(5000)
+                    _installStatus.value = ""
+                }
             }
         }
     }
@@ -686,7 +792,7 @@ class ConnectionService : Service() {
         for (prefix in prefixes) {
             FileLog.i(TAG, "Scanning $prefix.0/24 for ADB...")
             val startMs = System.currentTimeMillis()
-            val result = probeSubnetConcurrent(prefix, ownIp = "", maxConcurrent = 32)
+            val result = probeSubnetConcurrent(prefix, ownIps = subnetIps, maxConcurrent = 32)
             val elapsed = System.currentTimeMillis() - startMs
             if (result != null) {
                 FileLog.i(TAG, "Found car ADB at $result ($prefix.0/24, ${elapsed}ms)")
@@ -734,10 +840,11 @@ class ConnectionService : Service() {
      * This finds the car reliably regardless of its DHCP-assigned IP.
      */
     private suspend fun probeSubnetConcurrent(
-        prefix: String, ownIp: String, maxConcurrent: Int = 32
+        prefix: String, ownIps: List<String>, maxConcurrent: Int = 32
     ): String? = coroutineScope {
-        // Skip .0 (network) and .255 (broadcast)
-        val ips = (1..254).map { "$prefix.$it" }.filter { it != ownIp }
+        // Skip .0 (network) and .255 (broadcast), and own IPs
+        val ownIpSet = ownIps.toSet()
+        val ips = (1..254).map { "$prefix.$it" }.filter { it !in ownIpSet }
         ips.chunked(maxConcurrent).forEach { batch ->
             val results = batch.map { ip ->
                 async(Dispatchers.IO) { if (probePortRaw(ip, 5555)) ip else null }
@@ -804,7 +911,7 @@ class ConnectionService : Service() {
                     val iconPng = try {
                         val drawable = info.loadIcon(pm)
                         val bitmap = android.graphics.Bitmap.createBitmap(
-                            96, 96, android.graphics.Bitmap.Config.ARGB_8888
+                            96, 96, android.graphics.Bitmap.Config.RGB_565
                         )
                         val canvas = android.graphics.Canvas(bitmap)
                         drawable.setBounds(0, 0, 96, 96)
@@ -856,6 +963,8 @@ class ConnectionService : Service() {
         vdWaitJob = null
         vdClient?.disconnect()
         vdClient = null
+        // Clear stuck pointers from any interrupted touch session
+        InputInjectionService.instance?.clearVirtualDisplay()
         videoConnection?.disconnect()
         videoConnection = null
         inputConnection?.disconnect()
@@ -863,7 +972,6 @@ class ConnectionService : Service() {
         controlConnection?.disconnect()
         controlConnection = null
         activeConnection = null
-        autoUpdateAttempted = false
         _serviceState.value = State.WAITING
     }
 
@@ -897,7 +1005,7 @@ class ConnectionService : Service() {
             .setContentText(getString(messageRes))
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPi)
+            .addAction(android.R.drawable.ic_media_pause, getString(R.string.notification_action_stop), stopPi)
             .build()
     }
 

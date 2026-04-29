@@ -15,6 +15,16 @@ States: IDLE → CONNECTING → CONNECTED → STREAMING
 
 Car APK is embedded in the phone APK. The phone auto-updates the car app via dadb when version mismatch is detected during handshake. Car receives `UPDATING_CAR` message and shows status instead of reconnecting blindly.
 
+### Two-Mode UI
+
+The car app separates the connection flow from the streaming experience into two distinct modes, matching the phone app's approach:
+
+- **Launch mode** (`CarLaunchScreen`): Full-screen, connection-focused. Shows branding, step-by-step connection instructions, connection status, and manual IP entry. No navigation bar — the entire screen is dedicated to getting connected. Shown when the car app starts and remains until app icons are received from the phone via the control connection.
+
+- **Streaming mode** (`CarShell` with `PersistentNavBar`): The familiar layout with left navigation bar (notifications, home, back, recent apps) and content area (app grid, mirror view, notifications). Shown once `appList` is non-empty and the state is CONNECTED or STREAMING.
+
+The transition trigger: when the phone sends `APP_LIST` via the control connection and the connection state reaches CONNECTED/STREAMING, the UI switches from launch mode to streaming mode.
+
 ## Components
 
 ### CarConnectionService
@@ -56,6 +66,12 @@ Foreground service managing the full connection lifecycle with a parallel prereq
 - Skips video/input connection attempts and reconnect loop during update
 - After `pm install -r`, car app restarts fresh
 
+**State Flows:**
+- `_state`, `_phoneName`, `_appList`, `_notifications`, `_mediaMetadata`, `_playbackState`: primary state exposed to UI
+- `_videoReady`: true when first non-config video frame arrives
+- `_statusMessage`: human-readable status for UI display
+- `_vdStackEmpty` (SharedFlow): emitted when phone reports VD has no activities (triggers navigation to home)
+
 **VD Server Launch:**
 - `deployVdServer()`: `shellNoWait` with CLASSPATH from handshake's vdServerJarPath
 - Args: `W H DPI PORT EW EH FPS` — FPS passed from handshake's targetFps
@@ -74,24 +90,46 @@ Foreground service managing the full connection lifecycle with a parallel prereq
 
 H.264 decoder using MediaCodec with Surface output (GPU-direct rendering).
 
-- Frame queue: 30 frames (500ms at 60fps) — buffers startup race and network jitter
+- Frame queue: 15 frames — buffers startup race and network jitter
 - `onFrameReceived()`: queues frames even before `start()` is called
 - `start()`: feeds cached CONFIG first, then drains queue
-- Drop-oldest on queue full, with keyframe tracking (logs dropped keyframes separately)
-- `KEY_LOW_LATENCY = 1` for minimum decode delay
+- Drop-oldest on queue full: prefers dropping P-frames, evicts queued P-frames for keyframes/CONFIG
+- `KEY_LOW_LATENCY = 1`, `KEY_PRIORITY = 0` for minimum decode delay
 - CONFIG (SPS/PPS) cached and replayed on decoder restart
 - `isRunning` property for early start coordination
 - `logSink` callback routes all decoder logs to phone via carLogSend
-- Catchup mode: when queue exceeds 100ms of frames, skips every other non-keyframe (2x speed) to stay realtime
+- Catchup mode: four graduated speedup zones based on queue depth — normal (0-6 frames), gentle 1.5x (7-12 frames, skips 1 of 3 non-keyframes), medium 2x (13-20 frames, skips 1 of 2), aggressive 3x (21+ frames, skips 2 of 3). Keyframes never skipped.
+- Flushes codec and re-feeds CONFIG on 10+ consecutive dequeueInputBuffer drops
+
+### ServerApp
+
+Application class. Creates notification channel `dilinkauto_car_service` with `IMPORTANCE_LOW`.
+
+### RemoteAdbController
+
+Direct ADB client using dadb library. Provides tap, swipe, back, home, and app launch via shell commands on the virtual display. Used as an alternative input path.
+
+### CarLaunchScreen
+
+Full-screen connection-focused composable shown before the phone connection is established — no nav bar, no app grid.
+
+- DiLink Auto branding (icon, title, tagline)
+- Connection status card with colored indicator dot (green=streaming, orange=connected/connecting, gray=idle) and live status text
+- "How to connect" instructions: 4 numbered steps (enable hotspot, plug USB, open phone app, wait for auto-connect)
+- Manual IP entry for direct connection
+- Replaced by streaming mode layout when `appList` becomes non-empty and state reaches CONNECTED/STREAMING
 
 ### PersistentNavBar
 
-76dp left navigation bar with:
-- Notifications button with badge
+76dp left navigation bar — **only shown in streaming mode** — with:
+- Clock display (HH:mm, updates every 1s)
+- Eject button (disconnects and persists user preference)
+- Network status indicator
+- Notifications button with unread badge count
 - Home button
 - Back button
-- Recent app icons (pruned when apps become unavailable)
-- 40dp icons, 14sp text
+- Recent app icons (max 5, pruned when apps become unavailable)
+- 40dp icons, 12-14sp text
 
 Width computed to guarantee even viewport for H.264 encoder.
 
@@ -102,9 +140,9 @@ Width computed to guarantee even viewport for H.264 encoder.
 - Progress bars: determinate (filled) and indeterminate (spinning)
 - Tap-to-launch: tapping a notification launches the owner app on the VD and switches to mirror view
 
-### App Grid
+### App Grid (HomeContent)
 
-LauncherScreen features:
+Shown as the main content area when streaming mode is active and current screen is HOME:
 - Search field with `imePadding()` — keyboard doesn't push activity, only search bar moves
 - `windowSoftInputMode="adjustNothing"` in manifest
 - 64dp app icons in 160dp adaptive grid cells
@@ -112,6 +150,22 @@ LauncherScreen features:
 - Alphabetical sort
 - Manual IP entry
 - Connection status
+
+### LauncherScreen (Legacy)
+
+Full integrated launcher layout with `CarStatusBar`, `SideNavBar` (80dp), and `AppGrid`. Not used in the current `CarShell` routing — the active UI uses `PersistentNavBar` + `HomeContent`/`MirrorContent`/`NotificationContent` composables inline.
+
+### RecentAppsState
+
+Tracks recently launched apps (max 5), persisted to SharedPreferences. `pruneUnavailable()` removes apps no longer present when app list updates.
+
+### NavBarComponents
+
+Individual nav bar widget composables: `ClockDisplay` (updates every 1s), `NetworkInfo` (connected/disconnected state), `RecentAppIcon` (40dp, with active state highlight), `NavActionButton` (40dp icons, 12sp labels).
+
+### CarTheme
+
+Material3 dark color scheme (`CarDark`) with category-specific app tile colors: Navigation (green), Music (pink), Communication (blue), Other (gray).
 
 ### Car Display Info
 

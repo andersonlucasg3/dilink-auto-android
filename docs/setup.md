@@ -7,6 +7,8 @@
 - **USB cable:** Phone to car USB port
 - **Development:** Android Studio or Gradle, JDK 17
 
+**No internet connection is required** — DiLink-Auto streams over your phone's WiFi hotspot (the car connects directly to the phone). An internet connection is only needed for the apps running on your phone (e.g., maps, music), not for DiLink-Auto itself.
+
 ## Phone Setup (One-Time)
 
 1. **Install DiLink Auto Client**: `adb install app-client-debug.apk`
@@ -22,7 +24,9 @@ That's it. No Wireless Debugging, no pairing codes, no special WiFi configuratio
 
 ## Car Setup
 
-No manual car installation needed. The car APK is embedded inside the phone APK. On first connection (or version mismatch), the phone sends `UPDATING_CAR` to the car (which shows "Updating..." status), then auto-installs via dadb (WiFi ADB).
+**No internet connection required.** The car APK is embedded inside the phone APK — the phone pushes it to the car over local WiFi. No internet connection is needed at any point during setup or streaming.
+
+No manual car installation needed. On first connection (or version mismatch), the phone sends `UPDATING_CAR` to the car (which shows "Updating..." status), then auto-installs via dadb (WiFi ADB).
 
 Alternatively, use the "Install on Car" button in the phone app to manually push the car APK.
 
@@ -60,7 +64,7 @@ When the phone is connected to the car:
 7. **Phone deploys VD server** — extracts vd-server.jar to `/sdcard/DiLinkAuto/`, starts `app_process` as shell UID with FPS arg
 8. **VD server reverse-connects** to phone on localhost:19637 (NIO non-blocking)
 9. **VD server creates VirtualDisplay** at phone's native DPI (480dpi) with GPU downscale and periodic re-draw
-10. **Video streams** over WiFi TCP (video connection 9638) — H.264, High profile, 12Mbps CBR, 60fps
+10. **Video streams** over WiFi TCP (video connection 9638) — H.264, Main profile, 8Mbps CBR, configurable up to 60fps
 
 ## Troubleshooting
 
@@ -115,3 +119,58 @@ For reliable operation on HyperOS:
 1. Settings -> Apps -> DiLink Auto -> Autostart -> Enable
 2. Settings -> Battery -> DiLink Auto -> No Restrictions
 3. Lock the app in Recent Apps (long-press the card -> Lock)
+
+## Samsung One UI Tips
+
+Samsung devices running One UI 5+ (Android 13+) have additional security and power-saving features that can block DiLink-Auto from working correctly. This applies to Galaxy A, M, S, Z, and Tab series.
+
+### Disable Auto Blocker (Critical for USB ADB)
+
+**Auto Blocker** blocks USB commands and can prevent the car from connecting to your phone via USB ADB. This is the most common Samsung-specific issue.
+
+1. **Settings → Security and privacy → Auto Blocker → Off**
+2. If you prefer to keep Auto Blocker on, at minimum disable the **"Block commands over USB cable"** option
+
+### Allow All Files Access
+
+Samsung's Permission Manager may auto-revoke permissions from apps you haven't opened recently:
+
+1. **Settings → Apps → DiLink Auto → Permissions → Files and media → Allow management of all files**
+2. Toggle **"Allow management of all files"** ON
+3. Verify it stays ON after closing settings (Samsung may show a confirmation popup)
+
+### Disable Battery Optimization
+
+Samsung's battery management is more aggressive than stock Android:
+
+1. **Settings → Apps → DiLink Auto → Battery → Unrestricted**
+2. **Settings → Battery → Background usage limits → Never sleeping apps → Add DiLink Auto**
+3. **Settings → Battery → Background usage limits → Deep sleeping apps → Remove DiLink Auto** if listed
+
+### Lock App in Recents
+
+Samsung One UI may kill background apps to free memory:
+
+1. Open Recent Apps (swipe up from bottom with 3-button nav, or gesture nav)
+2. Tap the DiLink Auto icon at the top of its card
+3. Select **"Keep open"**
+
+### Disable Samsung Device Care Auto-Optimization
+
+Samsung's Device Care can automatically stop background services:
+
+1. **Settings → Battery and device care → Automation → Auto optimize daily → Off**
+2. **Settings → Battery and device care → Automation → Auto restart → Off**
+
+### If You See a "DeX" Permission Popup
+
+Some Samsung devices show a popup about "Samsung DeX" or "external display" permissions when an app tries to create a virtual display. Even though Galaxy A/M series don't support DeX, the dialog may still appear. Simply tap **"Allow"** or **"Start now"**. If the dialog keeps reappearing, go to **Settings → Connected devices → Samsung DeX** and disable "Auto start when HDMI is connected."
+
+### Knox Security Considerations
+
+Samsung Knox may show a security notification when DiLink-Auto accesses:
+- Virtual display surface (for video encoding)
+- USB debugging bridge (for car ADB connection)
+- All files storage (for deploying the VD server)
+
+These are expected behaviors. Tap "Allow" or "OK" on any Knox-related prompts. If prompts persist, you can temporarily lower Knox protection to "Medium" under **Settings → Security and privacy → Samsung Knox**.

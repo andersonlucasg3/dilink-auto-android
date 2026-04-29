@@ -83,6 +83,14 @@ Empty payload. Sent every 3 seconds on the control connection. If no frame is re
 
 Empty payload. Graceful shutdown.
 
+### APP_STOPPED (0x14) -- Phone -> Car
+
+Empty payload. Sent when an app on the virtual display is stopped.
+
+### VD_SERVER_READY (0x20) -- Car -> Phone
+
+Empty payload. Car confirms the VD server process is running on the phone.
+
 ### LAUNCH_APP (0x10) -- Car -> Phone
 
 ```
@@ -150,13 +158,19 @@ Track info and playback state. Not yet actively populated.
 
 Media control (play/pause/next/previous). Not yet wired to MediaSession.
 
+### NAVIGATION_STATE (0x20) -- Phone -> Car
+
+Navigation state data. Reserved for navigation widget integration.
+
 ## Input Channel (0x04)
 
-### CMD_INPUT_TOUCH (0x32) -- Car -> Phone
+### TOUCH_DOWN (0x01) -- Car -> Phone
+
+Single-pointer down event. Payload is a TouchEvent (25 bytes):
 
 ```
 +----------------------+------+
-| action                | byte  |  MotionEvent action (DOWN/MOVE/UP)
+| action                | byte  |  InputMsg.TOUCH_DOWN (0x01)
 | pointerId             | int32 |  multi-touch pointer ID
 | x                     | float |  normalized 0.0-1.0
 | y                     | float |  normalized 0.0-1.0
@@ -165,7 +179,13 @@ Media control (play/pause/next/previous). Not yet wired to MediaSession.
 +----------------------+------+
 ```
 
-Raw MotionEvent injection. The phone dispatches input frames on `Dispatchers.IO` (avoids NetworkOnMainThreadException on localhost socket write). The VD server reads commands via NIO Selector and builds full MotionEvent objects with all active pointers, injecting via IInputManager.injectInputEvent.
+### TOUCH_MOVE (0x02) -- Car -> Phone
+
+Single-pointer move event. Same TouchEvent payload format as TOUCH_DOWN.
+
+### TOUCH_UP (0x03) -- Car -> Phone
+
+Single-pointer up event. Same TouchEvent payload format as TOUCH_DOWN.
 
 ### TOUCH_MOVE_BATCH (0x04) -- Car -> Phone
 
@@ -183,10 +203,14 @@ Raw MotionEvent injection. The phone dispatches input frames on `Dispatchers.IO`
 
 Batched MOVE events — all active pointers in one message. Reduces syscalls for multi-touch gestures.
 
+### KEY_EVENT (0x10) -- Car -> Phone
+
+Key event (e.g., media keys, navigation keys). Reserved for future use.
+
 ## Constants
 
 ```
-APP_VERSION_CODE      = 46
+APP_VERSION_CODE      = read at runtime via PackageManager
 PROTOCOL_VERSION      = 1
 CONTROL_PORT          = 9637 (phone <-> car, handshake + heartbeat + commands + data)
 VIDEO_PORT            = 9638 (phone -> car, H.264 frames only)

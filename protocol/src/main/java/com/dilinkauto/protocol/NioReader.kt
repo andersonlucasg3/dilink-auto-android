@@ -178,7 +178,7 @@ class NioReader(
     private var noDataCount = 0L
 
     companion object {
-        const val DEFAULT_CAPACITY = 262144 // 256KB — matches socket receive buffer
+        const val DEFAULT_CAPACITY = 131072 // 128KB — reduced for low-end devices
         private const val GROW_PADDING = 4096
     }
 }

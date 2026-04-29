@@ -25,4 +25,68 @@
     <!-- Miroir -->
     <string name="status_updating">Mise à jour de l\'appli voiture…</string>
     <string name="status_please_wait">Veuillez patienter</string>
+
+    <!-- Orientation -->
+    <string name="landscape_app_note">Les applis contrôlent leur propre orientation. Les applis en mode portrait uniquement peuvent apparaître avec des bandes.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">Comment se connecter</string>
+
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">Mode WiFi Direct</string>
+    <string name="dev_mode_desc_on">WiFi ADB (la voiture se connecte au téléphone via WiFi — aucun câble USB nécessaire)</string>
+    <string name="dev_mode_desc_off">USB ADB (la voiture se connecte au téléphone via câble USB)</string>
+    <string name="wifi_adb_setup_title">Configuration WiFi ADB</string>
+    <string name="wifi_adb_setup_desc">Pour utiliser le Mode WiFi Direct, vous devez d\'abord activer ADB via WiFi sur votre téléphone. Connectez votre téléphone à un ordinateur via USB et exécutez :\n\nadb tcpip 5555\n\nCette opération ne doit être effectuée qu\'une seule fois. Ensuite, la voiture pourra se connecter à votre téléphone via WiFi sans câble USB.</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Ou connectez-vous manuellement par IP</string>
+    <string name="manual_connect_ip_label">Adresse IP du téléphone</string>
+    <string name="manual_connect_button">Connecter</string>
+
+    <!-- Branding -->
+    <string name="branding_title">DiLink Auto</string>
+    <string name="branding_tagline">Utilisez les applis de votre téléphone sur l\'écran de la voiture</string>
+
+    <!-- Connection Status -->
+    <string name="status_ready_to_connect">Prêt à connecter</string>
+    <string name="status_connecting">Connexion…</string>
+    <string name="status_connected">Connecté</string>
+    <string name="status_streaming">Diffusion</string>
+
+    <!-- How to Connect Steps -->
+    <string name="how_to_step_1">Activez le point d\'accès WiFi de votre téléphone</string>
+    <string name="how_to_step_2">Branchez votre téléphone au port USB de la voiture</string>
+    <string name="how_to_step_3">Ouvrez l\'appli DiLink Auto sur votre téléphone</string>
+    <string name="how_to_step_4">Attendez que la voiture se connecte automatiquement</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_eject">Éjecter</string>
+    <string name="nav_alerts">Alertes</string>
+
+    <!-- Network -->
+    <string name="network_connected">Connecté</string>
+    <string name="network_offline">Hors ligne</string>
+
+    <!-- Recent Apps -->
+    <string name="recent_app_fallback">Appli</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">Aucune notification</string>
+
+    <!-- Connection Status Messages -->
+    <string name="status_deploying_vd">Déploiement de l\'affichage virtuel…</string>
+    <string name="status_waiting_usb">En attente USB…</string>
+    <string name="status_waiting_wifi">En attente WiFi…</string>
+    <string name="status_tcp_adb_failed">Échec de la connexion TCP ADB</string>
+    <string name="status_tcp_adb_connected">TCP ADB connecté</string>
+    <string name="status_connecting_usb">Connexion USB… Vérifiez l\'autorisation sur le téléphone</string>
+    <string name="status_usb_failed">Échec connexion USB — vérifiez l\'autorisation sur le téléphone</string>
+    <string name="status_usb_connected">USB connecté</string>
+    <string name="status_updating_car">Mise à jour de l\'appli voiture…</string>
+    <string name="status_preparing_vd">Préparation de l\'affichage virtuel…</string>
+    <string name="status_starting_vd">Démarrage de l\'affichage virtuel…</string>
+    <string name="status_vd_failed">Échec du serveur VD</string>
+    <string name="status_waiting_video">En attente du flux vidéo…</string>
+    <string name="status_updating_please_wait">Mise à jour de l\'appli voiture… Veuillez patienter</string>
 </resources>

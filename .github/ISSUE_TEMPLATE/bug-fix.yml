@@ -1,0 +1,25 @@
+name: Bug Fix
+description: Report a bug to be fixed by the development agent
+labels: [bug, agent]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: Describe the bug and what needs to be fixed. Be specific.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: '- [ ] The bug no longer occurs'
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      placeholder: Logs, screenshots, steps to reproduce, or anything that helps.
+    validations:
+      required: false

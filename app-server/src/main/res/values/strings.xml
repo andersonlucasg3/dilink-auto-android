@@ -25,4 +25,69 @@
     <!-- Mirror -->
     <string name="status_updating">Updating car app…</string>
     <string name="status_please_wait">Please wait</string>
+
+    <!-- Orientation note -->
+    <string name="landscape_app_note">Apps control their own orientation. Portrait-only apps may appear letterboxed.</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">How to connect</string>
+
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">WiFi Direct Mode</string>
+    <string name="dev_mode_desc_on">WiFi ADB (car connects to phone over WiFi — no USB cable needed)</string>
+    <string name="dev_mode_desc_off">USB ADB (car connects to phone via USB cable)</string>
+    <string name="wifi_adb_setup_title">WiFi ADB Setup</string>
+    <string name="wifi_adb_setup_desc">To use WiFi Direct Mode, you must first enable ADB over WiFi on your phone. Connect your phone to a computer via USB and run:\n\nadb tcpip 5555\n\nThis only needs to be done once. After that, the car can connect to your phone over WiFi without a USB cable.</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">Or connect manually by IP</string>
+    <string name="manual_connect_ip_label">Phone IP address</string>
+    <string name="manual_connect_button">Connect</string>
+
+    <!-- Branding -->
+    <string name="branding_title">DiLink Auto</string>
+    <string name="branding_tagline">Use your phone apps on your car\'s screen</string>
+
+    <!-- Connection Status -->
+    <string name="status_ready_to_connect">Ready to connect</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_streaming">Streaming</string>
+
+    <!-- How to Connect Steps -->
+    <string name="how_to_step_1">Enable your phone\'s WiFi hotspot</string>
+    <string name="how_to_step_2">Plug your phone into the car\'s USB port</string>
+    <string name="how_to_step_3">Open the DiLink Auto app on your phone</string>
+    <string name="how_to_step_4">Wait for the car to connect automatically</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_eject">Eject</string>
+    <string name="nav_alerts">Alerts</string>
+
+    <!-- Network -->
+    <string name="network_connected">Connected</string>
+    <string name="network_offline">Offline</string>
+
+    <!-- Recent Apps -->
+    <string name="recent_app_fallback">App</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">No notifications</string>
+
+    <!-- Connection Status Messages -->
+    <string name="status_deploying_vd">Deploying virtual display…</string>
+    <string name="status_waiting_usb">Waiting for USB…</string>
+    <string name="status_waiting_wifi">Waiting for WiFi…</string>
+    <string name="status_tcp_adb_failed">TCP ADB connection failed</string>
+    <string name="status_tcp_adb_connected">TCP ADB connected</string>
+    <string name="status_connecting_tcp_adb">Connecting TCP ADB to %s…</string>
+    <string name="status_connecting_usb">Connecting USB… Check phone for authorization dialog</string>
+    <string name="status_usb_failed">USB connection failed — check phone for auth dialog</string>
+    <string name="status_usb_connected">USB connected</string>
+    <string name="status_updating_car">Updating car app…</string>
+    <string name="status_preparing_vd">Preparing virtual display…</string>
+    <string name="status_starting_vd">Starting virtual display…</string>
+    <string name="status_vd_failed">VD server failed</string>
+    <string name="status_waiting_video">Waiting for video stream…</string>
+    <string name="status_updating_please_wait">Updating car app… Please wait</string>
 </resources>

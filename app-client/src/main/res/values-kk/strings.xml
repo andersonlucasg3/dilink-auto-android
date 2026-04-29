@@ -53,6 +53,11 @@
     <string name="updates_ready">Телефон: v%1$s дайын</string>
     <string name="updates_install_btn">Жаңартуды орнату</string>
     <string name="updates_retry">Қайталау</string>
+    <string name="updates_available_title">Жаңарту қолжетімді</string>
+    <string name="updates_update_btn">Жаңарту</string>
+    <string name="updates_dismiss_btn">Өткізу</string>
+    <string name="updates_downloading_title">Жаңарту v%1$s жүктелуде</string>
+    <string name="updates_ready_title">Орнатуға дайын</string>
     <string name="updates_car_title">Автокөлік қолданбасы</string>
     <string name="updates_car_desc">Автокөлік қолданбасын WiFi ADB арқылы орнату немесе жаңарту</string>
     <string name="updates_car_install">Орнату</string>
@@ -99,14 +104,30 @@
     <string name="onboarding_accessibility_desc">Автокөліктің сенсорлық экраны телефонды басқаруына мүмкіндік береді. Онсыз экранды көресіз, бірақ түрте алмайсыз.</string>
     <string name="onboarding_notification_title">Хабарландыруларға қол жеткізу</string>
     <string name="onboarding_notification_desc">Телефон хабарландыруларын автокөлік дисплейінде көрсетеді. Онсыз жүргізу кезінде қоңыраулар мен хабарларды өткізіп аласыз.</string>
+    <string name="onboarding_car_setup_title">Қосылу алдында</string>
+    <string name="onboarding_car_setup_desc">Қосылу алдында барлығы дайын екеніне көз жеткізіңіз:</string>
+    <string name="onboarding_car_prereq_wifi_adb">Автокөлікте Wi-Fi ADB қосулы</string>
+    <string name="onboarding_car_prereq_hotspot">Телефон хотспоты қосулы</string>
+    <string name="onboarding_car_prereq_connected">Автокөлік хотспотқа қосылған</string>
+    <string name="onboarding_car_prereq_installed">Автокөлік қолданбасы орнатылған</string>
+    <string name="onboarding_car_install_btn">Автокөлікке орнату</string>
+    <string name="onboarding_car_installing">Автокөлік қолданбасы орнатылуда…</string>
+    <string name="onboarding_car_installed">Автокөлік қолданбасы орнатылды!</string>
     <string name="onboarding_done_title">Барлығы дайын</string>
-    <string name="onboarding_done_desc">Барлығы дайын. Бастау үшін телефонды автокөліктің USB портына жалғаңыз.</string>
+    <string name="onboarding_done_desc">Барлығы дайын. Бастау үшін төменде түртіңіз.</string>
     <string name="onboarding_grant">Рұқсат беру</string>
     <string name="onboarding_skip">Өткізіп жіберу</string>
     <string name="onboarding_continue">Жалғастыру</string>
     <string name="onboarding_start">DiLink-Auto пайдалануды бастау</string>
     <string name="onboarding_skip_btn">Әзірге өткізіп жіберу</string>
     <string name="onboarding_granted_label">Берілді</string>
+
+    <!-- Логтармен бөлісу -->
+    <string name="share_logs_title">Логтармен бөлісу</string>
+    <string name="share_logs_desc">Логтарды ZIP-ке орап, мәселелерді хабарлау үшін GitHub-та тапсырма ашу</string>
+    <string name="share_logs_button">Бөлісу</string>
+    <string name="share_logs_zipped">Логтар %s ішіне оралды</string>
+    <string name="share_logs_no_logs">Лог файлдары табылмады</string>
 
     <!-- Автокөлікке орнату (Баптаулар) -->
     <string name="car_install_title">Автокөлікке орнату</string>
@@ -116,4 +137,74 @@
     <string name="car_install_button">Автокөлікке орнату</string>
     <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
     <string name="about_dev_github">github.com/andersonlucasg3</string>
+
+    <!-- Car App -->
+    <string name="car_app_title">Автокөлік қолданбасы</string>
+    <string name="car_app_desc">Автокөлік қолданбасын WiFi ADB арқылы орнату немесе жаңарту</string>
+    <string name="car_app_install">Орнату</string>
+    <string name="car_app_retry">Қайталау</string>
+    <string name="car_app_installed">Автокөлік қолданбасы орнатылды</string>
+
+    <!-- Donation -->
+    <string name="donation_title">Дамуды қолдау</string>
+    <string name="donation_desc">DiLink-Auto жұмысын қолдаңыз. Әрбір үлес маңызды!</string>
+    <string name="donation_github">GitHub демеушісі</string>
+    <string name="donation_pix">Pix (Бразилия)</string>
+
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Samsung құрылғысы анықталды</string>
+    <string name="samsung_warning_desc">Samsung One UI қосымша баптауды қажет етеді: Auto Blocker өшіріңіз (USB ADB блоктайды), батареяға шектеусіз рұқсат беріңіз және барлық файлдарға қол жеткізуге рұқсат етіңіз. Толығырақ Баптаулардан қараңыз.</string>
+    <string name="samsung_settings_guide">Samsung баптау нұсқаулығы</string>
+
+    <!-- Distribution Channel -->
+    <string name="channel_title">Тарату арнасы</string>
+    <string name="channel_release">Релиз</string>
+    <string name="channel_prerelease">Пре-релиз</string>
+    <string name="channel_release_desc">Тұрақты релиздер — күнделікті пайдалануға ұсынылады</string>
+    <string name="channel_prerelease_desc">Әзірлеу құрастырылымдары — соңғы мүмкіндіктер, тұрақсыз болуы мүмкін</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_distribution">Тарату</string>
+
+    <!-- Install on Car Status -->
+    <string name="car_install_status_searching">Автокөлік ізделуде</string>
+    <string name="car_install_status_connecting">Автокөлікке қосылуда</string>
+    <string name="car_install_status_checking_version">Нұсқа тексерілуде</string>
+    <string name="car_install_status_pushing">APK жіберілуде</string>
+    <string name="car_install_status_installing_stage">Орнатылуда</string>
+    <string name="car_install_status_launching">Іске қосылуда</string>
+    <string name="car_install_title_installed">Автокөлік қолданбасы орнатылды</string>
+    <string name="car_install_title_failed">Орнату сәтсіз аяқталды</string>
+    <string name="car_install_title_installing">Автокөлікке орнатылуда</string>
+    <string name="car_install_status_connecting_to">%s-ке қосылуда…</string>
+    <string name="car_install_status_not_reachable">%s 5555-портында қолжетімсіз</string>
+    <string name="car_install_status_car_not_found">Автокөлік табылмады. USB арқылы қосыңыз немесе WiFi ADB тексеріңіз.</string>
+    <string name="car_install_status_already_up_to_date">Соңғы нұсқа (v%s)</string>
+    <string name="car_install_status_pushing_apk">APK жіберілуде (%d МБ)…</string>
+    <string name="car_install_status_installing_version">v%s орнатылуда…</string>
+    <string name="car_install_status_launching_car_app">Автокөлік қолданбасы іске қосылуда…</string>
+    <string name="car_install_status_car_installed">Автокөлік қолданбасы v%s орнатылды!</string>
+    <string name="car_install_status_failed">Сәтсіз: %s</string>
+    <string name="car_install_status_error">Қате: %s</string>
+    <string name="car_install_status_car_apk_not_found">Автокөлік APK табылмады</string>
+    <string name="car_install_status_auth_needed">Авторизация қажет — Автокөлік экранындағы USB жөндеу диалогын қабылдаңыз, содан кейін Қайталау үшін Жалғастыру түймесін басыңыз</string>
+
+    <!-- Auto-Update Status -->
+    <string name="status_auto_update">Автокөлік қолданбасы жаңартылуда (v%1$s → v%2$s)…</string>
+    <string name="status_auto_update_complete">Автокөлік қолданбасы жаңартылды! Қайта іске қосылуда…</string>
+    <string name="status_update_failed">Жаңарту сәтсіз: %s</string>
+    <string name="status_auto_update_failed">Авто-жаңарту сәтсіз: %s</string>
+
+    <!-- Notification Actions -->
+    <string name="notification_action_stop">Тоқтату</string>
+
+    <!-- Update Manager Errors -->
+    <string name="update_no_release">Релиз табылмады</string>
+    <string name="update_no_version">Ағымдағы нұсқаны анықтау мүмкін болмады</string>
+    <string name="update_download_http_error">Жүктеу сәтсіз: HTTP %d</string>
+    <string name="update_invalid_apk">Жүктелген APK жарамсыз</string>
+    <string name="update_download_failed">Жүктеу сәтсіз: %s</string>
+    <string name="update_file_not_found">Жаңарту файлы табылмады</string>
+    <string name="update_installer_error">Орнатушыны ашу мүмкін болмады: %s</string>
+    <string name="update_rate_limit">GitHub сұрау лимитіне жетті. Кейінірек әрекеттеніңіз.</string>
 </resources>

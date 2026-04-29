@@ -59,6 +59,13 @@ class CarConnectionService : Service() {
             .getBoolean("user_disconnected", false)
         set(value) = getSharedPreferences("dilinkauto", MODE_PRIVATE)
             .edit().putBoolean("user_disconnected", value).apply()
+
+    var devMode: Boolean
+        get() = getSharedPreferences("dilinkauto", MODE_PRIVATE)
+                    .getBoolean("dev_mode", false)
+        set(value) = getSharedPreferences("dilinkauto", MODE_PRIVATE)
+            .edit().putBoolean("dev_mode", value).apply()
+
     private var vdServerJarPath = "/sdcard/DiLinkAuto/vd-server.jar"
 
     private val touchExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
@@ -200,6 +207,7 @@ class CarConnectionService : Service() {
         userDisconnected = false
         _state.value = State.CONNECTING
         connectToPhone(host, port)
+        startUsbTrack()  // dev mode TCP ADB or USB ADB
     }
 
     // ─── State Machine Core ───
@@ -227,7 +235,7 @@ class CarConnectionService : Service() {
 
         userDisconnected = false
         _state.value = State.CONNECTING
-        _statusMessage.value = "Connecting..."
+        _statusMessage.value = getString(R.string.status_connecting)
         updateNotification(R.string.notification_searching)
 
         // Launch both tracks under a single parent job — cancelling connectionScope
@@ -254,12 +262,12 @@ class CarConnectionService : Service() {
                 if (wifiReady && usbReady && !vdServerStarted) {
                     carLogSend("Both WiFi and USB ready — deploying VD server")
                     _state.value = State.CONNECTED
-                    _statusMessage.value = "Deploying virtual display..."
+                    _statusMessage.value = getString(R.string.status_deploying_vd)
                     deployVdServer()
                 } else if (wifiReady && !usbReady) {
-                    _statusMessage.value = "Waiting for USB..."
+                    _statusMessage.value = getString(R.string.status_waiting_usb)
                 } else if (!wifiReady && usbReady) {
-                    _statusMessage.value = "Waiting for WiFi..."
+                    _statusMessage.value = getString(R.string.status_waiting_wifi)
                 }
             }
 
@@ -418,6 +426,11 @@ class CarConnectionService : Service() {
 
     private fun startUsbTrack() {
         if (usbReady) return // Already connected
+        if (devMode) {
+            carLogSend("Development mode active — using TCP ADB instead of USB")
+            startTcpAdbTrack()
+            return
+        }
         scope.launch(Dispatchers.IO) {
             // Scan for already-connected USB device
             val usbManager = getSystemService(USB_SERVICE) as UsbManager
@@ -429,6 +442,77 @@ class CarConnectionService : Service() {
                 }
             }
             carLogSend("USB track: no device found, waiting for attach broadcast")
+        }
+    }
+
+    // ─── Dev mode: TCP ADB track (replaces USB track) ───
+
+    private fun startTcpAdbTrack() {
+        if (usbReady || adbController?.isConnected == true) return
+        scope.launch(Dispatchers.IO) {
+            var attempts = 0
+            while (isActive && !usbReady && _state.value == State.CONNECTING && attempts < 60) {
+                // Only use phoneHost set by Track A (handshake) — never fall back
+                // to gateway IP because the emulator's gateway (10.0.2.2) is the host
+                // machine, not the phone.
+                val host = phoneHost
+                if (host != null && host != "10.0.2.2") {
+                    carLogSend("Dev mode: TCP ADB connecting to $host:5555 (attempt ${attempts + 1})")
+                    connectTcpAdb(host)
+                    return@launch
+                }
+                delay(1000)
+                attempts++
+            }
+            if (!usbReady) {
+                carLogSend("Dev mode: could not determine phone IP after ${attempts}s")
+            }
+        }
+    }
+
+    private suspend fun connectTcpAdb(host: String) {
+        if (usbReady || adbController?.isConnected == true) return
+
+        _statusMessage.value = getString(R.string.status_connecting_tcp_adb, host)
+        val keyDir = java.io.File(filesDir, "adb_keys")
+        val controller = RemoteAdbController(
+            phoneHost = host,
+            adbPort = 5555,
+            virtualDisplayId = -1,
+            keyDir = keyDir
+        )
+
+        if (!controller.connect()) {
+            _statusMessage.value = getString(R.string.status_tcp_adb_failed)
+            carLogSend("Dev mode: TCP ADB connection failed to $host:5555")
+            return
+        }
+
+        adbController = controller
+        _statusMessage.value = getString(R.string.status_tcp_adb_connected)
+        carLogSend("Dev mode: TCP ADB connected to $host:5555")
+
+        controller.shell("am start -n com.dilinkauto.client/.MainActivity")
+        carLogSend("Dev mode: phone app launched via TCP ADB")
+
+        usbReady = true
+        checkAndAdvance()
+    }
+
+    private fun isAdbAvailable(): Boolean =
+        (adbController?.isConnected == true) || (usbAdb?.isConnected == true)
+
+    private fun executeAdb(command: String, noWait: Boolean): Boolean {
+        return when {
+            adbController?.isConnected == true -> {
+                if (noWait) adbController!!.shellNoWait(command)
+                else adbController!!.shell(command)
+            }
+            usbAdb?.isConnected == true -> {
+                if (noWait) usbAdb!!.shellNoWait(command) >= 0
+                else { usbAdb!!.shell(command); true }
+            }
+            else -> false
         }
     }
 
@@ -457,17 +541,17 @@ class CarConnectionService : Service() {
         }
         usbConnecting = true
         scope.launch(Dispatchers.IO) {
-            _statusMessage.value = "Connecting USB... Check phone for authorization dialog"
+            _statusMessage.value = getString(R.string.status_connecting_usb)
             val adb = UsbAdbConnection(this@CarConnectionService)
             adb.setLogSink { msg -> carLogSend(msg) }
             if (!adb.connect(device)) {
                 usbConnecting = false
-                _statusMessage.value = "USB connection failed — check phone for auth dialog"
+                _statusMessage.value = getString(R.string.status_usb_failed)
                 carLogSend("USB ADB connection failed")
                 return@launch
             }
             usbAdb = adb
-            _statusMessage.value = "USB connected"
+            _statusMessage.value = getString(R.string.status_usb_connected)
             carLogSend("USB ADB connected")
 
             // Write key diagnostic to phone for debugging USB auth issues
@@ -475,8 +559,8 @@ class CarConnectionService : Service() {
             adb.shell("echo '$keyInfo' > /data/local/tmp/car-adb-key.log")
             carLogSend("ADB key: $keyInfo")
 
-            // Launch phone app if not already running
-            adb.shell("am start --activity-clear-task -n com.dilinkauto.client/.MainActivity")
+            // Launch phone app (don't clear task — if it's already open, just move on)
+            adb.shell("am start -n com.dilinkauto.client/.MainActivity")
             carLogSend("Phone app launched via USB ADB")
 
             usbConnecting = false
@@ -522,7 +606,7 @@ class CarConnectionService : Service() {
             ControlMsg.UPDATING_CAR -> {
                 carLogSend("Phone is updating car app — waiting for restart")
                 updatingFromPhone = true
-                _statusMessage.value = "Updating car app..."
+                _statusMessage.value = getString(R.string.status_updating_car)
             }
             ControlMsg.VD_STACK_EMPTY -> {
                 carLogSend("VD stack empty — switching to home")
@@ -584,9 +668,8 @@ class CarConnectionService : Service() {
 
     private fun deployVdServer() {
         if (vdServerStarted) return
-        val adb = usbAdb
-        if (adb == null) {
-            carLogSend("deployVdServer: no USB ADB")
+        if (!isAdbAvailable()) {
+            carLogSend("deployVdServer: no ADB connection")
             return
         }
         scope.launch(Dispatchers.IO) {
@@ -594,9 +677,9 @@ class CarConnectionService : Service() {
             val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
             val viewportWidth = displayMetrics.widthPixels - navBarPx
             val viewportHeight = displayMetrics.heightPixels
-            val phoneDpi = 480
+            val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
             val dpiScale = phoneDpi.toFloat() / 160f
-            val scaledH = ((600 * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
+            val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
             val scaledW = ((scaledH * viewportWidth.toFloat() / viewportHeight).toInt()) and 0x7FFFFFFE.toInt()
 
             val jarPath = vdServerJarPath
@@ -607,29 +690,27 @@ class CarConnectionService : Service() {
             val args = "$scaledW $scaledH $phoneDpi $serverPort $viewportWidth $viewportHeight $targetFps"
 
             // Kill any existing VD server
-            _statusMessage.value = "Preparing virtual display..."
-            adb.shellNoWait("pkill -f VirtualDisplayServer 2>/dev/null")
+            _statusMessage.value = getString(R.string.status_preparing_vd)
+            executeAdb("pkill -f VirtualDisplayServer 2>/dev/null", noWait = false)
             delay(200)
 
-            // Launch VD server via shellNoWait + exec (proven working approach).
-            // exec replaces the shell with app_process — keeps ADB stream open.
-            // VD server will die on USB disconnect; car re-deploys on reconnect.
-            _statusMessage.value = "Starting virtual display..."
+            // Launch VD server. Uses exec to replace shell with app_process — keeps ADB stream open.
+            // VD server will die on disconnect; car re-deploys on reconnect.
+            _statusMessage.value = getString(R.string.status_starting_vd)
             carLogSend("VD server: ${scaledW}x${scaledH}@${phoneDpi}dpi → ${viewportWidth}x${viewportHeight}")
 
             val cmd = "CLASSPATH=$jarPath exec app_process / " +
                     "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
                     " >$logFile 2>&1"
-            val streamId = adb.shellNoWait(cmd)
-            if (streamId < 0) {
+            if (!executeAdb(cmd, noWait = true)) {
                 carLogSend("VD server failed to start", "E")
-                _statusMessage.value = "VD server failed"
+                _statusMessage.value = getString(R.string.status_vd_failed)
                 return@launch
             }
 
             vdServerStarted = true
-            _statusMessage.value = "Waiting for video stream..."
-            carLogSend("VD server started (streamId=$streamId), waiting for video")
+            _statusMessage.value = getString(R.string.status_waiting_video)
+            carLogSend("VD server started, waiting for video")
         }
     }
 
@@ -703,7 +784,7 @@ class CarConnectionService : Service() {
             try {
                 conn.sendInput(InputMsg.TOUCH_MOVE_BATCH, payload)
                 touchSendCount++
-                if (touchSendCount <= 5) {
+                if (touchSendCount <= 5 || touchSendCount % 100 == 0L) {
                     carLogSend("Touch batch #$touchSendCount (${pointers.size} pointers)")
                 }
             }
@@ -770,6 +851,8 @@ class CarConnectionService : Service() {
         _appList.value = emptyList()
         _videoReady.value = false
         videoFrameCount = 0
+        touchSendCount = 0
+        touchDropCount = 0
         wifiReady = false
         vdServerStarted = false
         // USB: keep usbReady/usbConnecting if device is physically connected.
@@ -781,7 +864,7 @@ class CarConnectionService : Service() {
 
         if (updatingFromPhone) {
             _state.value = State.IDLE
-            _statusMessage.value = "Updating car app... Please wait"
+            _statusMessage.value = getString(R.string.status_updating_please_wait)
             carLogSend("Disconnected during update — waiting for app restart")
             // Don't reconnect — the phone will install the new APK and restart us
             return
