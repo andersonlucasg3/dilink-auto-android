@@ -78,10 +78,11 @@ O APK do carro e o JAR do servidor VD já vêm empacotados dentro do APK do celu
 **Funcionando:**
 - Streaming de vídeo H.264 a 60fps (8Mbps CBR, perfil Main, configurável via handshake)
 - Entrada de toque completa (multi-touch, pinça para zoom)
-- Launcher de apps com busca, ordenação alfabética, ícones de 64dp
+- Launcher de apps com busca, ordenação alfabética, ícones de 64dp, grade adaptativa
 - Notificações na tela do carro com barras de progresso, toque para abrir
 - Auto-atualização via GitHub Releases (release) ou pre-releases (debug)
-- Atualização automática: o celular detecta app do carro desatualizado e o atualiza via WiFi ADB
+- **Suporte ao Shizuku**: conexão sem ADB, auto-atualização silenciosa via pm install
+- Atualização automática: o celular detecta app do carro desatualizado (comparação via versionName) e o atualiza via WiFi ADB
 - Tela do celular desligada durante o streaming (economia de bateria)
 - Onboarding guiado para todas as permissões necessárias
 - Internacionalização: Inglês, Português, Russo, Bielorrusso, Francês, Cazaque, Ucraniano, Uzbeque

@@ -28,7 +28,7 @@ O [Shizuku](https://github.com/RikkaApps/Shizuku) fornece privilégios de shell 
 
 1. **Instale o Shizuku** pelo [GitHub Releases](https://github.com/RikkaApps/Shizuku/releases) ou Google Play
 2. **Inicie o Shizuku** uma vez via ADB (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`) ou via root
-3. **Abra o DiLink Auto** → Configurações → Shizuku → toque para conceder permissão
+3. **Abra o DiLink Auto** → Configurações → cartão Shizuku → toque para abrir o app Shizuku e autorizar o DiLink Auto
 4. Quando o Shizuku estiver ativo, o telefone implanta o servidor VD diretamente. Sem necessidade de USB ADB ou Depuração Sem Fio.
 
 Com o Shizuku ativo, o carro só precisa conectar via WiFi — o cabo USB não é necessário para streaming.

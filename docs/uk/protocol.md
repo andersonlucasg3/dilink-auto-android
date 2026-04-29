@@ -54,8 +54,10 @@ Control-з'єднання встановлюється першим (тут ві
 | supportedFeatures     | int32 |  бітова маска
 | displayMode           | byte  |  0=MIRROR, 1=VIRTUAL (за замовчуванням)
 | screenDpi             | int32 |  щільність дисплея автомобіля (напр. 240)
-| appVersionCode        | int32 |  код версії додатку автомобіля
+| appVersionCode        | int32 |  код версії додатку автомобіля (застарілий, для зворотної сумісності)
 | targetFps             | int32 |  запитаний FPS автомобіля (напр. 60)
+| довжина appVersionName  | int16 |  довжина рядка versionName
+| appVersionName        | UTF-8 |  назва версії додатку автомобіля (напр. "0.16.0")
 +----------------------+------+
 ```
 
@@ -131,7 +133,7 @@ H.264 NAL units, що представляють відеокадр.
 - Codec: H.264/AVC
 - Profile: High
 - Resolution: розміри вікна автомобіля (напр., 1806x990)
-- Bitrate: 12 Mbps CBR
+- Bitrate: 8 Mbps CBR
 - Frame rate: настроюваний через `targetFps` у handshake (за замовчуванням 30, автомобіль запитує 60)
 - IDR interval: 1 секунда
 - SurfaceScaler: періодичне перемальовування кожні `1000/fps` мс забезпечує вивід кодувальника на статичному вмісті
@@ -210,7 +212,7 @@ H.264 NAL units, що представляють відеокадр.
 ## Constants
 
 ```
-APP_VERSION_CODE      = read at runtime via PackageManager
+APP_VERSION_COMPARISON = versionName via semver (with versionCode fallback for older cars)
 PROTOCOL_VERSION      = 1
 CONTROL_PORT          = 9637 (phone <-> car, handshake + heartbeat + commands + data)
 VIDEO_PORT            = 9638 (phone -> car, H.264 frames only)

@@ -28,7 +28,7 @@ That's it. No Wireless Debugging, no pairing codes, no special WiFi configuratio
 
 1. **Install Shizuku** from [GitHub Releases](https://github.com/RikkaApps/Shizuku/releases) or Google Play
 2. **Start Shizuku** once via ADB (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`) or via root
-3. **Open DiLink Auto** → Settings → Shizuku → tap to grant permission
+3. **Open DiLink Auto** → Settings → Shizuku card → tap to open the Shizuku app and authorize DiLink Auto
 4. When Shizuku is active, the phone deploys the VD server directly. No need for USB ADB or Wireless Debugging.
 
 With Shizuku active, the car only needs to connect over WiFi — the USB cable is not required for streaming.

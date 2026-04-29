@@ -47,7 +47,7 @@ Servico em primeiro plano gerenciando o ciclo de vida completo da conexao com um
 **Trilha A — WiFi:**
 - Descoberta: gateway IP (hotspot/LAN, tenta novamente a cada 3s) → mDNS → IP manual
 - Conexao de controle: SocketChannel NIO nao-bloqueante conectando ao celular TCP:9637
-- Handshake: envia dimensoes do viewport + DPI + appVersionCode + targetFps (60) → recebe informacoes do celular + vdServerJarPath
+- Handshake: envia dimensoes do viewport + DPI + appVersionCode + appVersionName + targetFps (60) → recebe informacoes do celular + vdServerJarPath + connectionMethod
 - Na resposta do handshake: abre conexoes de video (9638) + entrada (9639) em paralelo, define `wifiReady = true` apos todas as 3 estabelecidas
 - Video: recebe quadros H.264 via conexao de video, despacha para VideoDecoder
 - Toque: executor dedicado de thread unica, `sendTouchEvent()` / `sendTouchBatch()` via conexao de entrada
@@ -145,7 +145,7 @@ Largura calculada para garantir viewport par para o codificador H.264.
 Exibida como area de conteudo principal quando o modo streaming esta ativo e a tela atual e HOME:
 - Campo de busca com `imePadding()` — teclado nao empurra a atividade, apenas a barra de busca se move
 - `windowSoftInputMode="adjustNothing"` no manifest
-- Icones de apps 64dp em celulas de grade adaptativa de 160dp
+- Icones de apps 64dp em colunas de grade fixa calculadas dinamicamente (3-12 conforme a largura do display), decodificacao lazy por tile com downscale
 - Texto do nome do app: bodyLarge
 - Ordenacao alfabetica
 - Entrada manual de IP

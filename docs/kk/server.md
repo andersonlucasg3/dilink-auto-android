@@ -47,7 +47,7 @@
 **Track A — WiFi:**
 - Табу: gateway IP (hotspot/LAN, әр 3s қайталанады) → mDNS → manual IP
 - Control connection: телефон TCP:9637-ге NIO блокталмайтын SocketChannel connect
-- Handshake: көрініс терезесі өлшемдері + DPI + appVersionCode + targetFps (60) жібереді → телефон ақпараты + vdServerJarPath алады
+- Handshake: көрініс терезесі өлшемдері + DPI + appVersionCode + appVersionName + targetFps (60) жібереді → телефон ақпараты + vdServerJarPath + connectionMethod алады
 - Handshake жауабында: бейне (9638) + енгізу (9639) қосылымдарын параллель ашады, барлығы 3 орнатылғаннан кейін `wifiReady = true` орнатады
 - Video: бейне қосылымы арқылы H.264 кадрларын алады, VideoDecoder-ге жібереді
 - Touch: арнайы бір ағынды executor, `sendTouchEvent()` / `sendTouchBatch()` енгізу қосылымы арқылы
@@ -145,7 +145,7 @@ dadb кітапханасын пайдаланатын тікелей ADB кли
 Ағынды режим белсенді және ағымдағы экран HOME болғанда негізгі мазмұн аймағы ретінде көрсетіледі:
 - `imePadding()` бар іздеу өрісі — пернетақта activity-ді итермейді, тек іздеу жолағы қозғалады
 - Манифестте `windowSoftInputMode="adjustNothing"`
-- 160dp бейімделген тор ұяшықтарында 64dp қолданба белгішелері
+- Дисплей еніне байланысты динамикалық есептелетін тұрақты тор бағандарында 64dp қолданба белгішелері (3-12)
 - Қолданба атауы мәтіні: bodyLarge
 - Әліпбилік сұрыптау
 - Қолмен IP енгізу

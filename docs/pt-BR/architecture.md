@@ -215,5 +215,5 @@ Estados: IDLE -> CONNECTING -> CONNECTED -> STREAMING
 | WiFi ADB | dadb 1.2.10 (auto-atualizacao do carro) |
 | Assincrono | Kotlin Coroutines + Flow |
 | API Minima | 29 (Android 10) |
-| Versao do App | versionCode lido em runtime via PackageManager (compartilhado em gradle.properties) |
+| Versao do App | versionName comparado via semver (compartilhado em gradle.properties); versionCode ainda enviado para compatibilidade retroativa |
 | Versao do Protocolo | PROTOCOL_VERSION = 1 |

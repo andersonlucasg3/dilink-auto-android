@@ -216,5 +216,5 @@ DiLink-Auto/
 | WiFi ADB | dadb 1.2.10 (автообновление авто) |
 | Async | Kotlin Coroutines + Flow |
 | Мин. API | 29 (Android 10) |
-| Версия приложения | versionCode читается во время выполнения через PackageManager (общий в gradle.properties) |
+| Версия приложения | versionName сравнивается через semver (общий в gradle.properties); versionCode всё ещё отправляется для обратной совместимости |
 | Версия протокола | PROTOCOL_VERSION = 1 |

@@ -54,8 +54,10 @@ Control қосылымы бірінші орнатылады (handshake осын
 | supportedFeatures     | int32 |  биттік маска
 | displayMode           | byte  |  0=MIRROR, 1=VIRTUAL (әдепкі)
 | screenDpi             | int32 |  көлік дисплейінің тығыздығы (мысалы, 240)
-| appVersionCode        | int32 |  көлік қолданбасының нұсқа коды
+| appVersionCode        | int32 |  көлік қолданбасының нұсқа коды (ескірген, кері үйлесімділік үшін)
 | targetFps             | int32 |  көліктің сұратылған FPS (мысалы, 60)
+| appVersionName ұзындығы | int16 |  versionName жолының ұзындығы
+| appVersionName        | UTF-8 |  көлік қолданбасының нұсқа атауы (мысалы, "0.16.0")
 +----------------------+------+
 ```
 
@@ -131,7 +133,7 @@ LAUNCH_APP сияқты пішім. Қолданбаның іске қосылғ
 - Codec: H.264/AVC
 - Profile: High
 - Resolution: көлік көрініс терезесі өлшемдері (мысалы, 1806x990)
-- Bitrate: 12 Mbps CBR
+- Bitrate: 8 Mbps CBR
 - Frame rate: handshake-тегі `targetFps` арқылы бапталады (әдепкі 30, көлік 60 сұратады)
 - IDR interval: 1 секунд
 - SurfaceScaler: әр `1000/fps` мс сайын мерзімді қайта салу статикалық мазмұнда кодтаушы шығысын қамтамасыз етеді
@@ -210,7 +212,7 @@ UTF-8 мәтін жолы. Көлік барлық журналдарды (Video
 ## Constants
 
 ```
-APP_VERSION_CODE      = read at runtime via PackageManager
+APP_VERSION_COMPARISON = versionName via semver (with versionCode fallback for older cars)
 PROTOCOL_VERSION      = 1
 CONTROL_PORT          = 9637 (phone <-> car, handshake + heartbeat + commands + data)
 VIDEO_PORT            = 9638 (phone -> car, H.264 frames only)

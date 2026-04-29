@@ -28,7 +28,7 @@ Hammasi shu. Simli disk raskadka, ulash kodlari, maxsus WiFi sozlamalari talab q
 
 1. **Shizuku-ni** [GitHub Releases](https://github.com/RikkaApps/Shizuku/releases) yoki Google Play orqali o'rnating
 2. **Shizuku-ni** ADB orqali bir marta ishga tushiring (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`) yoki root orqali
-3. **DiLink Auto-ni oching** → Sozlamalar → Shizuku → ruxsat berish uchun bosing
+3. **DiLink Auto-ni oching** → Sozlamalar → Shizuku → Shizuku ilovasini ochish va DiLink Auto-ni avtorizatsiya qilish uchun bosing
 4. Shizuku faol bo'lganda, telefon VD serverini bevosita o'rnatadi. USB ADB yoki simsiz disk raskadka kerak emas.
 
 Shizuku faol bo'lganda, avtomobilga faqat WiFi orqali ulanish kerak — oqimli uzatish uchun USB kabeli kerak emas.

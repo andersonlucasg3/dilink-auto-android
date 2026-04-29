@@ -54,8 +54,10 @@ Um protocolo interno separado executa entre o app do celular e o servidor VD em 
 | supportedFeatures     | int32 |  mascara de bits
 | displayMode           | byte  |  0=MIRROR, 1=VIRTUAL (padrao)
 | screenDpi             | int32 |  densidade da tela do carro (ex. 240)
-| appVersionCode        | int32 |  codigo de versao do app do carro
+| appVersionCode        | int32 |  codigo de versao do app do carro (legado, para compatibilidade retroativa)
 | targetFps             | int32 |  FPS solicitado pelo carro (ex. 60)
+| tam appVersionName    | int16 |  tamanho da string versionName
+| appVersionName        | UTF-8 |  nome da versao do app do carro (ex. "0.16.0")
 +----------------------+------+
 ```
 
@@ -131,7 +133,7 @@ Unidades NAL H.264 representando um quadro de video.
 - Codec: H.264/AVC
 - Perfil: High
 - Resolucao: dimensoes do viewport do carro (ex., 1806x990)
-- Bitrate: 12 Mbps CBR
+- Bitrate: 8 Mbps CBR
 - Taxa de quadros: configuravel via `targetFps` no handshake (padrao 30, carro solicita 60)
 - Intervalo IDR: 1 segundo
 - SurfaceScaler: redesenho periodico a cada `1000/fps` ms garante saida do codificador em conteudo estatico
@@ -210,7 +212,7 @@ Evento de tecla (ex., teclas de midia, teclas de navegacao). Reservado para uso 
 ## Constantes
 
 ```
-APP_VERSION_CODE      = lido em runtime via PackageManager
+APP_VERSION_COMPARISON = versionName via semver (com fallback para versionCode em carros antigos)
 PROTOCOL_VERSION      = 1
 CONTROL_PORT          = 9637 (celular <-> carro, handshake + heartbeat + comandos + dados)
 VIDEO_PORT            = 9638 (celular -> carro, apenas quadros H.264)
