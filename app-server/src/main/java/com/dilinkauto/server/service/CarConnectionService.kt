@@ -45,12 +45,12 @@ import kotlinx.coroutines.flow.*
 class CarConnectionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var controlConnection: Connection? = null
-    private var videoConnection: Connection? = null
-    private var inputConnection: Connection? = null
+    @Volatile private var controlConnection: Connection? = null
+    @Volatile private var videoConnection: Connection? = null
+    @Volatile private var inputConnection: Connection? = null
     val videoDecoder = VideoDecoder()
-    private var adbController: RemoteAdbController? = null
-    private var phoneHost: String? = null
+    @Volatile private var adbController: RemoteAdbController? = null
+    @Volatile private var phoneHost: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var consecutiveFailures = 0
     private var usbAdb: UsbAdbConnection? = null
@@ -145,6 +145,9 @@ class CarConnectionService : Service() {
 
     private val _shortcutsCache = MutableStateFlow<Map<String, List<AppShortcut>>>(emptyMap())
     val shortcutsCache: StateFlow<Map<String, List<AppShortcut>>> = _shortcutsCache.asStateFlow()
+
+    private val _appInfoData = MutableStateFlow<AppInfoDataMessage?>(null)
+    val appInfoData: StateFlow<AppInfoDataMessage?> = _appInfoData.asStateFlow()
 
     enum class State { IDLE, CONNECTING, CONNECTED, STREAMING }
 
@@ -690,24 +693,17 @@ class CarConnectionService : Service() {
     private fun handleDataFrame(frame: FrameCodec.Frame) {
         when (frame.messageType) {
             DataMsg.APP_LIST -> {
-                val msg = AppListMessage.decode(frame.payload)
-                val apps = msg.apps.map { app ->
+                val apps = AppListMessage.decode(frame.payload).apps
+                _appList.value = apps
+                // Store source icons in car cache for multi-size access.
+                // Icons with empty payload but present hash were skipped by phone
+                // (unchanged) — the cache already has them from a prior transmission.
+                apps.forEach { app ->
                     if (app.iconPng.isNotEmpty()) {
-                        // Cache the icon on disk + memory, then strip the raw bytes
-                        // so the StateFlow holds lightweight objects — critical for
-                        // LazyVerticalGrid scroll performance.
-                        ServerApp.iconCache.put(app.packageName, app.iconHash, app.iconPng)
-                        app.copy(iconPng = ByteArray(0))
-                    } else if (app.iconHash.isNotEmpty()) {
-                        // Icon was skipped by phone (unchanged hash) — keep hash so
-                        // the UI can load from disk or memory cache.
-                        app
-                    } else {
-                        app
+                        ServerApp.iconCache.putSource(app.packageName, app.iconPng)
                     }
                 }
-                _appList.value = apps
-                carLogSend("App list received: ${apps.size} apps${if (apps.any { it.iconHash.isNotEmpty() }) " (with hashes)" else ""}")
+                carLogSend("App list received: ${apps.size} apps")
             }
             DataMsg.NOTIFICATION_POST -> {
                 val n = NotificationData.decode(frame.payload)
@@ -724,6 +720,11 @@ class CarConnectionService : Service() {
                 val pkg = String(frame.payload, Charsets.UTF_8)
                 _appList.value = _appList.value.filter { it.packageName != pkg }
                 carLogSend("App uninstalled: $pkg — removed from grid")
+            }
+            DataMsg.APP_INFO_DATA -> {
+                val info = AppInfoDataMessage.decode(frame.payload)
+                _appInfoData.value = info
+                carLogSend("App info received: ${info.packageName} v${info.versionName}")
             }
         }
     }
@@ -884,6 +885,10 @@ class CarConnectionService : Service() {
                 carLogSend("Requested uninstall: $packageName")
             } catch (e: Exception) { carLogSend("requestUninstall failed: ${e.message}", "E") }
         }
+    }
+
+    fun clearAppInfoData() {
+        _appInfoData.value = null
     }
 
     fun requestAppInfo(packageName: String) {

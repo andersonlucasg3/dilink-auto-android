@@ -10,6 +10,7 @@ import kotlinx.coroutines.*
 import android.os.PowerManager
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentHashMap
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 
@@ -47,6 +48,9 @@ class VirtualDisplayClient(
 
     // Track launched apps in order — used to know which app gains focus after back presses
     private val launchedAppStack = mutableListOf<String>()
+
+    // Async response channels for VD server shortcut queries
+    private val shortcutResponses = ConcurrentHashMap<String, CompletableDeferred<String>>()
 
     /**
      * Opens the ServerSocket immediately (synchronous, instant).
@@ -198,6 +202,21 @@ class VirtualDisplayClient(
                         continue
                     }
 
+                    // Shortcut query result — response to CMD_QUERY_SHORTCUTS
+                    if (msgType == MSG_SHORTCUTS_RESULT) {
+                        val pkgLen = rdr.readInt()
+                        val pkgBytes = ByteArray(pkgLen)
+                        rdr.readFully(pkgBytes, 0, pkgLen)
+                        val pkg = String(pkgBytes, Charsets.UTF_8)
+                        val dataLen = rdr.readInt()
+                        val dataBytes = ByteArray(dataLen)
+                        rdr.readFully(dataBytes, 0, dataLen)
+                        val data = String(dataBytes, Charsets.UTF_8)
+                        FileLog.i(TAG, "Shortcut result for $pkg: ${data.length} chars")
+                        shortcutResponses.remove(pkg)?.complete(data)
+                        continue
+                    }
+
                     val size = rdr.readInt()
 
                     if (size > 100000 || (frameCount > 0 && frameCount % 30 == 0L)) {
@@ -276,6 +295,51 @@ class VirtualDisplayClient(
         }
     }
 
+    fun uninstallApp(packageName: String) {
+        sendCommand { buf ->
+            val bytes = packageName.toByteArray(Charsets.UTF_8)
+            buf.put(CMD_UNINSTALL.toByte())
+            buf.putInt(bytes.size)
+            buf.put(bytes)
+        }
+    }
+
+    fun openAppInfo(packageName: String) {
+        sendCommand { buf ->
+            val bytes = packageName.toByteArray(Charsets.UTF_8)
+            buf.put(CMD_OPEN_APP_INFO.toByte())
+            buf.putInt(bytes.size)
+            buf.put(bytes)
+        }
+    }
+
+    /**
+     * Query app shortcuts via the VD server (which has shell access).
+     * Returns the raw output from "cmd shortcut get-shortcuts" or null on timeout/failure.
+     */
+    suspend fun queryShortcuts(packageName: String): String? {
+        val ch = channel ?: return null
+        val deferred = CompletableDeferred<String>()
+        shortcutResponses[packageName] = deferred
+        try {
+            val buf = ByteBuffer.allocate(1024)
+            val bytes = packageName.toByteArray(Charsets.UTF_8)
+            buf.put(CMD_QUERY_SHORTCUTS.toByte())
+            buf.putInt(bytes.size)
+            buf.put(bytes)
+            buf.flip()
+            synchronized(writeLock) {
+                FrameCodec.writeAll(ch, buf)
+            }
+            return withTimeout(5000L) { deferred.await() }
+        } catch (e: Exception) {
+            FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
+            return null
+        } finally {
+            shortcutResponses.remove(packageName)
+        }
+    }
+
     /**
      * Send a raw touch event for immediate MotionEvent injection on the VD.
      * Synchronous write — avoids coroutine dispatch latency for touch events.
@@ -330,6 +394,9 @@ class VirtualDisplayClient(
     fun disconnect() {
         isConnected = false
         videoJob?.cancel()
+        // Fail any pending shortcut queries so callers don't wait for timeout
+        shortcutResponses.values.forEach { try { it.complete("") } catch (_: Exception) {} }
+        shortcutResponses.clear()
         reader?.close() // wake selector so video relay exits promptly
         try { serverChannel?.close() } catch (_: Exception) {}
         try { channel?.close() } catch (_: Exception) {}
@@ -407,11 +474,15 @@ class VirtualDisplayClient(
         private const val MSG_DISPLAY_READY: Byte = 0x10
         private const val MSG_STACK_EMPTY: Byte = 0x11
         private const val MSG_FOCUSED_APP: Byte = 0x12
+        private const val MSG_SHORTCUTS_RESULT: Byte = 0x13
         private const val CMD_LAUNCH_APP = 0x20
         private const val CMD_GO_BACK = 0x21
         private const val CMD_GO_HOME = 0x22
         private const val CMD_INPUT_TAP = 0x30
         private const val CMD_INPUT_SWIPE = 0x31
         private const val CMD_INPUT_TOUCH = 0x32
+        private const val CMD_UNINSTALL = 0x23
+        private const val CMD_OPEN_APP_INFO = 0x24
+        private const val CMD_QUERY_SHORTCUTS = 0x25
     }
 }

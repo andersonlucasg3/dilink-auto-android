@@ -243,14 +243,8 @@ fun AppGrid(
         else sorted.filter { it.appName.contains(searchQuery, ignoreCase = true) }
     }
 
-    // In-memory cache of decoded ImageBitmaps — survives fast-scroll recompositions.
-    // Backed by CarIconCache for persistence across reconnections.
-    val decodedIconCache = remember { mutableMapOf<String, androidx.compose.ui.graphics.ImageBitmap>() }
-
-    // Cleanup stale cache entries when app list changes
-    remember(apps) {
-        decodedIconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
-    }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val iconSizePx = with(density) { 64.dp.toPx().toInt() }
 
     Column(modifier = modifier) {
         Row(modifier = Modifier.weight(1f)) {
@@ -270,7 +264,7 @@ fun AppGrid(
                     items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
                         AppTile(
                             app = app,
-                            decodedIconCache = decodedIconCache,
+                            iconSizePx = iconSizePx,
                             onClick = { onAppClick(app.packageName) },
                             service = service
                         )
@@ -394,7 +388,7 @@ private fun GridScrollbar(
 @Composable
 fun AppTile(
     app: AppInfo,
-    decodedIconCache: MutableMap<String, androidx.compose.ui.graphics.ImageBitmap>,
+    iconSizePx: Int,
     onClick: () -> Unit,
     service: CarConnectionService
 ) {
@@ -412,23 +406,17 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
-    // Lazy-decode icon via CarIconCache (memory → disk → decode, in that order)
+    // Lazy-decode icon via car-side cache at the exact pixel size needed
     var iconBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
 
-    LaunchedEffect(app.packageName) {
-        val cached = decodedIconCache[app.packageName]
-        if (cached != null) {
-            iconBitmap = cached
-            return@LaunchedEffect
-        }
+    LaunchedEffect(app.packageName, iconSizePx) {
+        if (app.iconPng.isEmpty()) return@LaunchedEffect
         try {
             val bmp = withContext(Dispatchers.IO) {
-                ServerApp.iconCache.getOrPut(app.packageName, app.iconHash, app.iconPng)
+                ServerApp.iconCache.get(app.packageName, iconSizePx)
             }
             if (bmp != null) {
-                val img = bmp.asImageBitmap()
-                decodedIconCache[app.packageName] = img
-                iconBitmap = img
+                iconBitmap = bmp.asImageBitmap()
             }
         } catch (e: Exception) {
             Log.w("AppTile", "Decode failed for ${app.packageName}: ${e.message}")
@@ -481,47 +469,86 @@ fun AppTile(
             )
         }
 
-        // Dropdown context menu
+        // Dropdown context menu — sized generously for car touchscreen interaction
         DropdownMenu(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
             offset = DpOffset(8.dp, 0.dp),
-            modifier = Modifier.background(Color(0xFF1A1F2B))
+            modifier = Modifier
+                .widthIn(min = 220.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_uninstall), color = Color.White) },
+                text = {
+                    Text(
+                        stringResource(R.string.action_uninstall),
+                        color = Color.White,
+                        fontSize = 18.sp
+                    )
+                },
                 onClick = {
                     menuExpanded = false
                     service.requestUninstall(app.packageName)
                 },
-                leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color(0xFFEF5350)) }
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Delete, null,
+                        tint = Color(0xFFEF5350),
+                        modifier = Modifier.size(28.dp)
+                    )
+                },
+                modifier = Modifier.padding(vertical = 4.dp)
             )
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_app_info), color = Color.White) },
+                text = {
+                    Text(
+                        stringResource(R.string.action_app_info),
+                        color = Color.White,
+                        fontSize = 18.sp
+                    )
+                },
                 onClick = {
                     menuExpanded = false
                     service.requestAppInfo(app.packageName)
                 },
-                leadingIcon = { Icon(Icons.Default.Info, null, tint = Color(0xFF64B5F6)) }
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Info, null,
+                        tint = Color(0xFF64B5F6),
+                        modifier = Modifier.size(28.dp)
+                    )
+                },
+                modifier = Modifier.padding(vertical = 4.dp)
             )
 
             // Shortcut items
             if (shortcuts != null && shortcuts.isNotEmpty()) {
-                Divider(color = Color(0xFF2A2F3A), modifier = Modifier.padding(vertical = 4.dp))
+                Divider(
+                    color = Color(0xFF2A2F3A),
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
                 shortcuts.forEach { shortcut ->
                     DropdownMenuItem(
                         text = {
                             Text(
                                 shortcut.shortLabel.ifEmpty { shortcut.longLabel },
                                 color = Color(0xFFB0BEC5),
-                                fontSize = 13.sp
+                                fontSize = 16.sp
                             )
                         },
                         onClick = {
                             menuExpanded = false
                             service.executeShortcut(app.packageName, shortcut.id)
                         },
-                        leadingIcon = { Icon(Icons.Default.OpenInNew, null, tint = Color(0xFF81C784)) }
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.OpenInNew, null,
+                                tint = Color(0xFF81C784),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        },
+                        modifier = Modifier.padding(vertical = 4.dp)
                     )
                 }
             }
