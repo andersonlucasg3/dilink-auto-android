@@ -45,12 +45,12 @@ import kotlinx.coroutines.flow.*
 class CarConnectionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var controlConnection: Connection? = null
-    private var videoConnection: Connection? = null
-    private var inputConnection: Connection? = null
+    @Volatile private var controlConnection: Connection? = null
+    @Volatile private var videoConnection: Connection? = null
+    @Volatile private var inputConnection: Connection? = null
     val videoDecoder = VideoDecoder()
-    private var adbController: RemoteAdbController? = null
-    private var phoneHost: String? = null
+    @Volatile private var adbController: RemoteAdbController? = null
+    @Volatile private var phoneHost: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var consecutiveFailures = 0
     private var usbAdb: UsbAdbConnection? = null
@@ -145,6 +145,9 @@ class CarConnectionService : Service() {
 
     private val _shortcutsCache = MutableStateFlow<Map<String, List<AppShortcut>>>(emptyMap())
     val shortcutsCache: StateFlow<Map<String, List<AppShortcut>>> = _shortcutsCache.asStateFlow()
+
+    private val _appInfoData = MutableStateFlow<AppInfoDataMessage?>(null)
+    val appInfoData: StateFlow<AppInfoDataMessage?> = _appInfoData.asStateFlow()
 
     enum class State { IDLE, CONNECTING, CONNECTED, STREAMING }
 
@@ -715,6 +718,11 @@ class CarConnectionService : Service() {
                 _appList.value = _appList.value.filter { it.packageName != pkg }
                 carLogSend("App uninstalled: $pkg — removed from grid")
             }
+            DataMsg.APP_INFO_DATA -> {
+                val info = AppInfoDataMessage.decode(frame.payload)
+                _appInfoData.value = info
+                carLogSend("App info received: ${info.packageName} v${info.versionName}")
+            }
         }
     }
 
@@ -874,6 +882,10 @@ class CarConnectionService : Service() {
                 carLogSend("Requested uninstall: $packageName")
             } catch (e: Exception) { carLogSend("requestUninstall failed: ${e.message}", "E") }
         }
+    }
+
+    fun clearAppInfoData() {
+        _appInfoData.value = null
     }
 
     fun requestAppInfo(packageName: String) {

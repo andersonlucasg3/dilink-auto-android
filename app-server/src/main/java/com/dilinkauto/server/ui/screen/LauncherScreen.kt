@@ -469,47 +469,86 @@ fun AppTile(
             )
         }
 
-        // Dropdown context menu
+        // Dropdown context menu — sized generously for car touchscreen interaction
         DropdownMenu(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
             offset = DpOffset(8.dp, 0.dp),
-            modifier = Modifier.background(Color(0xFF1A1F2B))
+            modifier = Modifier
+                .widthIn(min = 220.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_uninstall), color = Color.White) },
+                text = {
+                    Text(
+                        stringResource(R.string.action_uninstall),
+                        color = Color.White,
+                        fontSize = 18.sp
+                    )
+                },
                 onClick = {
                     menuExpanded = false
                     service.requestUninstall(app.packageName)
                 },
-                leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color(0xFFEF5350)) }
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Delete, null,
+                        tint = Color(0xFFEF5350),
+                        modifier = Modifier.size(28.dp)
+                    )
+                },
+                modifier = Modifier.padding(vertical = 4.dp)
             )
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_app_info), color = Color.White) },
+                text = {
+                    Text(
+                        stringResource(R.string.action_app_info),
+                        color = Color.White,
+                        fontSize = 18.sp
+                    )
+                },
                 onClick = {
                     menuExpanded = false
                     service.requestAppInfo(app.packageName)
                 },
-                leadingIcon = { Icon(Icons.Default.Info, null, tint = Color(0xFF64B5F6)) }
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Info, null,
+                        tint = Color(0xFF64B5F6),
+                        modifier = Modifier.size(28.dp)
+                    )
+                },
+                modifier = Modifier.padding(vertical = 4.dp)
             )
 
             // Shortcut items
             if (shortcuts != null && shortcuts.isNotEmpty()) {
-                Divider(color = Color(0xFF2A2F3A), modifier = Modifier.padding(vertical = 4.dp))
+                Divider(
+                    color = Color(0xFF2A2F3A),
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
                 shortcuts.forEach { shortcut ->
                     DropdownMenuItem(
                         text = {
                             Text(
                                 shortcut.shortLabel.ifEmpty { shortcut.longLabel },
                                 color = Color(0xFFB0BEC5),
-                                fontSize = 13.sp
+                                fontSize = 16.sp
                             )
                         },
                         onClick = {
                             menuExpanded = false
                             service.executeShortcut(app.packageName, shortcut.id)
                         },
-                        leadingIcon = { Icon(Icons.Default.OpenInNew, null, tint = Color(0xFF81C784)) }
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.OpenInNew, null,
+                                tint = Color(0xFF81C784),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        },
+                        modifier = Modifier.padding(vertical = 4.dp)
                     )
                 }
             }

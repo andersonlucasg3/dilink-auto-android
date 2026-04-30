@@ -510,6 +510,52 @@ data class AppUninstalledMessage(val packageName: String) {
     }
 }
 
+/** Phone → Car: app info data for display on car screen (payload in DataMsg.APP_INFO_DATA) */
+data class AppInfoDataMessage(
+    val packageName: String,
+    val appName: String,
+    val versionName: String,
+    val versionCode: Long,
+    val installTime: Long,
+    val targetSdk: Int
+) {
+    fun encode(): ByteArray {
+        val pkgBytes = packageName.toByteArray(Charsets.UTF_8)
+        val nameBytes = appName.toByteArray(Charsets.UTF_8)
+        val verBytes = versionName.toByteArray(Charsets.UTF_8)
+        val buf = java.nio.ByteBuffer.allocate(
+            2 + pkgBytes.size + 2 + nameBytes.size + 2 + verBytes.size + 8 + 8 + 4
+        )
+        buf.putShort(pkgBytes.size.toShort()); buf.put(pkgBytes)
+        buf.putShort(nameBytes.size.toShort()); buf.put(nameBytes)
+        buf.putShort(verBytes.size.toShort()); buf.put(verBytes)
+        buf.putLong(versionCode)
+        buf.putLong(installTime)
+        buf.putInt(targetSdk)
+        return buf.array()
+    }
+
+    companion object {
+        fun decode(data: ByteArray): AppInfoDataMessage {
+            val buf = java.nio.ByteBuffer.wrap(data)
+            fun readStr(): String {
+                val len = buf.short.toInt() and 0xFFFF
+                val bytes = ByteArray(len)
+                buf.get(bytes)
+                return String(bytes, Charsets.UTF_8)
+            }
+            return AppInfoDataMessage(
+                packageName = readStr(),
+                appName = readStr(),
+                versionName = readStr(),
+                versionCode = buf.long,
+                installTime = buf.long,
+                targetSdk = buf.int
+            )
+        }
+    }
+}
+
 /** Shortcut info for an app */
 data class AppShortcut(
     val id: String,
