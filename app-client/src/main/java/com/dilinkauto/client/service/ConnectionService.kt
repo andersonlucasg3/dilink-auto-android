@@ -969,25 +969,11 @@ class ConnectionService : Service() {
                 val apps = pm.queryIntentActivities(
                     Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
                 ).map { info ->
-                    val iconPng = try {
-                        val drawable = info.loadIcon(pm)
-                        val bitmap = android.graphics.Bitmap.createBitmap(
-                            96, 96, android.graphics.Bitmap.Config.RGB_565
-                        )
-                        val canvas = android.graphics.Canvas(bitmap)
-                        drawable.setBounds(0, 0, 96, 96)
-                        drawable.draw(canvas)
-                        val stream = java.io.ByteArrayOutputStream()
-                        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 80, stream)
-                        bitmap.recycle()
-                        stream.toByteArray()
-                    } catch (e: Exception) { ByteArray(0) }
-
                     AppInfo(
                         info.activityInfo.packageName,
                         info.loadLabel(pm).toString(),
                         categorizeApp(info.activityInfo.packageName),
-                        iconPng
+                        ClientApp.iconCache.getOrLoad(info.activityInfo.packageName, 96)
                     )
                 }.sortedBy { it.category.id }
 

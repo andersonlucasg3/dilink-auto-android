@@ -3,7 +3,9 @@ package com.dilinkauto.client
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.os.Environment
 import com.dilinkauto.client.service.UpdateManager
+import java.io.File
 
 class ClientApp : Application() {
 
@@ -12,6 +14,10 @@ class ClientApp : Application() {
         createNotificationChannels()
         UpdateManager.init(this)
         ShizukuManager.init(this)
+        iconCache = AppIconCache(
+            packageManager,
+            File(Environment.getExternalStorageDirectory(), "DiLinkAuto")
+        )
     }
 
     private fun createNotificationChannels() {
@@ -38,5 +44,8 @@ class ClientApp : Application() {
     companion object {
         const val CHANNEL_SERVICE = "dilinkauto_service"
         const val CHANNEL_UPDATE = "dilinkauto_update"
+
+        lateinit var iconCache: AppIconCache
+            private set
     }
 }

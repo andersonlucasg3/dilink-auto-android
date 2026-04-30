@@ -1,14 +1,10 @@
 package com.dilinkauto.client.service
 
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import com.dilinkauto.client.ClientApp
 import com.dilinkauto.protocol.DataMsg
 import com.dilinkauto.protocol.NotificationData
-import java.io.ByteArrayOutputStream
 
 /**
  * Listens for phone notifications and forwards them to the car display.
@@ -60,7 +56,7 @@ class NotificationService : NotificationListenerService() {
             progress = progress,
             progressMax = progressMax,
             progressIndeterminate = progressIndeterminate,
-            iconPng = loadAppIconPng(sbn.packageName)
+            iconPng = ClientApp.iconCache.getOrLoad(sbn.packageName, 64)
         )
 
         try {
@@ -95,25 +91,5 @@ class NotificationService : NotificationListenerService() {
     @Suppress("NOTHING_TO_INLINE")
     fun cancelAll() {
         super.cancelAllNotifications()
-    }
-
-    private fun loadAppIconPng(packageName: String): ByteArray {
-        return try {
-            val icon: Drawable = packageManager.getApplicationIcon(packageName)
-            val bitmap = if (icon is BitmapDrawable) {
-                Bitmap.createScaledBitmap(icon.bitmap, 64, 64, true)
-            } else {
-                val bmp = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bmp)
-                icon.setBounds(0, 0, 64, 64)
-                icon.draw(canvas)
-                bmp
-            }
-            val stream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.PNG, 80, stream)
-            stream.toByteArray()
-        } catch (_: Exception) {
-            ByteArray(0)
-        }
     }
 }
