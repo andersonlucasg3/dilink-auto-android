@@ -138,6 +138,17 @@ fun CarShell(service: CarConnectionService) {
         }
     }
 
+    // When the focused app changes on the VD (after back presses close an app),
+    // update the nav bar to reflect the new active app
+    LaunchedEffect(Unit) {
+        service.focusedApp.collect { pkg ->
+            if (pkg != null) {
+                activeAppPackage = pkg
+                currentScreen = Screen.APP
+            }
+        }
+    }
+
     // Prune recent apps when the app list updates
     LaunchedEffect(appList) {
         if (appList.isNotEmpty()) {
