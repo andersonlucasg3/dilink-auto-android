@@ -394,6 +394,9 @@ class VirtualDisplayClient(
     fun disconnect() {
         isConnected = false
         videoJob?.cancel()
+        // Fail any pending shortcut queries so callers don't wait for timeout
+        shortcutResponses.values.forEach { try { it.complete("") } catch (_: Exception) {} }
+        shortcutResponses.clear()
         reader?.close() // wake selector so video relay exits promptly
         try { serverChannel?.close() } catch (_: Exception) {}
         try { channel?.close() } catch (_: Exception) {}

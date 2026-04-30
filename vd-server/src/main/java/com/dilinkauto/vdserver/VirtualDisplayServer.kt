@@ -503,7 +503,10 @@ class VirtualDisplayServer(
                         respBuf.putInt(dataBytes.size)
                         respBuf.put(dataBytes)
                         respBuf.flip()
-                        writeAllBlocking(ch, respBuf)
+                        writeQueue.add(respBuf)
+                        writeQueueDepth++
+                        val wt = writerThread
+                        if (wt != null) LockSupport.unpark(wt)
                     }
                     CMD_STOP -> running = false
                     else -> err("Unknown command: 0x${cmd.toString(16)}")
