@@ -736,16 +736,19 @@ class VirtualDisplayServer(
                 err("mDisplayIdToMirror reflection failed: ${e.javaClass.simpleName}: ${e.message}")
             }
 
+            // SHOULD_SHOW_SYSTEM_DECORATIONS (1<<9) intentionally NOT set.
+            // On Samsung devices it activates DeX desktop UI (taskbar, window
+            // decorations) on the VD, rendering them too small for the car display.
+            // The car's own PersistentNavBar and status UI provide all chrome.
             val flags = (DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
                     or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
                     or (1 shl 6)   // ROTATES_WITH_CONTENT
-                    or (1 shl 9)   // SHOULD_SHOW_SYSTEM_DECORATIONS
                     or (1 shl 10)  // TRUSTED
                     or (1 shl 11)  // OWN_DISPLAY_GROUP
                     or (1 shl 13)  // ALWAYS_UNLOCKED
                     or (1 shl 14)) // OWN_FOCUS
 
-            log("Creating VD with flags=0x${flags.toString(16)}")
+            log("Creating VD with flags=0x${flags.toString(16)} (no system decorations)")
             virtualDisplay = dm.createVirtualDisplay("DiLinkAutoVD", width, height, dpi, vdSurface, flags)
 
             if (virtualDisplay != null) {
@@ -782,9 +785,10 @@ class VirtualDisplayServer(
         val dmg = getInstance.invoke(null)
         log("Got DisplayManagerGlobal instance")
 
+        // SHOULD_SHOW_SYSTEM_DECORATIONS (1<<9) intentionally NOT set — see comment above.
         val flags = (DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
                 or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
-                or (1 shl 6) or (1 shl 9) or (1 shl 10) or (1 shl 11) or (1 shl 13) or (1 shl 14))
+                or (1 shl 6) or (1 shl 10) or (1 shl 11) or (1 shl 13) or (1 shl 14))
 
         val configBuilderClass = Class.forName("android.hardware.display.VirtualDisplayConfig\$Builder")
         val builderCtor = configBuilderClass.getDeclaredConstructor(
