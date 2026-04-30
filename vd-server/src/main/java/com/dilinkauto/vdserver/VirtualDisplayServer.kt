@@ -492,7 +492,7 @@ class VirtualDisplayServer(
                         reader.readFullyBlocking(buf, 0, len)
                         val pkg = String(buf)
                         log("Querying shortcuts for: $pkg")
-                        val output = execShellFullOutput("cmd shortcut get-shortcuts --package $pkg") ?: ""
+                        val output = execShellFullOutput("cmd shortcut get-shortcuts --package $pkg 2>&1") ?: ""
                         log("Shortcut result for $pkg: ${output.length} chars")
                         val pkgBytes = pkg.toByteArray(Charsets.UTF_8)
                         val dataBytes = output.toByteArray(Charsets.UTF_8)

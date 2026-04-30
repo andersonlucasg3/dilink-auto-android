@@ -36,7 +36,7 @@ class ConnectionService : Service() {
     private var controlConnection: Connection? = null
     private var videoConnection: Connection? = null
     private var inputConnection: Connection? = null
-    private var vdClient: VirtualDisplayClient? = null
+    @Volatile private var vdClient: VirtualDisplayClient? = null
     private var pendingAppLaunch: String? = null
     private var vdWaitJob: Job? = null
     private var vdWidth = 1304
@@ -1101,6 +1101,7 @@ class ConnectionService : Service() {
     }
 
     private suspend fun queryShortcuts(packageName: String): List<AppShortcut> {
+        FileLog.i(TAG, "Querying shortcuts for $packageName: shizuku=${ShizukuManager.isAvailable} vdClient=${vdClient != null} vdConnected=${vdClient?.isConnected}")
         // Try Shizuku shell first — has full access to shortcut data
         if (ShizukuManager.isAvailable) {
             try {
@@ -1116,6 +1117,7 @@ class ConnectionService : Service() {
         // Try VD server — runs as shell UID, can access all shortcuts
         val vd = vdClient
         if (vd != null && vd.isConnected) {
+            FileLog.i(TAG, "VD server path: querying shortcuts for $packageName")
             try {
                 val output = vd.queryShortcuts(packageName)
                 if (!output.isNullOrBlank()) {
@@ -1123,7 +1125,11 @@ class ConnectionService : Service() {
                     if (parsed.isNotEmpty()) {
                         FileLog.i(TAG, "VD server returned ${parsed.size} shortcuts for $packageName")
                         return parsed
+                    } else {
+                        FileLog.w(TAG, "VD server returned output but parsed empty for $packageName")
                     }
+                } else {
+                    FileLog.w(TAG, "VD server returned empty/null output for $packageName")
                 }
             } catch (e: Exception) {
                 FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
