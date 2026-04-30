@@ -345,7 +345,11 @@ class ConnectionService : Service() {
         FileLog.i(TAG, "Car display: ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi fps=${request.targetFps}")
         targetFps = request.targetFps
 
-        val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
+        val phoneDpi = VideoConfig.getVirtualDisplayDpi(this)
+        val isDesktopMode = VideoConfig.isDesktopMode(this)
+        if (isDesktopMode) {
+            FileLog.i(TAG, "Desktop mode detected — using DPI=$phoneDpi for VD")
+        }
         val dpiScale = phoneDpi.toFloat() / 160f
         val minHeightPx = (VideoConfig.TARGET_SW_DP * dpiScale).toInt()
         val carAspect = request.screenWidth.toFloat() / request.screenHeight
@@ -371,7 +375,8 @@ class ConnectionService : Service() {
             virtualDisplayId = -1,
             adbPort = 5555,
             vdServerJarPath = vdJarPath,
-            connectionMethod = connMethod
+            connectionMethod = connMethod,
+            vdDpi = phoneDpi
         )
         serviceScope.launch(Dispatchers.IO) {
             // Check version BEFORE sending response — determines the flow
@@ -509,7 +514,7 @@ class ConnectionService : Service() {
         }
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
+                val phoneDpi = VideoConfig.getVirtualDisplayDpi(this@ConnectionService)
                 val dpiScale = phoneDpi.toFloat() / 160f
                 val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
                 val scaledW = ((scaledH * carWidth.toFloat() / carHeight).toInt()) and 0x7FFFFFFE.toInt()
