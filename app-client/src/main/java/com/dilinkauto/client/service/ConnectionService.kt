@@ -62,7 +62,6 @@ class ConnectionService : Service() {
     override fun onCreate() {
         super.onCreate()
         FileLog.rotate() // Archive previous log, start fresh
-        VideoConfig.diagLog = { msg -> FileLog.d(TAG, "DeXDetect: $msg") }
         // Clear stale static state from previous service instance
         activeConnection = null
         _serviceState.value = State.IDLE
@@ -427,20 +426,15 @@ class ConnectionService : Service() {
         FileLog.i(TAG, "Car display: ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi fps=${request.targetFps}")
         targetFps = request.targetFps
 
-        val desktopMode = VideoConfig.isDesktopMode(this)
-        val phoneDpi = if (desktopMode) VideoConfig.DESKTOP_MODE_DPI else VideoConfig.VIRTUAL_DISPLAY_DPI
-        val targetSwDp = if (desktopMode) VideoConfig.DESKTOP_MODE_TARGET_SW_DP else VideoConfig.TARGET_SW_DP
-        if (desktopMode) {
-            FileLog.i(TAG, "Desktop mode detected — DPI=$phoneDpi SW_DP=$targetSwDp for VD")
-        }
+        val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
         val dpiScale = phoneDpi.toFloat() / 160f
-        val minHeightPx = (targetSwDp * dpiScale).toInt()
+        val minHeightPx = (VideoConfig.TARGET_SW_DP * dpiScale).toInt()
         val carAspect = request.screenWidth.toFloat() / request.screenHeight
         val scaledH = minHeightPx and 0x7FFFFFFE.toInt()
         val scaledW = ((scaledH * carAspect).toInt()) and 0x7FFFFFFE.toInt()
         vdWidth = scaledW
         vdHeight = scaledH
-        FileLog.i(TAG, "VD dimensions: ${scaledW}x${scaledH} @${phoneDpi}dpi (SW=$targetSwDp dp)")
+        FileLog.i(TAG, "Touch mapping: ${scaledW}x${scaledH}")
 
         vdClient?.disconnect()
         vdClient = null
@@ -597,11 +591,9 @@ class ConnectionService : Service() {
         }
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val desktopMode = VideoConfig.isDesktopMode(this@ConnectionService)
-                val phoneDpi = if (desktopMode) VideoConfig.DESKTOP_MODE_DPI else VideoConfig.VIRTUAL_DISPLAY_DPI
-                val targetSwDp = if (desktopMode) VideoConfig.DESKTOP_MODE_TARGET_SW_DP else VideoConfig.TARGET_SW_DP
+                val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
                 val dpiScale = phoneDpi.toFloat() / 160f
-                val scaledH = ((targetSwDp * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
+                val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
                 val scaledW = ((scaledH * carWidth.toFloat() / carHeight).toInt()) and 0x7FFFFFFE.toInt()
                 val jarPath = java.io.File(
                     java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
