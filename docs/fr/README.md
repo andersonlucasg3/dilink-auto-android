@@ -78,15 +78,16 @@ L'APK voiture et le JAR du serveur VD sont intégrés dans l'APK du téléphone 
 **Fonctionnel :**
 - Diffusion vidéo H.264 à 60 ips (CBR 8 Mbps, profil Main, configurable via négociation)
 - Entrée tactile complète (multi-touch, pincer pour zoomer)
-- Lanceur d'applications avec recherche, tri alphabétique, icônes 64 dp
+- Lanceur d'applications avec recherche, tri alphabétique, icônes 64 dp, grille adaptative
 - Notifications sur l'écran de la voiture avec barres de progression, touchez pour ouvrir
 - Auto-mise à jour via GitHub Releases (release) ou pré-versions (debug)
-- Mise à jour automatique : le téléphone détecte une application voiture obsolète et la met à jour via WiFi ADB
+- **Prise en charge Shizuku** : connexion sans ADB, auto-mise à jour silencieuse via pm install
+- Mise à jour automatique : le téléphone détecte une application voiture obsolète (comparaison des noms de version) et la met à jour via WiFi ADB
 - Écran du téléphone éteint pendant la diffusion (économie de batterie)
 - Intégration guidée pour toutes les autorisations requises
 - Internationalisation : anglais, portugais, russe, biélorusse, français, kazakh, ukrainien, ouzbek
 - Restauration de l'affichage après déconnexion USB (v0.14.0+)
-- Testé sur BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
+- Testé sur BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 + Galaxy S24
 
 **À venir :** streaming audio, contrôles multimédia, widgets de navigation
 

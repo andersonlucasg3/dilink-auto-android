@@ -47,7 +47,7 @@ Foreground service managing the full connection lifecycle with a parallel prereq
 **Track A — WiFi:**
 - Discovery: gateway IP (hotspot/LAN, retries every 3s) → mDNS → manual IP
 - Control connection: NIO non-blocking SocketChannel connect to phone TCP:9637
-- Handshake: sends viewport dimensions + DPI + appVersionCode + targetFps (60) → receives phone info + vdServerJarPath
+- Handshake: sends viewport dimensions + DPI + appVersionCode + appVersionName + targetFps (60) → receives phone info + vdServerJarPath + connectionMethod
 - On handshake response: opens video (9638) + input (9639) connections in parallel, sets `wifiReady = true` after all 3 established
 - Video: receives H.264 frames via video connection, dispatches to VideoDecoder
 - Touch: dedicated single-thread executor, `sendTouchEvent()` / `sendTouchBatch()` via input connection
@@ -145,7 +145,7 @@ Width computed to guarantee even viewport for H.264 encoder.
 Shown as the main content area when streaming mode is active and current screen is HOME:
 - Search field with `imePadding()` — keyboard doesn't push activity, only search bar moves
 - `windowSoftInputMode="adjustNothing"` in manifest
-- 64dp app icons in 160dp adaptive grid cells
+- 64dp app icons in dynamically calculated fixed grid columns (3-12 based on display width)
 - App name text: bodyLarge
 - Alphabetical sort
 - Manual IP entry

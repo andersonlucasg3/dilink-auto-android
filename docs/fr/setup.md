@@ -28,7 +28,7 @@ C'est tout. Pas de Débogage sans fil, pas de codes d'appairage, pas de configur
 
 1. **Installez Shizuku** depuis [GitHub Releases](https://github.com/RikkaApps/Shizuku/releases) ou Google Play
 2. **Démarrez Shizuku** une fois via ADB (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`) ou via root
-3. **Ouvrez DiLink Auto** → Paramètres → Shizuku → appuyez pour accorder l'autorisation
+3. **Ouvrez DiLink Auto** → Paramètres → Shizuku → appuyez pour ouvrir l'application Shizuku et autoriser DiLink Auto
 4. Lorsque Shizuku est actif, le téléphone déploie directement le serveur VD. Pas besoin d'USB ADB ou de Débogage sans fil.
 
 Avec Shizuku actif, la voiture n'a besoin que d'une connexion WiFi — le câble USB n'est pas nécessaire pour la diffusion.

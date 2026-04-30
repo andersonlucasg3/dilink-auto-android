@@ -278,6 +278,7 @@ class VirtualDisplayClient(
         }
     }
 
+    @android.annotation.SuppressLint("BlockedPrivateApi")
     fun disconnect() {
         isConnected = false
         videoJob?.cancel()

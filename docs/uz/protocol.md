@@ -54,8 +54,10 @@ Telefon ilovasi va VD serveri o'rtasida `localhost:19637` da alohida ichki proto
 | supportedFeatures     | int32 |  bit maskasi
 | displayMode           | byte  |  0=MIRROR, 1=VIRTUAL (default)
 | screenDpi             | int32 |  avtomobil displey zichligi (mas. 240)
-| appVersionCode        | int32 |  avtomobil ilovasi versiya kodi
+| appVersionCode        | int32 |  avtomobil ilovasi versiya kodi (eski, orqaga moslik uchun)
 | targetFps             | int32 |  avtomobil so'ragan FPS (mas. 60)
+| appVersionName uzunligi | int16 |  versionName satr uzunligi
+| appVersionName        | UTF-8 |  avtomobil ilovasi versiya nomi (mas. "0.16.0")
 +----------------------+------+
 ```
 
@@ -131,7 +133,7 @@ Video kadrni ifodalovchi H.264 NAL birliklari.
 - Codec: H.264/AVC
 - Profile: High
 - Resolution: avtomobil ko'rish oynasi o'lchamlari (mas., 1806x990)
-- Bitrate: 12 Mbps CBR
+- Bitrate: 8 Mbps CBR
 - Frame rate: handshake'dagi `targetFps` orqali sozlanadi (default 30, avtomobil 60 so'raydi)
 - IDR interval: 1 soniya
 - SurfaceScaler: har `1000/fps` ms da davriy qayta chizish statik tarkibda kodlovchi chiqishini ta'minlaydi
@@ -210,7 +212,7 @@ Tugma hodisasi (masalan, media tugmalar, navigatsiya tugmalari). Kelajakda foyda
 ## Constants
 
 ```
-APP_VERSION_CODE      = read at runtime via PackageManager
+APP_VERSION_COMPARISON = versionName via semver (with versionCode fallback for older cars)
 PROTOCOL_VERSION      = 1
 CONTROL_PORT          = 9637 (phone <-> car, handshake + heartbeat + commands + data)
 VIDEO_PORT            = 9638 (phone -> car, H.264 frames only)

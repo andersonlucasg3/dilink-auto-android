@@ -6,7 +6,7 @@ Telefon klienti VD serverini joylashtirishni, avtomobilni avto-yangilashni va 3-
 
 1. Avtomobildan TCP ulanishlarini 9637 portida tinglaydi (control, NIO ServerSocketChannel)
 2. Handshake'ga qurilma ma'lumoti, vdServerJarPath va `targetFps` ni o'qib javob beradi
-3. Handshake'dan appVersionCode ni tekshiradi — versiya mos kelmasa `UPDATING_CAR` yuboradi va avtomobil ilovasini dadb orqali avto-yangilaydi
+3. Handshake'dan appVersionName ni taqqoslaydi (versionCode ga fallback bilan) — versiya mos kelmasa `UPDATING_CAR` yuboradi va avtomobil ilovasini dadb orqali avto-yangilaydi
 4. Handshake'dan keyin avtomobildan video (9638) va kiritish (9639) ulanishlarini qabul qiladi
 5. vd-server.jar ni `/sdcard/DiLinkAuto/` ga joylashtiradi va VD serverini ishga tushiradi (FPS argumenti bilan)
 6. VD serveridan localhost:19637 da teskari ulanishni qabul qiladi (NIO ServerSocketChannel)
@@ -19,15 +19,15 @@ Telefon klienti VD serverini joylashtirishni, avtomobilni avto-yangilashni va 3-
 
 ### ClientApp
 
-Application klassi. Xabarnoma kanallarini yaratadi (`dilinkauto_service`, `dilinkauto_update`), yaratish paytida `UpdateManager` ni initsializatsiya qiladi.
+Application klassi. Xabarnoma kanallarini yaratadi (`dilinkauto_service`, `dilinkauto_update`), yaratish paytida `UpdateManager` va `ShizukuManager` ni initsializatsiya qiladi.
 
 ### UpdateManager
 
 GitHub Releases'dan yangi versiyalarni tekshiradigan o'z-o'zini yangilash mexanizmi.
 - `checkForUpdate(force)`: `https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases/latest` so'raydi, teg nomidagi semver'ni o'rnatilgan versionName bilan solishtiradi. Majburiy bo'lmasa 6 soatlik tanaffusga rioya qiladi.
 - `downloadUpdate()`: Progress ko'rsatish bilan `HttpsURLConnection` orqali APK yuklaydi. `PackageManager.getPackageArchiveInfo()` orqali tekshiradi.
-- `installUpdate(context)`: `FileProvider` URI orqali tizim paket o'rnatuvchisini ochadi.
-- Holatlar: Idle, Checking, Available, Downloading, ReadyToInstall, UpToDate, Error. `StateFlow` orqali taqdim etiladi.
+- `installUpdate(context)`: Shizuku mavjud bo'lganda ovozsiz o'rnatish uchun `pm install -r` dan foydalanadi; aks holda `FileProvider` URI orqali tizim paket o'rnatuvchisini ochadi.
+- Holatlar: Idle, Checking, Available, Downloading, ReadyToInstall, Installing, Installed, UpToDate, Error. `StateFlow` orqali taqdim etiladi.
 
 ### MainActivity
 
@@ -45,7 +45,7 @@ Ikki ekranli kirish nuqtasi:
 - **Input connection** (port 9639): handshake'dan keyin qabul qilinadi, INPUT kadr tinglovchisi localhost teginish yozuvlarida NetworkOnMainThreadException oldini olish uchun `Dispatchers.IO` da ishlov beriladi
 - `deployAssets()`: vd-server.jar ni sdcard ga, app-server.apk ni filesDir ga chiqaradi
 - Versiya nomuvofiqligini aniqlaydi → `UPDATING_CAR` yuboradi → avtomobil ilovasini dadb orqali avto-yangilaydi (WiFi ADB, dadb 1.2.10)
-- Aqlli tarmoq qayta chaqiruvi: `onLost` uzilgan tarmoq ulanish foydalanayotgan tarmoq ekanini tekshiradi, bog'liq bo'lmagan uzilishlarni e'tiborsiz qoldiradi (mobil ma'lumotlar sikli)
+- Aqlli tarmoq qayta chaqiruvi: `TRANSPORT_WIFI` orqali filtrlanadi — faqat WiFi o'zgarishlariga reaksiya qiladi, 3G/4G mobil ma'lumotlar tebranishlarini e'tiborsiz qoldiradi
 - Video kadrlarni (H.264 CONFIG + FRAME) VD dan avtomobilga video ulanishi orqali uzatadi
 - Avtomobildan teginish hodisalarini (kiritish ulanishi) VD serveriga yo'naltiradi
 - Ilovalar ro'yxatini 96x96 PNG ikonkalari bilan avtomobilga control ulanishi orqali yuboradi
@@ -99,13 +99,16 @@ Teginish hodisalari avtomobildan kiritish ulanishi orqali CMD_INPUT_TOUCH (0x32)
 | Permission | Purpose |
 |-----------|---------|
 | MANAGE_EXTERNAL_STORAGE | VD JAR ni sdcard ga joylashtirish uchun All Files Access |
-| Accessibility Service | Fizik displeyga kiritish inyeksiyasi (zaxira) |
+| Accessibility Service | dispatchGesture orqali virtual displeyga teginish inyeksiyasi (hodisalarni kuzatishsiz) |
 | Notification Access | Avtomobilga xabarnomalarni yo'naltirish (progress bilan) |
-| USB Debugging | Avtomobil USB ADB treki uchun talab qilinadi (Developer Options) |
+| API Shizuku | ADB-siz VD serverini joylashtirish va ovozsiz o'z-o'zini yangilash uchun yuqori darajali shell kirish |
+| QUERY_ALL_PACKAGES | Ilovalar ishga tushirgich to'ri |
+| REQUEST_INSTALL_PACKAGES | Avtomobil ilovasini dadb orqali avto-yangilash |
 
 ## Bog'liqliklar
 
 - Jetpack Compose + Material 3
 - kotlinx-coroutines
 - dadb 1.2.10 (avtomobil avto-yangilash uchun WiFi ADB)
+- Shizuku api/provider/aidl 13.1.5
 - Protocol module (avtomobil ilovasi bilan umumiy)

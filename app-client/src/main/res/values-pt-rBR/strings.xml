@@ -52,6 +52,8 @@
     <string name="updates_downloading">Baixando… %1$d%%</string>
     <string name="updates_ready">Telefone: v%1$s pronto</string>
     <string name="updates_install_btn">Instalar Atualização</string>
+    <string name="updates_installing">Instalando v%1$s via Shizuku…</string>
+    <string name="updates_installed">Telefone atualizado! Reinicie para aplicar.</string>
     <string name="updates_retry">Tentar Novamente</string>
     <string name="updates_available_title">Atualização Disponível</string>
     <string name="updates_update_btn">Atualizar</string>

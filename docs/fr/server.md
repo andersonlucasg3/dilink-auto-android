@@ -47,7 +47,7 @@ Service foreground gérant le cycle de vie complet de la connexion avec une mach
 **Piste A — WiFi :**
 - Découverte : IP passerelle (hotspot/LAN, réessaye toutes les 3s) → mDNS → IP manuelle
 - Connexion contrôle : connexion NIO non-bloquante SocketChannel vers TCP:9637 du téléphone
-- Handshake : envoie dimensions viewport + DPI + appVersionCode + targetFps (60) → reçoit infos téléphone + vdServerJarPath
+- Handshake : envoie dimensions viewport + DPI + appVersionCode + appVersionName + targetFps (60) → reçoit infos téléphone + vdServerJarPath + connectionMethod
 - À la réponse handshake : ouvre les connexions vidéo (9638) + entrée (9639) en parallèle, définit `wifiReady = true` après établissement des 3
 - Vidéo : reçoit les trames H.264 via la connexion vidéo, les distribue à VideoDecoder
 - Tactile : exécuteur single-thread dédié, `sendTouchEvent()` / `sendTouchBatch()` via la connexion entrée
@@ -145,7 +145,7 @@ Largeur calculée pour garantir un viewport pair pour l'encodeur H.264.
 Affichée comme zone de contenu principale quand le mode streaming est actif et que l'écran actuel est HOME :
 - Champ de recherche avec `imePadding()` — le clavier ne pousse pas l'activité, seule la barre de recherche bouge
 - `windowSoftInputMode="adjustNothing"` dans le manifest
-- Icônes d'app 64dp dans cellules de grille adaptatives 160dp
+- Icônes d'app 64dp en colonnes de grille fixes calculées dynamiquement (3-12 selon la largeur d'affichage)
 - Texte du nom d'app : bodyLarge
 - Tri alphabétique
 - Saisie manuelle d'IP

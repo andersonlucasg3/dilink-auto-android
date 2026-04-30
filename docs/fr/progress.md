@@ -1,9 +1,19 @@
 # Suivi de progression
 
-Version actuelle : **v0.15.0** (stable)
-Dernière mise à jour : 2026-04-28
+Version actuelle : **v0.16.0** (stable)
+Dernière mise à jour : 2026-04-29
 
 ## Jalons
+
+### v0.16.0 (2026-04-29)
+
+- **Shizuku** : L'app apparaît maintenant dans la liste des apps autorisées Shizuku (ajout de ShizukuProvider ContentProvider). La carte paramètres ouvre directement l'app Shizuku pour la gestion des permissions.
+- **Correction Shizuku exec** : Correction du EBADF des ParcelFileDescriptors dans les transactions binder en dupliquant les FDs avant lecture. `pm install` via Shizuku pour l'auto-mise à jour silencieuse.
+- **Mode Shizuku sur la voiture** : La connexion voiture ne reste plus bloquée sur "En attente du WiFi" quand Shizuku est actif — la boucle de nouvelle tentative IP passerelle ne s'arrête plus après la première tentative.
+- **Vérification de version passée à versionName** : Les mises à jour de l'app voiture comparent maintenant les chaînes versionName (compatible semver) au lieu des entiers versionCode, permettant les mises à jour pré-release de la voiture.
+- **Renforcement de la sécurité** : Suppression des permissions inutilisées `RECORD_AUDIO` et `SYSTEM_ALERT_WINDOW`. Le service d'accessibilité n'écoute plus les événements `typeAllMask` (utilise uniquement `dispatchGesture`).
+- **Performance de la grille d'apps** : Correction du crash lors du défilement rapide sur l'écran voiture. `GridCells.Adaptive` → `GridCells.Fixed` avec colonnes calculées. Décodage bitmap lazy par tuile avec `inSampleSize=2` + `RGB_565`.
+- **Stabilité réseau** : `NetworkCallback` côté téléphone maintenant filtré sur `TRANSPORT_WIFI` uniquement, ignorant les fluctuations de données mobiles 3G/4G.
 
 ### v0.15.0 (2026-04-28)
 

@@ -6,7 +6,7 @@ O cliente do celular gerencia a implantacao do servidor VD, a auto-atualizacao d
 
 1. Escuta por conexoes TCP do carro na porta 9637 (controle, NIO ServerSocketChannel)
 2. Responde ao handshake com informacoes do dispositivo, vdServerJarPath e le o `targetFps`
-3. Verifica o appVersionCode do handshake — envia `UPDATING_CAR` e auto-atualiza o app do carro via dadb se houver discrepancia de versao
+3. Compara o appVersionName do handshake (com fallback para versionCode) — envia `UPDATING_CAR` e auto-atualiza o app do carro via dadb se houver discrepancia de versao
 4. Aceita conexoes de video (9638) e entrada (9639) do carro apos o handshake
 5. Implanta vd-server.jar em `/sdcard/DiLinkAuto/` e inicia o servidor VD (com argumento FPS)
 6. Aceita conexao reversa do servidor VD em localhost:19637 (NIO ServerSocketChannel)
@@ -19,15 +19,15 @@ O cliente do celular gerencia a implantacao do servidor VD, a auto-atualizacao d
 
 ### ClientApp
 
-Classe Application. Cria canais de notificacao (`dilinkauto_service`, `dilinkauto_update`), inicializa `UpdateManager` no create.
+Classe Application. Cria canais de notificacao (`dilinkauto_service`, `dilinkauto_update`), inicializa `UpdateManager` e `ShizukuManager` no create.
 
 ### UpdateManager
 
 Mecanismo de auto-atualizacao que verifica GitHub Releases por novas versoes.
 - `checkForUpdate(force)`: Consulta `https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases/latest`, compara semver da tag name com o versionName instalado. Respeita intervalo de 6 horas, a menos que forçado.
 - `downloadUpdate()`: Baixa APK via `HttpsURLConnection` com relatorio de progresso. Verifica via `PackageManager.getPackageArchiveInfo()`.
-- `installUpdate(context)`: Abre o instalador de pacotes do sistema via URI do `FileProvider`.
-- Estados: Idle, Checking, Available, Downloading, ReadyToInstall, UpToDate, Error. Expostos via `StateFlow`.
+- `installUpdate(context)`: Usa Shizuku `pm install -r` para instalação silenciosa quando o Shizuku está disponível; caso contrário, recorre ao instalador de pacotes do sistema via URI do `FileProvider`.
+- Estados: Idle, Checking, Available, Downloading, ReadyToInstall, Instalando, Instalado, UpToDate, Error. Expostos via `StateFlow`.
 
 ### MainActivity
 
@@ -45,7 +45,7 @@ Servico em primeiro plano que gerencia o ciclo de vida da conexao celular-carro 
 - **Conexao de entrada** (porta 9639): aceita apos handshake, listener de quadros INPUT despachado em `Dispatchers.IO` para evitar NetworkOnMainThreadException em escritas de toque no localhost
 - `deployAssets()`: extrai vd-server.jar para o sdcard, app-server.apk para filesDir
 - Detecta discrepancia de versao → envia `UPDATING_CAR` → auto-atualiza o app do carro via dadb (WiFi ADB, dadb 1.2.10)
-- Callback de rede inteligente: `onLost` verifica se a rede perdida e a que a conexao utiliza, ignora quedas nao relacionadas (ciclagem de dados moveis)
+- Callback de rede inteligente: filtrado por `TRANSPORT_WIFI` — reage apenas a mudancas de WiFi, ignora flutuacoes de dados moveis 3G/4G
 - Retransmite quadros de video (H.264 CONFIG + FRAME) do VD para o carro via conexao de video
 - Encaminha eventos de toque do carro (conexao de entrada) para o servidor VD
 - Envia lista de apps com icones PNG 96x96 para o carro via conexao de controle
@@ -99,13 +99,16 @@ Eventos de toque chegam do carro via conexao de entrada como CMD_INPUT_TOUCH (0x
 | Permissao | Proposito |
 |-----------|-----------|
 | MANAGE_EXTERNAL_STORAGE | Acesso a Todos os Arquivos para implantacao do JAR VD no sdcard |
-| Servico de Acessibilidade | Injecao de entrada na tela fisica (fallback) |
+| Servico de Acessibilidade | Injecao de toque no display virtual via dispatchGesture (sem monitoramento de eventos) |
 | Acesso a Notificacoes | Encaminhar notificacoes para o carro (com progresso) |
-| Depuracao USB | Necessaria para a trilha USB ADB do carro (Opcoes do Desenvolvedor) |
+| API Shizuku | Acesso shell elevado para implantacao do servidor VD sem ADB e auto-atualizacao silenciosa |
+| QUERY_ALL_PACKAGES | Grade de apps do launcher |
+| REQUEST_INSTALL_PACKAGES | Auto-atualizacao do app do carro via dadb |
 
 ## Dependencias
 
 - Jetpack Compose + Material 3
 - kotlinx-coroutines
 - dadb 1.2.10 (WiFi ADB para auto-atualizacao do carro)
+- Shizuku api/provider/aidl 13.1.5
 - Modulo Protocol (compartilhado com o app do carro)

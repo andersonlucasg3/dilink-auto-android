@@ -6,7 +6,7 @@
 
 1. Слушает TCP соединения от автомобиля на порту 9637 (управление, NIO ServerSocketChannel)
 2. Отвечает на handshake информацией об устройстве, vdServerJarPath и читает `targetFps`
-3. Проверяет appVersionCode из handshake — отправляет `UPDATING_CAR` и автообновляет приложение авто через dadb при несовпадении версий
+3. Сравнивает appVersionName из handshake (с fallback на versionCode) — отправляет `UPDATING_CAR` и автообновляет приложение авто через dadb при несовпадении версий
 4. Принимает видео (9638) и ввод (9639) соединения от автомобиля после handshake
 5. Развёртывает vd-server.jar в `/sdcard/DiLinkAuto/` и запускает сервер VD (с аргументом FPS)
 6. Принимает обратное соединение от сервера VD на localhost:19637 (NIO ServerSocketChannel)
@@ -19,15 +19,15 @@
 
 ### ClientApp
 
-Класс приложения. Создаёт каналы уведомлений (`dilinkauto_service`, `dilinkauto_update`), инициализирует `UpdateManager` при создании.
+Класс приложения. Создаёт каналы уведомлений (`dilinkauto_service`, `dilinkauto_update`), инициализирует `UpdateManager` и `ShizukuManager` при создании.
 
 ### UpdateManager
 
 Механизм самообновления, который проверяет GitHub Releases на новые версии.
 - `checkForUpdate(force)`: Запрашивает `https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases/latest`, сравнивает semver из имени тега с установленной versionName. Соблюдает 6-часовой интервал, если не принудительно.
 - `downloadUpdate()`: Скачивает APK через `HttpsURLConnection` с отчётом о прогрессе. Проверяет через `PackageManager.getPackageArchiveInfo()`.
-- `installUpdate(context)`: Открывает системный установщик пакетов через URI `FileProvider`.
-- Состояния: Idle, Checking, Available, Downloading, ReadyToInstall, UpToDate, Error. Предоставляется через `StateFlow`.
+- `installUpdate(context)`: Использует Shizuku `pm install -r` для бесшумной установки, когда Shizuku доступен; иначе открывает системный установщик пакетов через URI `FileProvider`.
+- Состояния: Idle, Checking, Available, Downloading, ReadyToInstall, Installing, Installed, UpToDate, Error. Предоставляется через `StateFlow`.
 
 ### MainActivity
 
@@ -45,7 +45,7 @@
 - **Соединение ввода** (порт 9639): принимается после handshake, слушатель кадров INPUT с диспетчеризацией на `Dispatchers.IO` для избежания NetworkOnMainThreadException при записи касаний на localhost
 - `deployAssets()`: извлекает vd-server.jar на sdcard, app-server.apk в filesDir
 - Определяет несовпадение версий → отправляет `UPDATING_CAR` → автообновляет приложение авто через dadb (WiFi ADB, dadb 1.2.10)
-- Умный сетевой обратный вызов: `onLost` проверяет, является ли потерянная сеть той, которую использует соединение, игнорирует несвязанные потери (циклирование мобильных данных)
+- Умный сетевой обратный вызов: фильтруется по `TRANSPORT_WIFI` — реагирует только на изменения WiFi, игнорирует колебания мобильных данных 3G/4G
 - Ретранслирует видеокадры (H.264 CONFIG + FRAME) от VD к авто через видео соединение
 - Направляет события касаний от авто (соединение ввода) к серверу VD
 - Отправляет список приложений с иконками PNG 96x96 в авто через управляющее соединение
@@ -99,13 +99,16 @@
 | Разрешение | Назначение |
 |-----------|---------|
 | MANAGE_EXTERNAL_STORAGE | Доступ ко всем файлам для развёртывания JAR VD на sdcard |
-| Служба специальных возможностей | Инжекция ввода на физический экран (резервный вариант) |
+| Служба специальных возможностей | Инжекция касаний на виртуальный дисплей через dispatchGesture (без мониторинга событий) |
 | Доступ к уведомлениям | Пересылка уведомлений в авто (с прогрессом) |
-| USB Debugging | Требуется для дорожки USB ADB автомобиля (Опции разработчика) |
+| API Shizuku | Повышенный shell-доступ для развёртывания сервера VD без ADB и бесшумного самообновления |
+| QUERY_ALL_PACKAGES | Сетка лаунчера приложений |
+| REQUEST_INSTALL_PACKAGES | Автообновление приложения авто через dadb |
 
 ## Зависимости
 
 - Jetpack Compose + Material 3
 - kotlinx-coroutines
 - dadb 1.2.10 (WiFi ADB для автообновления авто)
+- Shizuku api/provider/aidl 13.1.5
 - Модуль Protocol (общий с приложением автомобиля)

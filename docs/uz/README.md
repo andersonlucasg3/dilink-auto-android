@@ -78,15 +78,16 @@ Avtomobil APK va VD server JAR telefon APK ichiga joylashtirilgan — avtomobilg
 **Ishlaydi:**
 - 60 kadr/s H.264 video oqimi (8 Mbit/s CBR, Main profili, qo'l siqish orqali sozlanadi)
 - To'liq sensorli kiritish (multi-tach, kattalashtirish uchun chimchilash)
-- Qidiruv, alifbo tartibida saralash, 64dp piktogrammalar bilan ilova ishga tushirgich
+- Qidiruv, alifbo tartibida saralash, 64dp piktogrammalar, moslashuvchan to'r bilan ilova ishga tushirgich
 - Progress chiziqlari bilan avtomobil ekranida bildirishnomalar, ochish uchun bosing
 - GitHub Releases (reliz) yoki oldindan relizlar (disk raskadrovka) orqali o'zini yangilash
-- Avto-yangilash: telefon eskirgan avtomobil ilovasini aniqlaydi va uni WiFi ADB orqali yangilaydi
+- **Shizuku qo'llab-quvvatlashi**: ADB-siz ulanish, pm install orqali ovozsiz o'zini yangilash
+- Avto-yangilash: telefon eskirgan avtomobil ilovasini (versiya nomini taqqoslash) aniqlaydi va uni WiFi ADB orqali yangilaydi
 - Oqim vaqtida telefon ekrani o'chirilgan (batareyani tejash)
 - Barcha kerakli ruxsatlar uchun yo'naltirilgan onboarding
 - Internatsionalizatsiya: ingliz, portugal, rus, belarus, fransuz, qozoq, ukrain, o'zbek
 - USB uzilgandan keyin displeyni tiklash (v0.14.0+)
-- BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 da sinovdan o'tkazilgan
+- BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 + Galaxy S24 da sinovdan o'tkazilgan
 
 **Yaqinda:** audio oqimi, media boshqaruvi, navigatsiya vidjetlari
 

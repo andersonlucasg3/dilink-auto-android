@@ -1,9 +1,19 @@
 # Rastreador de Progresso
 
-Versao atual: **v0.15.0** (estavel)
-Ultima atualizacao: 2026-04-28
+Versao atual: **v0.16.0** (estavel)
+Ultima atualizacao: 2026-04-29
 
 ## Marcos
+
+### v0.16.0 (2026-04-29)
+
+- **Shizuku**: App agora aparece na lista de apps autorizados do Shizuku (adicionado ShizukuProvider ContentProvider). Cartao de configuracoes abre o app Shizuku diretamente para gerenciamento de permissao.
+- **Correcao Shizuku exec**: Corrigido EBADF de ParcelFileDescriptors em transacoes binder ao duplicar FDs antes da leitura. `pm install` via Shizuku para auto-atualizacao silenciosa.
+- **Modo Shizuku no carro**: Conexao do carro nao fica mais presa em "Aguardando WiFi" quando Shizuku esta ativo — loop de tentativa de gateway IP nao para mais apos a primeira tentativa.
+- **Verificacao de versao alterada para versionName**: Atualizacoes do app do carro agora comparam strings versionName (compativel com semver) em vez de inteiros versionCode, permitindo atualizacoes pre-release do carro.
+- **Reforco de seguranca**: Removidas permissoes nao utilizadas `RECORD_AUDIO` e `SYSTEM_ALERT_WINDOW`. Servico de acessibilidade nao escuta mais eventos `typeAllMask` (usa apenas `dispatchGesture`).
+- **Performance da grade de apps**: Corrigida falha durante rolagem rapida no display do carro. `GridCells.Adaptive` → `GridCells.Fixed` com colunas calculadas. Decodificacao lazy de bitmap por tile com `inSampleSize=2` + `RGB_565`.
+- **Estabilidade de rede**: `NetworkCallback` do lado do telefone agora filtrado para `TRANSPORT_WIFI` apenas, ignorando flutuacoes de dados moveis 3G/4G.
 
 ### v0.15.0 (2026-04-28)
 

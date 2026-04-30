@@ -28,7 +28,7 @@
 
 1. **Встановіть Shizuku** з [GitHub Releases](https://github.com/RikkaApps/Shizuku/releases) або Google Play
 2. **Запустіть Shizuku** один раз через ADB (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`) або через root
-3. **Відкрийте DiLink Auto** → Налаштування → Shizuku → торкніться для надання дозволу
+3. **Відкрийте DiLink Auto** → Налаштування → Shizuku → торкніться, щоб відкрити додаток Shizuku та авторизувати DiLink Auto
 4. Коли Shizuku активний, телефон розгортає VD-сервер безпосередньо. USB ADB або бездротове налагодження не потрібні.
 
 При активному Shizuku автомобілю потрібен лише WiFi — USB-кабель для потокової передачі не потрібен.

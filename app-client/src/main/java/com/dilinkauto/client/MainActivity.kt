@@ -1054,9 +1054,13 @@ fun SettingsScreen(
             title = shizukuTitle,
             description = shizukuDesc,
             onClick = {
-                if (!shizukuAvailable) {
-                    ShizukuManager.requestPermission()
-                    permissionsKey++
+                when {
+                    shizukuAvailable -> { /* already authorized */ }
+                    shizukuInstalled -> {
+                        ShizukuManager.requestPermission()
+                        ShizukuManager.openShizukuApp(context)
+                        permissionsKey++
+                    }
                 }
             }
         )
@@ -1264,6 +1268,20 @@ fun UpdatesCard(
                         Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.updates_install_btn))
+                    }
+                }
+                is UpdateState.Installing -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.updates_installing, state.version), fontSize = 13.sp, color = Color.Gray)
+                    }
+                }
+                is UpdateState.Installed -> {
+                    Text(stringResource(R.string.updates_installed), fontSize = 13.sp, color = Color(0xFF4CAF50))
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onCheckForUpdate) {
+                        Text(stringResource(R.string.updates_check_phone), color = MaterialTheme.colorScheme.primary)
                     }
                 }
                 is UpdateState.Error -> {

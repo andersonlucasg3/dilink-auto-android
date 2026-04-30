@@ -214,5 +214,5 @@ Module librairie Android (`com.android.library`), compilé via `bundleLibRuntime
 | WiFi ADB | dadb 1.2.10 (mise à jour auto voiture) |
 | Async | Kotlin Coroutines + Flow |
 | API min | 29 (Android 10) |
-| Version app | versionCode lu à l'exécution via PackageManager (partagé dans gradle.properties) |
+| Version app | versionName comparée via semver (partagé dans gradle.properties) ; versionCode toujours envoyé pour compatibilité ascendante |
 | Version protocole | PROTOCOL_VERSION = 1 |

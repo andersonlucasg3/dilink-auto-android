@@ -109,7 +109,7 @@ class ConnectionService : Service() {
     private fun registerNetworkCallback() {
         val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .build()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
@@ -375,13 +375,15 @@ class ConnectionService : Service() {
         )
         serviceScope.launch(Dispatchers.IO) {
             // Check version BEFORE sending response — determines the flow
-            val carVersion = request.appVersionCode
-            @Suppress("DEPRECATION")
-            val myVersion = packageManager.getPackageInfo(packageName, 0).versionCode
+            val carVersionName = request.appVersionName.ifEmpty { request.appVersionCode.toString() }
+            val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
+                it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
+            }
             // Skip auto-update if a previous attempt failed recently (5min cooldown)
             val updateCooldown = autoUpdateFailedAt > 0L &&
                 System.currentTimeMillis() - autoUpdateFailedAt < 5 * 60 * 1000L
-            val needsUpdate = carVersion < myVersion && !autoUpdateAttempted && !updateCooldown
+            val needsUpdate = UpdateManager.compareVersions(myVersionName, carVersionName) > 0
+                && !autoUpdateAttempted && !updateCooldown
 
             if (needsUpdate) {
                 // ─── UPDATE FLOW ───
@@ -402,8 +404,8 @@ class ConnectionService : Service() {
 
                 // Do NOT start VD wait or send app list — the car will restart after update.
                 autoUpdateAttempted = true
-                FileLog.i(TAG, "Car app outdated (v$carVersion < v$myVersion) — updating, then waiting for reconnect")
-                _installStatusStatic.value = getString(R.string.status_auto_update, carVersion.toString(), myVersion.toString())
+                FileLog.i(TAG, "Car app outdated ($carVersionName < $myVersionName) — updating, then waiting for reconnect")
+                _installStatusStatic.value = getString(R.string.status_auto_update, carVersionName, myVersionName)
                 autoUpdateCarApp(conn)
                 // autoUpdateCarApp restarts the car app — it will reconnect with the new version.
                 // We disconnect and go back to WAITING.
@@ -422,10 +424,10 @@ class ConnectionService : Service() {
                     return@launch
                 }
 
-                if (carVersion < myVersion) {
-                    FileLog.i(TAG, "Car app outdated (v$carVersion) — update already attempted this session, proceeding")
+                if (UpdateManager.compareVersions(myVersionName, carVersionName) > 0) {
+                    FileLog.i(TAG, "Car app outdated ($carVersionName) — update already attempted this session, proceeding")
                 } else {
-                    FileLog.i(TAG, "Car app up-to-date (v$carVersion)")
+                    FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
                 }
 
                 // Accept video and input connections from car
@@ -753,16 +755,17 @@ class ConnectionService : Service() {
                 try {
                     _installStatus.value = getString(R.string.car_install_status_checking_version)
                     val versionOutput = dadb.shell(
-                        "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionCode"
+                        "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionName"
                     ).allOutput
-                    val installedVersion = Regex("""versionCode=(\d+)""")
-                        .find(versionOutput)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                    @Suppress("DEPRECATION")
-                    val myVersion = packageManager.getPackageInfo(packageName, 0).versionCode
-                    FileLog.i(TAG, "Car app: installed=v$installedVersion, embedded=v$myVersion")
+                    val installedVersionName = Regex("""versionName=(\S+)""")
+                        .find(versionOutput)?.groupValues?.get(1) ?: "0"
+                    val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
+                        it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
+                    }
+                    FileLog.i(TAG, "Car app: installed=$installedVersionName, embedded=$myVersionName")
 
-                    if (installedVersion >= myVersion) {
-                        _installStatus.value = getString(R.string.car_install_status_already_up_to_date, installedVersion.toString())
+                    if (UpdateManager.compareVersions(myVersionName, installedVersionName) <= 0) {
+                        _installStatus.value = getString(R.string.car_install_status_already_up_to_date, installedVersionName)
                         return@launch
                     }
 
@@ -771,14 +774,14 @@ class ConnectionService : Service() {
                     dadb.push(apkFile, remotePath)
                     FileLog.i(TAG, "Car APK pushed (${apkFile.length()} bytes)")
 
-                    _installStatus.value = getString(R.string.car_install_status_installing_version, myVersion.toString())
+                    _installStatus.value = getString(R.string.car_install_status_installing_version, myVersionName)
                     val result = dadb.shell("pm install -r $remotePath").allOutput
                     FileLog.i(TAG, "Install result: ${result.trim()}")
 
                     if (result.contains("Success")) {
                         _installStatus.value = getString(R.string.car_install_status_launching_car_app)
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
-                        _installStatus.value = getString(R.string.car_install_status_car_installed, myVersion.toString())
+                        _installStatus.value = getString(R.string.car_install_status_car_installed, myVersionName)
                     } else {
                         _installStatus.value = getString(R.string.car_install_status_failed, result.trim())
                     }
@@ -1042,6 +1045,7 @@ class ConnectionService : Service() {
      * 2. FLAG_TURN_SCREEN_ON activity launch — WindowManager triggers display on
      * 3. WakeLock with ACQUIRE_CAUSES_WAKEUP — framework-level
      */
+    @android.annotation.SuppressLint("BlockedPrivateApi")
     private fun forceWakeScreen() {
         serviceScope.launch(Dispatchers.IO) {
             try {

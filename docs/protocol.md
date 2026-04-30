@@ -54,8 +54,10 @@ A separate internal protocol runs between the phone app and VD server on `localh
 | supportedFeatures     | int32 |  bitmask
 | displayMode           | byte  |  0=MIRROR, 1=VIRTUAL (default)
 | screenDpi             | int32 |  car display density (e.g. 240)
-| appVersionCode        | int32 |  car app version code
+| appVersionCode        | int32 |  car app version code (legacy, for backward compatibility)
 | targetFps             | int32 |  car's requested FPS (e.g. 60)
+| appVersionName len    | int16 |  version name string length
+| appVersionName        | UTF-8 |  car app version name (e.g. "0.16.0")
 +----------------------+------+
 ```
 
@@ -131,7 +133,7 @@ H.264 NAL units representing a video frame.
 - Codec: H.264/AVC
 - Profile: High
 - Resolution: car viewport dimensions (e.g., 1806x990)
-- Bitrate: 12 Mbps CBR
+- Bitrate: 8 Mbps CBR
 - Frame rate: configurable via `targetFps` in handshake (default 30, car requests 60)
 - IDR interval: 1 second
 - SurfaceScaler: periodic re-draw every `1000/fps` ms ensures encoder output on static content
@@ -210,7 +212,7 @@ Key event (e.g., media keys, navigation keys). Reserved for future use.
 ## Constants
 
 ```
-APP_VERSION_CODE      = read at runtime via PackageManager
+APP_VERSION_COMPARISON = versionName via semver (with versionCode fallback for older cars)
 PROTOCOL_VERSION      = 1
 CONTROL_PORT          = 9637 (phone <-> car, handshake + heartbeat + commands + data)
 VIDEO_PORT            = 9638 (phone -> car, H.264 frames only)

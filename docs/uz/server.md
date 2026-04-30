@@ -47,7 +47,7 @@ Parallel shart holat mashinasi va 3 ajratilgan ulanish bilan to'liq ulanish hayo
 **Track A — WiFi:**
 - Aniqlash: gateway IP (hotspot/LAN, har 3s qaytariladi) → mDNS → qo'lda IP
 - Control connection: telefon TCP:9637 ga NIO bloklanmaydigan SocketChannel connect
-- Handshake: ko'rish oynasi o'lchamlari + DPI + appVersionCode + targetFps (60) yuboradi → telefon ma'lumoti + vdServerJarPath oladi
+- Handshake: ko'rish oynasi o'lchamlari + DPI + appVersionCode + appVersionName + targetFps (60) yuboradi → telefon ma'lumoti + vdServerJarPath + connectionMethod oladi
 - Handshake javobida: video (9638) + kiritish (9639) ulanishlarini parallel ochadi, barchasi 3 o'rnatilgandan keyin `wifiReady = true` o'rnatadi
 - Video: video ulanishi orqali H.264 kadrlarini oladi, VideoDecoder'ga yuboradi
 - Touch: maxsus bir oqimli ijrochi, `sendTouchEvent()` / `sendTouchBatch()` kiritish ulanishi orqali
@@ -145,7 +145,7 @@ Eni H.264 kodlovchi uchun juft ko'rish oynasini kafolatlash uchun hisoblanadi.
 Oqim rejimi faol va joriy ekran HOME bo'lganda asosiy tarkib maydoni sifatida ko'rsatiladi:
 - `imePadding()` bilan qidiruv maydoni — klaviatura activity'ni turtmaydi, faqat qidiruv satri harakatlanadi
 - Manifest'da `windowSoftInputMode="adjustNothing"`
-- 160dp adaptiv to'r katakchalarida 64dp ilova ikonkalari
+- Displey kengligiga qarab dinamik hisoblanadigan qat'iy to'r ustunlarida 64dp ilova ikonkalari (3-12)
 - Ilova nomi matni: bodyLarge
 - Alifbo tartibida saralash
 - Qo'lda IP kiritish

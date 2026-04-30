@@ -1,9 +1,19 @@
 # Progress Traker
 
-Joriy versiya: **v0.15.0** (barqaror)
-So'nggi yangilanish: 2026-04-28
+Joriy versiya: **v0.16.0** (barqaror)
+So'nggi yangilanish: 2026-04-29
 
 ## Bosqichlar
+
+### v0.16.0 (2026-04-29)
+
+- **Shizuku**: Ilova endi Shizuku avtorizatsiya qilingan ilovalar ro'yxatida ko'rinadi (ShizukuProvider ContentProvider qo'shildi). Sozlamalar kartochkasi ruxsatlarni boshqarish uchun Shizuku ilovasini to'g'ridan-to'g'ri ochadi.
+- **Shizuku exec tuzatish**: O'qishdan oldin FD'larni dup qilish orqali binder tranzaksiyalarida ParcelFileDescriptors'dan EBADF tuzatildi. Ovozsiz o'z-o'zini yangilash uchun Shizuku orqali `pm install`.
+- **Avtomobilda Shizuku rejimi**: Shizuku faol bo'lganda avtomobil ulanishi endi "WiFi kutish" da qolib ketmaydi — gateway IP qayta urinish sikli birinchi urinishdan keyin to'xtab qolmaydi.
+- **Versiya tekshiruvi versionName ga o'tkazildi**: Avtomobil ilovasi yangilanishlari endi versionCode butun sonlari o'rniga versionName satrlarini (semver-mos) solishtiradi, bu avtomobil uchun oldindan reliz yangilanishlarini yoqadi.
+- **Xavfsizlik kuchaytirildi**: Ishlatilmayotgan `RECORD_AUDIO` va `SYSTEM_ALERT_WINDOW` ruxsatlari olib tashlandi. Maxsus imkoniyatlar xizmati endi `typeAllMask` hodisalarini tinglamaydi (faqat `dispatchGesture` ishlatadi).
+- **Ilovalar to'ri ishlashi**: Avtomobil displeyida tezkor aylantirish paytida yuzaga kelgan nosozlik tuzatildi. `GridCells.Adaptive` → `GridCells.Fixed` hisoblangan ustunlar bilan. Har bir plitka uchun `inSampleSize=2` + `RGB_565` bilan lazy bitmap dekodlash.
+- **Tarmoq barqarorligi**: Telefon tomonidagi `NetworkCallback` endi faqat `TRANSPORT_WIFI` ga filtrlanadi, 3G/4G mobil ma'lumotlar tebranishlarini e'tiborsiz qoldiradi.
 
 ### v0.15.0 (2026-04-28)
 

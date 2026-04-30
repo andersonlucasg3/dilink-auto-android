@@ -54,8 +54,10 @@ Un protocole interne séparé fonctionne entre l'application téléphone et le s
 | supportedFeatures     | int32 |  masque de bits
 | displayMode           | byte  |  0=MIRROR, 1=VIRTUAL (défaut)
 | screenDpi             | int32 |  densité écran voiture (ex. 240)
-| appVersionCode        | int32 |  code version app voiture
+| appVersionCode        | int32 |  code version app voiture (legacy, pour compatibilité ascendante)
 | targetFps             | int32 |  FPS demandé par la voiture (ex. 60)
+| longueur appVersionName | int16 |  longueur de la chaîne versionName
+| appVersionName        | UTF-8 |  nom de version app voiture (ex. "0.16.0")
 +----------------------+------+
 ```
 
@@ -131,7 +133,7 @@ Unités NAL H.264 représentant une trame vidéo.
 - Codec : H.264/AVC
 - Profil : High
 - Résolution : dimensions du viewport voiture (ex., 1806x990)
-- Bitrate : 12 Mbps CBR
+- Bitrate : 8 Mbps CBR
 - Fréquence d'images : configurable via `targetFps` dans le handshake (défaut 30, la voiture demande 60)
 - Intervalle IDR : 1 seconde
 - SurfaceScaler : redessin périodique toutes les `1000/fps` ms assure la sortie encodeur sur contenu statique
@@ -210,7 +212,7 @@ Données d'état de navigation. Réservé pour l'intégration du widget de navig
 ## Constantes
 
 ```
-APP_VERSION_CODE      = lu à l'exécution via PackageManager
+APP_VERSION_COMPARISON = versionName via semver (avec appVersionCode en solution de repli pour véhicules plus anciens)
 PROTOCOL_VERSION      = 1
 CONTROL_PORT          = 9637 (téléphone <-> voiture, handshake + heartbeat + commandes + données)
 VIDEO_PORT            = 9638 (téléphone -> voiture, trames H.264 uniquement)

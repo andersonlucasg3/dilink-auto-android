@@ -79,15 +79,16 @@ The car APK and VD server JAR are bundled inside the phone APK — you never ins
 **Working:**
 - 60fps H.264 video streaming (8Mbps CBR, Main profile, configurable via handshake)
 - Full touch input (multi-touch, pinch-to-zoom)
-- App launcher with search, alphabetical sort, 64dp icons
+- App launcher with search, alphabetical sort, 64dp icons, adaptive grid
 - Notifications on car screen with progress bars, tap to open
 - Self-update via GitHub Releases (release) or prereleases (debug)
-- Auto-update: phone detects outdated car app and updates it over WiFi ADB
+- **Shizuku support**: ADB-free connection, silent self-update via pm install
+- Auto-update: phone detects outdated car app (version name comparison) and updates over WiFi ADB
 - Phone screen off during streaming (battery saving)
 - Guided onboarding for all required permissions
 - Internationalization: English, Portuguese, Russian, Belarusian, French, Kazakh, Ukrainian, Uzbek
 - Display restore after USB disconnect (v0.14.0+)
-- Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
+- Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 + Galaxy S24
 
 **Coming:** audio streaming, media controls, navigation widgets
 
