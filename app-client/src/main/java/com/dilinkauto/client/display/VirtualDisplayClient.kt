@@ -45,6 +45,9 @@ class VirtualDisplayClient(
 
     private var serverChannel: ServerSocketChannel? = null
 
+    // Track launched apps in order — used to know which app gains focus after back presses
+    private val launchedAppStack = mutableListOf<String>()
+
     /**
      * Opens the ServerSocket immediately (synchronous, instant).
      * Call this BEFORE sending the handshake response so the socket is ready
@@ -148,9 +151,49 @@ class VirtualDisplayClient(
 
                     // Stack empty signal — no payload, relay to car
                     if (msgType == MSG_STACK_EMPTY) {
-                        FileLog.i(TAG, "VD stack empty — notifying car")
+                        FileLog.i(TAG, "VD stack empty — notifying car, appStack=$launchedAppStack")
+                        // If we still have apps in our stack, the VD might consider HOME
+                        // as a task. Pop from stack and notify car about the previous app.
+                        if (launchedAppStack.size > 1) {
+                            launchedAppStack.removeAt(launchedAppStack.lastIndex)
+                            val nowFocused = launchedAppStack.last()
+                            FileLog.i(TAG, "App stack pop → now focused: $nowFocused")
+                            if (controlConnection.isConnected) {
+                                val pkgBytes = nowFocused.toByteArray(Charsets.UTF_8)
+                                controlConnection.sendControl(
+                                    com.dilinkauto.protocol.ControlMsg.FOCUSED_APP, pkgBytes)
+                            }
+                        } else {
+                            launchedAppStack.clear()
+                            if (controlConnection.isConnected) {
+                                controlConnection.sendControl(com.dilinkauto.protocol.ControlMsg.VD_STACK_EMPTY)
+                            }
+                        }
+                        continue
+                    }
+
+                    // Focused app signal — package name follows
+                    if (msgType == MSG_FOCUSED_APP) {
+                        val pkgLen = rdr.readInt()
+                        val pkgBytes = ByteArray(pkgLen)
+                        rdr.readFully(pkgBytes, 0, pkgLen)
+                        val focusedPkg = String(pkgBytes, Charsets.UTF_8)
+                        FileLog.i(TAG, "VD focused app: $focusedPkg (appStack=$launchedAppStack)")
+                        // Sync our app stack with the VD's reality
+                        if (launchedAppStack.isNotEmpty() && launchedAppStack.last() != focusedPkg) {
+                            // The VD reports a different focused app — our stack is stale
+                            if (focusedPkg in launchedAppStack) {
+                                while (launchedAppStack.isNotEmpty() && launchedAppStack.last() != focusedPkg) {
+                                    launchedAppStack.removeAt(launchedAppStack.lastIndex)
+                                }
+                            } else {
+                                // New focused app not in our stack — add it
+                                launchedAppStack.add(focusedPkg)
+                            }
+                        }
                         if (controlConnection.isConnected) {
-                            controlConnection.sendControl(com.dilinkauto.protocol.ControlMsg.VD_STACK_EMPTY)
+                            controlConnection.sendControl(
+                                com.dilinkauto.protocol.ControlMsg.FOCUSED_APP, pkgBytes)
                         }
                         continue
                     }
@@ -193,6 +236,11 @@ class VirtualDisplayClient(
     // ─── Commands ───
 
     fun launchApp(packageName: String) {
+        // Track launched app in stack
+        if (launchedAppStack.isEmpty() || launchedAppStack.last() != packageName) {
+            launchedAppStack.add(packageName)
+            FileLog.i(TAG, "App stack: $launchedAppStack")
+        }
         sendCommand { buf ->
             val bytes = packageName.toByteArray(Charsets.UTF_8)
             buf.put(CMD_LAUNCH_APP.toByte())
@@ -285,6 +333,7 @@ class VirtualDisplayClient(
         reader?.close() // wake selector so video relay exits promptly
         try { serverChannel?.close() } catch (_: Exception) {}
         try { channel?.close() } catch (_: Exception) {}
+        launchedAppStack.clear()
 
         // Restore physical display — VD server cleanup may not run if process was killed.
         // The VD server uses SurfaceControl / cmd display power-off (hardware-level off).
@@ -357,6 +406,7 @@ class VirtualDisplayClient(
         private const val MSG_VIDEO_FRAME: Byte = 0x02
         private const val MSG_DISPLAY_READY: Byte = 0x10
         private const val MSG_STACK_EMPTY: Byte = 0x11
+        private const val MSG_FOCUSED_APP: Byte = 0x12
         private const val CMD_LAUNCH_APP = 0x20
         private const val CMD_GO_BACK = 0x21
         private const val CMD_GO_HOME = 0x22

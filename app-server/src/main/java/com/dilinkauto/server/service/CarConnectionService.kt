@@ -131,6 +131,9 @@ class CarConnectionService : Service() {
     private val _vdStackEmpty = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val vdStackEmpty: SharedFlow<Unit> = _vdStackEmpty.asSharedFlow()
 
+    private val _focusedApp = MutableStateFlow<String?>(null)
+    val focusedApp: StateFlow<String?> = _focusedApp.asStateFlow()
+
     private val _videoReady = MutableStateFlow(false)
     val videoReady: StateFlow<Boolean> = _videoReady.asStateFlow()
 
@@ -629,7 +632,13 @@ class CarConnectionService : Service() {
             }
             ControlMsg.VD_STACK_EMPTY -> {
                 carLogSend("VD stack empty — switching to home")
+                _focusedApp.value = null
                 _vdStackEmpty.tryEmit(Unit)
+            }
+            ControlMsg.FOCUSED_APP -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                carLogSend("Focused app: $pkg")
+                _focusedApp.value = pkg
             }
         }
     }

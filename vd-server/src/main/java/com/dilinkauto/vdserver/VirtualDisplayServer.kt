@@ -90,6 +90,7 @@ class VirtualDisplayServer(
         private const val MSG_VIDEO_FRAME: Byte = 0x02
         private const val MSG_DISPLAY_READY: Byte = 0x10
         private const val MSG_STACK_EMPTY: Byte = 0x11
+        private const val MSG_FOCUSED_APP: Byte = 0x12
 
         private const val CMD_LAUNCH_APP = 0x20
         private const val CMD_GO_BACK = 0x21
@@ -798,10 +799,14 @@ class VirtualDisplayServer(
     private fun checkStackEmptyImpl() {
         try {
             Thread.sleep(300)
+            // Count tasks on this display by looking for Task{ near display annotations.
+            // The -B 20 context ensures the display annotation and Task{ can be on
+            // different lines (varies by Android version).
             val p = Runtime.getRuntime().exec(arrayOf("sh", "-c",
                 "dumpsys activity activities 2>/dev/null" +
+                " | grep -B 20 'Task{'" +
                 " | grep -E 'display(Id)?=#?$displayId'" +
-                " | grep -c 'Task{'"))
+                " | wc -l"))
             val buf = ByteArray(64)
             val len = p.inputStream.read(buf)
             p.waitFor()
@@ -811,9 +816,53 @@ class VirtualDisplayServer(
             if (taskCount == 0) {
                 log("Display $displayId stack is empty")
                 enqueueWriteByte(MSG_STACK_EMPTY)
+            } else {
+                // Detect the focused app package on this display
+                val focusedPkg = getFocusedPackageOnDisplay()
+                if (focusedPkg != null) {
+                    log("Focused app on display $displayId: $focusedPkg")
+                    val pkgBytes = focusedPkg.toByteArray(Charsets.UTF_8)
+                    val msgBuf = java.nio.ByteBuffer.allocate(1 + 4 + pkgBytes.size)
+                    msgBuf.put(MSG_FOCUSED_APP)
+                    msgBuf.putInt(pkgBytes.size)
+                    msgBuf.put(pkgBytes)
+                    msgBuf.flip()
+                    writeQueue.add(msgBuf)
+                    writeQueueDepth++
+                    val wt = writerThread
+                    if (wt != null) java.util.concurrent.locks.LockSupport.unpark(wt)
+                } else {
+                    log("Display $displayId has tasks but no focused app — treating as empty")
+                    enqueueWriteByte(MSG_STACK_EMPTY)
+                }
             }
         } catch (e: Exception) {
             err("checkStackEmpty failed: ${e.message}")
+        }
+    }
+
+    /** Detects the package name of the currently focused (resumed) activity on the VD display. */
+    private fun getFocusedPackageOnDisplay(): String? {
+        return try {
+            // The globally resumed activity is the one with input focus.
+            // During streaming, this is on the VD (OWN_FOCUS flag).
+            val fp = Runtime.getRuntime().exec(arrayOf("sh", "-c",
+                "dumpsys activity activities 2>/dev/null" +
+                " | grep -B 5 'mResumedActivity'" +
+                " | grep -oP '[a-zA-Z][a-zA-Z0-9_.]+(?=/)'" +
+                " | head -1"))
+            val fbuf = ByteArray(256)
+            val flen = fp.inputStream.read(fbuf)
+            fp.waitFor()
+            if (flen > 0) {
+                val pkg = String(fbuf, 0, flen).trim()
+                // Exclude system/home packages — we only care about user apps
+                if (pkg.isNotEmpty() && !pkg.startsWith("com.android.") && pkg != "android") {
+                    pkg
+                } else null
+            } else null
+        } catch (e: Exception) {
+            null
         }
     }
 

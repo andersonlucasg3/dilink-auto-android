@@ -14,6 +14,8 @@ object ControlMsg {
     const val APP_STOPPED: Byte = 0x14
     /** Phone → Car: VD display has no activities (stack empty after back) */
     const val VD_STACK_EMPTY: Byte = 0x15
+    /** Phone → Car: currently focused app package on VD (payload: UTF-8 package name) */
+    const val FOCUSED_APP: Byte = 0x16
     /** Car → Phone: VD server is running, connect to it on localhost:port */
     const val VD_SERVER_READY: Byte = 0x20
     /** Phone → Car: car app is being updated, don't reconnect — wait for restart */
