@@ -689,7 +689,16 @@ class CarConnectionService : Service() {
 
     private fun handleDataFrame(frame: FrameCodec.Frame) {
         when (frame.messageType) {
-            DataMsg.APP_LIST -> { _appList.value = AppListMessage.decode(frame.payload).apps }
+            DataMsg.APP_LIST -> {
+                val apps = AppListMessage.decode(frame.payload).apps
+                _appList.value = apps
+                // Store source icons in car cache for multi-size access
+                apps.forEach { app ->
+                    if (app.iconPng.isNotEmpty()) {
+                        ServerApp.iconCache.putSource(app.packageName, app.iconPng)
+                    }
+                }
+            }
             DataMsg.NOTIFICATION_POST -> {
                 val n = NotificationData.decode(frame.payload)
                 // Replace existing notification with same ID (handles progress updates)
