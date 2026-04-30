@@ -137,6 +137,9 @@ class CarConnectionService : Service() {
     private val _statusMessage = MutableStateFlow("")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
+    private val _shortcutsCache = MutableStateFlow<Map<String, List<AppShortcut>>>(emptyMap())
+    val shortcutsCache: StateFlow<Map<String, List<AppShortcut>>> = _shortcutsCache.asStateFlow()
+
     enum class State { IDLE, CONNECTING, CONNECTED, STREAMING }
 
     inner class LocalBinder : Binder() {
@@ -631,6 +634,11 @@ class CarConnectionService : Service() {
                 carLogSend("VD stack empty — switching to home")
                 _vdStackEmpty.tryEmit(Unit)
             }
+            ControlMsg.APP_SHORTCUTS_LIST -> {
+                val msg = AppShortcutsListMessage.decode(frame.payload)
+                carLogSend("Shortcuts received: ${msg.shortcuts.size} for ${msg.packageName}")
+                _shortcutsCache.value = _shortcutsCache.value + (msg.packageName to msg.shortcuts)
+            }
         }
     }
 
@@ -680,6 +688,11 @@ class CarConnectionService : Service() {
             }
             DataMsg.MEDIA_METADATA -> { _mediaMetadata.value = MediaMetadata.decode(frame.payload) }
             DataMsg.MEDIA_PLAYBACK_STATE -> { _playbackState.value = PlaybackState.decode(frame.payload) }
+            DataMsg.APP_UNINSTALLED -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                _appList.value = _appList.value.filter { it.packageName != pkg }
+                carLogSend("App uninstalled: $pkg — removed from grid")
+            }
         }
     }
 
@@ -829,6 +842,45 @@ class CarConnectionService : Service() {
         scope.launch(Dispatchers.IO) {
             try { controlConnection?.sendControl(ControlMsg.GO_BACK) }
             catch (e: Exception) { carLogSend("goBack failed: ${e.message}", "E") }
+        }
+    }
+
+    fun requestUninstall(packageName: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                controlConnection?.sendControl(ControlMsg.APP_UNINSTALL, packageName.toByteArray(Charsets.UTF_8))
+                carLogSend("Requested uninstall: $packageName")
+            } catch (e: Exception) { carLogSend("requestUninstall failed: ${e.message}", "E") }
+        }
+    }
+
+    fun requestAppInfo(packageName: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                controlConnection?.sendControl(ControlMsg.APP_INFO, packageName.toByteArray(Charsets.UTF_8))
+                carLogSend("Requested app info: $packageName")
+            } catch (e: Exception) { carLogSend("requestAppInfo failed: ${e.message}", "E") }
+        }
+    }
+
+    fun requestShortcuts(packageName: String) {
+        // Clear stale cache entry first so the UI knows we're loading
+        _shortcutsCache.value = _shortcutsCache.value - packageName
+        scope.launch(Dispatchers.IO) {
+            try {
+                controlConnection?.sendControl(ControlMsg.APP_SHORTCUTS, packageName.toByteArray(Charsets.UTF_8))
+                carLogSend("Requested shortcuts: $packageName")
+            } catch (e: Exception) { carLogSend("requestShortcuts failed: ${e.message}", "E") }
+        }
+    }
+
+    fun executeShortcut(packageName: String, shortcutId: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val msg = AppShortcutActionMessage(packageName, shortcutId)
+                controlConnection?.sendControl(ControlMsg.APP_SHORTCUT_ACTION, msg.encode())
+                carLogSend("Execute shortcut: $shortcutId for $packageName")
+            } catch (e: Exception) { carLogSend("executeShortcut failed: ${e.message}", "E") }
         }
     }
 

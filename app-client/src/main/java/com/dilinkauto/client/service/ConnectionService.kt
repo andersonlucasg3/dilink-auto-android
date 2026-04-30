@@ -4,13 +4,20 @@ import android.app.Activity
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.LauncherApps
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.UserHandle
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.dilinkauto.client.ClientApp
@@ -50,6 +57,8 @@ class ConnectionService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private var packageRemovedReceiver: BroadcastReceiver? = null
+
     override fun onCreate() {
         super.onCreate()
         FileLog.rotate() // Archive previous log, start fresh
@@ -58,8 +67,38 @@ class ConnectionService : Service() {
         _serviceState.value = State.IDLE
         acquireWakeLock()
         registerNetworkCallback()
+        registerPackageRemovedReceiver()
         deployAssets()
         UpdateManager.checkForUpdate(force = false)
+    }
+
+    private fun registerPackageRemovedReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == Intent.ACTION_PACKAGE_REMOVED) {
+                    val pkg = intent.data?.schemeSpecificPart ?: return
+                    val replacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
+                    if (replacing) return // ignore updates (app is reinstalled immediately)
+                    FileLog.i(TAG, "Package removed: $pkg — notifying car")
+                    val conn = controlConnection
+                    if (conn != null && conn.isConnected) {
+                        try {
+                            conn.sendData(DataMsg.APP_UNINSTALLED, pkg.toByteArray(Charsets.UTF_8))
+                        } catch (e: Exception) {
+                            FileLog.w(TAG, "Failed to send APP_UNINSTALLED: ${e.message}")
+                        }
+                        // Resend the full app list so car has accurate state
+                        sendAppList()
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addDataScheme("package")
+        }
+        registerReceiver(receiver, filter)
+        packageRemovedReceiver = receiver
     }
 
     @Volatile
@@ -336,6 +375,48 @@ class ConnectionService : Service() {
                 val port = java.nio.ByteBuffer.wrap(frame.payload).getInt()
                 FileLog.i(TAG, "Car says VD server ready on port $port")
                 waitForVDServer(port)
+            }
+            ControlMsg.APP_UNINSTALL -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                FileLog.i(TAG, "Car requested uninstall: $pkg")
+                serviceScope.launch(Dispatchers.Main) {
+                    try {
+                        val intent = Intent(Intent.ACTION_DELETE).apply {
+                            data = Uri.parse("package:$pkg")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        FileLog.w(TAG, "Failed to start uninstall for $pkg: ${e.message}")
+                    }
+                }
+            }
+            ControlMsg.APP_INFO -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                FileLog.i(TAG, "Car requested app info: $pkg")
+                serviceScope.launch(Dispatchers.Main) {
+                    try {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:$pkg")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        FileLog.w(TAG, "Failed to open app info for $pkg: ${e.message}")
+                    }
+                }
+            }
+            ControlMsg.APP_SHORTCUTS -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                FileLog.i(TAG, "Car requested shortcuts for: $pkg")
+                sendAppShortcuts(pkg)
+            }
+            ControlMsg.APP_SHORTCUT_ACTION -> {
+                val action = AppShortcutActionMessage.decode(frame.payload)
+                FileLog.i(TAG, "Car requested shortcut action: ${action.shortcutId} for ${action.packageName}")
+                serviceScope.launch(Dispatchers.IO) {
+                    launchShortcut(action.packageName, action.shortcutId)
+                }
             }
         }
     }
@@ -993,6 +1074,73 @@ class ConnectionService : Service() {
         }
     }
 
+    // ─── App Shortcuts ───
+
+    private fun sendAppShortcuts(packageName: String) {
+        val conn = controlConnection ?: return
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val shortcuts = queryShortcuts(packageName)
+                val msg = AppShortcutsListMessage(packageName, shortcuts)
+                conn.sendControl(ControlMsg.APP_SHORTCUTS_LIST, msg.encode())
+                FileLog.i(TAG, "Sent ${shortcuts.size} shortcuts for $packageName")
+            } catch (e: Exception) {
+                FileLog.w(TAG, "Failed to query/send shortcuts for $packageName: ${e.message}")
+                // Send empty list so car doesn't hang waiting
+                try {
+                    val msg = AppShortcutsListMessage(packageName, emptyList())
+                    conn.sendControl(ControlMsg.APP_SHORTCUTS_LIST, msg.encode())
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun queryShortcuts(packageName: String): List<AppShortcut> {
+        return try {
+            val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+                ?: return emptyList()
+            val user = android.os.Process.myUserHandle()
+            val query = LauncherApps.ShortcutQuery().apply {
+                setQueryFlags(
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+                )
+            }
+            (launcherApps.getShortcuts(query, user) ?: emptyList())
+                .filter { it.`package` == packageName }
+                .map { AppShortcut(it.id, it.shortLabel.toString(), it.longLabel.toString()) }
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Shortcut query failed for $packageName: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun launchShortcut(packageName: String, shortcutId: String) {
+        try {
+            val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+                ?: return
+            val user = android.os.Process.myUserHandle()
+            val query = LauncherApps.ShortcutQuery().apply {
+                setQueryFlags(
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+                )
+            }
+            val shortcuts = launcherApps.getShortcuts(query, user) ?: emptyList()
+            val shortcut = shortcuts.find { it.id == shortcutId && it.`package` == packageName }
+            if (shortcut != null) {
+                launcherApps.startShortcut(packageName, shortcutId, null, null, user)
+                FileLog.i(TAG, "Launched shortcut $shortcutId for $packageName")
+            } else {
+                FileLog.w(TAG, "Shortcut $shortcutId not found for $packageName")
+            }
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Failed to launch shortcut $shortcutId: ${e.message}")
+        }
+    }
+
     private fun categorizeApp(pkg: String): AppCategory = when {
         pkg.contains("map", true) || pkg.contains("navi", true) ||
         pkg.contains("waze", true) || pkg.contains("amap", true) ||
@@ -1144,6 +1292,10 @@ class ConnectionService : Service() {
             } catch (_: Exception) {}
         }
         networkCallback = null
+        packageRemovedReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+        }
+        packageRemovedReceiver = null
         wakeLock?.release()
         serviceScope.cancel()
         super.onDestroy()

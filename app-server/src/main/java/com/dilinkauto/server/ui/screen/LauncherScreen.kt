@@ -3,9 +3,11 @@ package com.dilinkauto.server.ui.screen
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +25,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.*
@@ -97,6 +100,7 @@ fun LauncherScreen(
                 AppGrid(
                     apps = appList,
                     onAppClick = onAppClick,
+                    service = service,
                     modifier = Modifier.weight(1f)
                 )
             } else {
@@ -228,6 +232,7 @@ fun NavButton(icon: ImageVector, label: String, onClick: () -> Unit) {
 fun AppGrid(
     apps: List<AppInfo>,
     onAppClick: (String) -> Unit,
+    service: CarConnectionService,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -266,7 +271,8 @@ fun AppGrid(
                         AppTile(
                             app = app,
                             iconCache = iconCache,
-                            onClick = { onAppClick(app.packageName) }
+                            onClick = { onAppClick(app.packageName) },
+                            service = service
                         )
                     }
                 }
@@ -384,11 +390,13 @@ private fun GridScrollbar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppTile(
     app: AppInfo,
     iconCache: MutableMap<String, Bitmap?>,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    service: CarConnectionService
 ) {
     val categoryIcon = when (app.category) {
         AppCategory.NAVIGATION -> Icons.Default.Navigation
@@ -404,8 +412,7 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
-    // Lazy-decode icon when tile first appears — cancelled automatically
-    // when tile scrolls out of LazyVerticalGrid viewport
+    // Lazy-decode icon when tile first appears
     var iconBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
 
     LaunchedEffect(app.packageName) {
@@ -419,7 +426,7 @@ fun AppTile(
             val bmp = withContext(Dispatchers.IO) {
                 val opts = BitmapFactory.Options().apply {
                     inPreferredConfig = Bitmap.Config.RGB_565
-                    inSampleSize = 2 // downscale for car display, 4x less memory
+                    inSampleSize = 2
                 }
                 BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size, opts)
             }
@@ -432,38 +439,97 @@ fun AppTile(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        if (iconBitmap != null) {
-            Image(
-                bitmap = iconBitmap!!,
-                contentDescription = app.appName,
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(12.dp))
-            )
-        } else {
-            Icon(
-                categoryIcon,
-                contentDescription = null,
-                tint = categoryColor,
-                modifier = Modifier.size(64.dp)
+    // Context menu state
+    var menuExpanded by remember { mutableStateOf(false) }
+    val shortcutsCache by service.shortcutsCache.collectAsState()
+    val shortcuts = shortcutsCache[app.packageName]
+
+    Box {
+        Column(
+            modifier = Modifier
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        menuExpanded = true
+                        service.requestShortcuts(app.packageName)
+                    }
+                )
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            if (iconBitmap != null) {
+                Image(
+                    bitmap = iconBitmap!!,
+                    contentDescription = app.appName,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+            } else {
+                Icon(
+                    categoryIcon,
+                    contentDescription = null,
+                    tint = categoryColor,
+                    modifier = Modifier.size(64.dp)
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = app.appName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = app.appName,
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.White,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+
+        // Dropdown context menu
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            offset = DpOffset(8.dp, 0.dp),
+            modifier = Modifier.background(Color(0xFF1A1F2B))
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.action_uninstall), color = Color.White) },
+                onClick = {
+                    menuExpanded = false
+                    service.requestUninstall(app.packageName)
+                },
+                leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color(0xFFEF5350)) }
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.action_app_info), color = Color.White) },
+                onClick = {
+                    menuExpanded = false
+                    service.requestAppInfo(app.packageName)
+                },
+                leadingIcon = { Icon(Icons.Default.Info, null, tint = Color(0xFF64B5F6)) }
+            )
+
+            // Shortcut items
+            if (shortcuts != null && shortcuts.isNotEmpty()) {
+                Divider(color = Color(0xFF2A2F3A), modifier = Modifier.padding(vertical = 4.dp))
+                shortcuts.forEach { shortcut ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                shortcut.shortLabel.ifEmpty { shortcut.longLabel },
+                                color = Color(0xFFB0BEC5),
+                                fontSize = 13.sp
+                            )
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            service.executeShortcut(app.packageName, shortcut.id)
+                        },
+                        leadingIcon = { Icon(Icons.Default.OpenInNew, null, tint = Color(0xFF81C784)) }
+                    )
+                }
+            }
+        }
     }
 }
 
