@@ -1,8 +1,10 @@
 package com.dilinkauto.server.ui.nav
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,12 +22,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.AppCategory
 import com.dilinkauto.protocol.AppInfo
 import com.dilinkauto.server.R
 import com.dilinkauto.server.ServerApp
+import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -77,10 +81,12 @@ fun NetworkInfo(isConnected: Boolean) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecentAppIcon(
     app: AppInfo?,
     isActive: Boolean,
+    service: CarConnectionService,
     onClick: () -> Unit
 ) {
     val density = LocalDensity.current
@@ -114,54 +120,156 @@ fun RecentAppIcon(
         } catch (_: Exception) {}
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(60.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isActive) Color(0xFF1E2430) else Color.Transparent)
-            .clickable(onClick = onClick)
-    ) {
-        if (isActive) {
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-        }
+    // Context menu state
+    var menuExpanded by remember { mutableStateOf(false) }
+    val shortcutsCache by service.shortcutsCache.collectAsState()
+    val shortcuts = app?.packageName?.let { shortcutsCache[it] }
 
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+    Box {
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 4.dp)
-        ) {
-            val bitmap = iconBitmap
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = app?.appName,
-                    modifier = Modifier.size(40.dp)
+                .fillMaxWidth()
+                .height(60.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (isActive) Color(0xFF1E2430) else Color.Transparent)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        if (app != null) {
+                            menuExpanded = true
+                            service.requestShortcuts(app.packageName)
+                        }
+                    }
                 )
-            } else {
-                Icon(
-                    categoryIcon,
-                    contentDescription = app?.appName,
-                    tint = if (isActive) categoryColor else Color(0xFFBBBBBB),
-                    modifier = Modifier.size(40.dp)
+        ) {
+            if (isActive) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary)
                 )
             }
-            Text(
-                text = app?.appName ?: stringResource(R.string.recent_app_fallback),
-                fontSize = 14.sp,
-                color = if (isActive) Color.White else Color(0xFF888888),
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth()
-            )
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp)
+            ) {
+                val bitmap = iconBitmap
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = app?.appName,
+                        modifier = Modifier.size(40.dp)
+                    )
+                } else {
+                    Icon(
+                        categoryIcon,
+                        contentDescription = app?.appName,
+                        tint = if (isActive) categoryColor else Color(0xFFBBBBBB),
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+                Text(
+                    text = app?.appName ?: stringResource(R.string.recent_app_fallback),
+                    fontSize = 14.sp,
+                    color = if (isActive) Color.White else Color(0xFF888888),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        // Dropdown context menu
+        if (app != null) {
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+                offset = DpOffset(80.dp, 0.dp),
+                modifier = Modifier
+                    .widthIn(min = 200.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(R.string.action_uninstall),
+                            color = Color.White,
+                            fontSize = 16.sp
+                        )
+                    },
+                    onClick = {
+                        menuExpanded = false
+                        service.requestUninstall(app.packageName)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Delete, null,
+                            tint = Color(0xFFEF5350),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    },
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(R.string.action_app_info),
+                            color = Color.White,
+                            fontSize = 16.sp
+                        )
+                    },
+                    onClick = {
+                        menuExpanded = false
+                        service.requestAppInfo(app.packageName)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Info, null,
+                            tint = Color(0xFF64B5F6),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    },
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+
+                // Shortcut items
+                if (shortcuts != null && shortcuts.isNotEmpty()) {
+                    Divider(
+                        color = Color(0xFF2A2F3A),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    shortcuts.forEach { shortcut ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    shortcut.shortLabel.ifEmpty { shortcut.longLabel },
+                                    color = Color(0xFFB0BEC5),
+                                    fontSize = 14.sp
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                service.executeShortcut(app.packageName, shortcut.id)
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.OpenInNew, null,
+                                    tint = Color(0xFF81C784),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            },
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

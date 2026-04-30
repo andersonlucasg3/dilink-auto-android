@@ -146,6 +146,9 @@ class CarConnectionService : Service() {
     private val _shortcutsCache = MutableStateFlow<Map<String, List<AppShortcut>>>(emptyMap())
     val shortcutsCache: StateFlow<Map<String, List<AppShortcut>>> = _shortcutsCache.asStateFlow()
 
+    private val _appInfoData = MutableStateFlow<AppInfoDataMessage?>(null)
+    val appInfoData: StateFlow<AppInfoDataMessage?> = _appInfoData.asStateFlow()
+
     enum class State { IDLE, CONNECTING, CONNECTED, STREAMING }
 
     inner class LocalBinder : Binder() {
@@ -715,6 +718,11 @@ class CarConnectionService : Service() {
                 _appList.value = _appList.value.filter { it.packageName != pkg }
                 carLogSend("App uninstalled: $pkg — removed from grid")
             }
+            DataMsg.APP_INFO_DATA -> {
+                val info = AppInfoDataMessage.decode(frame.payload)
+                _appInfoData.value = info
+                carLogSend("App info received: ${info.packageName} v${info.versionName}")
+            }
         }
     }
 
@@ -876,9 +884,11 @@ class CarConnectionService : Service() {
         }
     }
 
+    fun clearAppInfoData() {
+        _appInfoData.value = null
+    }
+
     fun requestAppInfo(packageName: String) {
-        // Switch car to mirror mode so the user sees the app info page
-        _focusedApp.value = packageName
         scope.launch(Dispatchers.IO) {
             try {
                 controlConnection?.sendControl(ControlMsg.APP_INFO, packageName.toByteArray(Charsets.UTF_8))

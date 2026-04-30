@@ -386,12 +386,7 @@ class ConnectionService : Service() {
             ControlMsg.APP_INFO -> {
                 val pkg = String(frame.payload, Charsets.UTF_8)
                 FileLog.i(TAG, "Car requested app info: $pkg")
-                val client = vdClient
-                if (client != null) {
-                    client.openAppInfo(pkg)
-                } else {
-                    FileLog.w(TAG, "VD client not connected, cannot open app info for $pkg")
-                }
+                sendAppInfoData(pkg)
             }
             ControlMsg.APP_SHORTCUTS -> {
                 val pkg = String(frame.payload, Charsets.UTF_8)
@@ -1061,6 +1056,31 @@ class ConnectionService : Service() {
 
     // ─── App Shortcuts ───
 
+    private fun sendAppInfoData(packageName: String) {
+        val conn = controlConnection ?: return
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val pm = packageManager
+                val pi = pm.getPackageInfo(packageName, 0)
+                val ai = pm.getApplicationInfo(packageName, 0)
+                val appName = pm.getApplicationLabel(ai).toString()
+                val msg = AppInfoDataMessage(
+                    packageName = packageName,
+                    appName = appName,
+                    versionName = pi.versionName ?: "",
+                    versionCode = if (android.os.Build.VERSION.SDK_INT >= 28)
+                        pi.longVersionCode else pi.versionCode.toLong(),
+                    installTime = pi.firstInstallTime,
+                    targetSdk = pi.applicationInfo.targetSdkVersion
+                )
+                conn.sendData(DataMsg.APP_INFO_DATA, msg.encode())
+                FileLog.i(TAG, "Sent app info for $packageName v${pi.versionName}")
+            } catch (e: Exception) {
+                FileLog.w(TAG, "Failed to query/send app info for $packageName: ${e.message}")
+            }
+        }
+    }
+
     private fun sendAppShortcuts(packageName: String) {
         val conn = controlConnection ?: return
         serviceScope.launch(Dispatchers.IO) {
@@ -1081,6 +1101,19 @@ class ConnectionService : Service() {
     }
 
     private fun queryShortcuts(packageName: String): List<AppShortcut> {
+        // Try Shizuku shell first — has full access to shortcut data
+        if (ShizukuManager.isAvailable) {
+            try {
+                val output = ShizukuManager.execAndWait("cmd shortcut get-shortcuts --package $packageName")
+                if (!output.isNullOrEmpty()) {
+                    val parsed = parseCmdShortcutOutput(output, packageName)
+                    if (parsed.isNotEmpty()) return parsed
+                }
+            } catch (e: Exception) {
+                FileLog.w(TAG, "Shizuku shortcut query failed for $packageName: ${e.message}")
+            }
+        }
+        // Fallback: LauncherApps API (may fail with "Caller can't access shortcut information")
         return try {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
                 ?: return emptyList()
@@ -1094,7 +1127,6 @@ class ConnectionService : Service() {
                 )
             }
             (launcherApps.getShortcuts(query, user) ?: emptyList())
-                .filter { it.`package` == packageName }
                 .map { AppShortcut(it.id, it.shortLabel.toString(), it.longLabel.toString()) }
         } catch (e: Exception) {
             FileLog.w(TAG, "Shortcut query failed for $packageName: ${e.message}")
@@ -1102,13 +1134,65 @@ class ConnectionService : Service() {
         }
     }
 
+    /** Parse output from 'cmd shortcut get-shortcuts' shell command. */
+    private fun parseCmdShortcutOutput(output: String, expectedPackage: String): List<AppShortcut> {
+        val shortcuts = mutableListOf<AppShortcut>()
+        var currentId: String? = null
+        var shortLabel = ""
+        var longLabel = ""
+        for (line in output.lines()) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) continue
+
+            val isIndented = line.startsWith(" ") || line.startsWith("\t")
+
+            // Package header line: "com.example.app:" (not indented)
+            if (!isIndented && trimmed.endsWith(":")) {
+                if (currentId != null) {
+                    shortcuts.add(AppShortcut(currentId, shortLabel.ifEmpty { longLabel }, longLabel))
+                }
+                currentId = null; shortLabel = ""; longLabel = ""
+                continue
+            }
+            // Shortcut id line (indented, ends with ":")
+            if (isIndented && trimmed.endsWith(":") && !trimmed.contains(" ")) {
+                if (currentId != null) {
+                    shortcuts.add(AppShortcut(currentId, shortLabel.ifEmpty { longLabel }, longLabel))
+                }
+                currentId = trimmed.removeSuffix(":")
+                shortLabel = ""; longLabel = ""
+                continue
+            }
+            // Label lines
+            if (currentId != null) {
+                if (trimmed.startsWith("ShortLabel:")) {
+                    shortLabel = trimmed.removePrefix("ShortLabel:").trim()
+                } else if (trimmed.startsWith("LongLabel:")) {
+                    longLabel = trimmed.removePrefix("LongLabel:").trim()
+                }
+            }
+        }
+        if (currentId != null) {
+            shortcuts.add(AppShortcut(currentId, shortLabel.ifEmpty { longLabel }, longLabel))
+        }
+        return shortcuts
+    }
+
     private fun launchShortcut(packageName: String, shortcutId: String) {
         try {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
                 ?: return
             val user = android.os.Process.myUserHandle()
-            launcherApps.startShortcut(packageName, shortcutId, null, null, user)
-            FileLog.i(TAG, "Launched shortcut $shortcutId for $packageName")
+            val displayId = vdClient?.displayId
+            val options = if (displayId != null && displayId >= 0) {
+                android.app.ActivityOptions.makeBasic().apply {
+                    launchDisplayId = displayId
+                }.toBundle()
+            } else {
+                null
+            }
+            launcherApps.startShortcut(packageName, shortcutId, null, options, user)
+            FileLog.i(TAG, "Launched shortcut $shortcutId for $packageName on display $displayId")
         } catch (e: Exception) {
             FileLog.w(TAG, "Failed to launch shortcut $shortcutId: ${e.message}")
         }
