@@ -1059,7 +1059,7 @@ class ConnectionService : Service() {
                         info.activityInfo.packageName,
                         info.loadLabel(pm).toString(),
                         categorizeApp(info.activityInfo.packageName),
-                        ClientApp.iconCache.getOrLoad(info.activityInfo.packageName, 96)
+                        ClientApp.loadIconPng(pm, info.activityInfo.packageName, 192)
                     )
                 }.sortedBy { it.category.id }
 

@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -24,8 +25,11 @@ import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.AppCategory
 import com.dilinkauto.protocol.AppInfo
 import com.dilinkauto.server.R
+import com.dilinkauto.server.ServerApp
 import com.dilinkauto.server.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -79,6 +83,9 @@ fun RecentAppIcon(
     isActive: Boolean,
     onClick: () -> Unit
 ) {
+    val density = LocalDensity.current
+    val iconSizePx = with(density) { 40.dp.toPx().toInt() }
+
     val categoryIcon = when (app?.category) {
         AppCategory.NAVIGATION -> Icons.Default.Navigation
         AppCategory.MUSIC -> Icons.Default.MusicNote
@@ -93,13 +100,18 @@ fun RecentAppIcon(
         else -> OtherColor
     }
 
-    val iconBitmap = remember(app?.packageName, app?.iconPng?.size) {
-        val png = app?.iconPng
-        if (png != null && png.isNotEmpty()) {
-            try {
-                android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
-            } catch (_: Exception) { null }
-        } else null
+    var iconBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+
+    LaunchedEffect(app?.packageName, iconSizePx) {
+        val pkg = app?.packageName ?: return@LaunchedEffect
+        try {
+            val bmp = withContext(Dispatchers.IO) {
+                ServerApp.iconCache.get(pkg, iconSizePx)
+            }
+            if (bmp != null) {
+                iconBitmap = bmp.asImageBitmap()
+            }
+        } catch (_: Exception) {}
     }
 
     Row(
@@ -126,9 +138,10 @@ fun RecentAppIcon(
                 .fillMaxSize()
                 .padding(horizontal = 4.dp)
         ) {
-            if (iconBitmap != null) {
+            val bitmap = iconBitmap
+            if (bitmap != null) {
                 Image(
-                    bitmap = iconBitmap,
+                    bitmap = bitmap,
                     contentDescription = app?.appName,
                     modifier = Modifier.size(40.dp)
                 )
