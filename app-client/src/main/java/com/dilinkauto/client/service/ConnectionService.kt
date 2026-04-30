@@ -1045,6 +1045,7 @@ class ConnectionService : Service() {
      * 2. FLAG_TURN_SCREEN_ON activity launch — WindowManager triggers display on
      * 3. WakeLock with ACQUIRE_CAUSES_WAKEUP — framework-level
      */
+    @android.annotation.SuppressLint("BlockedPrivateApi")
     private fun forceWakeScreen() {
         serviceScope.launch(Dispatchers.IO) {
             try {
