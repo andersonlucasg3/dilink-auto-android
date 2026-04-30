@@ -93,4 +93,8 @@
     <string name="status_vd_failed">VD server failed</string>
     <string name="status_waiting_video">Waiting for video stream…</string>
     <string name="status_updating_please_wait">Updating car app… Please wait</string>
+
+    <!-- App Context Actions -->
+    <string name="action_uninstall">Uninstall</string>
+    <string name="action_app_info">App info</string>
 </resources>

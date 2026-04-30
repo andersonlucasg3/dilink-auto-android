@@ -92,4 +92,6 @@
     <string name="status_vd_failed">Servidor VD falhou</string>
     <string name="status_waiting_video">Aguardando stream de vídeo…</string>
     <string name="status_updating_please_wait">Atualizando app do carro… Aguarde</string>
+    <string name="action_uninstall">Desinstalar</string>
+    <string name="action_app_info">Info do app</string>
 </resources>

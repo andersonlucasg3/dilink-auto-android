@@ -92,4 +92,6 @@
     <string name="status_vd_failed">Ошибка VD сервера</string>
     <string name="status_waiting_video">Ожидание видеопотока…</string>
     <string name="status_updating_please_wait">Обновление приложения авто… Пожалуйста, подождите</string>
+    <string name="action_uninstall">Удалить</string>
+    <string name="action_app_info">Сведения</string>
 </resources>

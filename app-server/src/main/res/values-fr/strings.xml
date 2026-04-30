@@ -92,4 +92,6 @@
     <string name="status_vd_failed">Échec du serveur VD</string>
     <string name="status_waiting_video">En attente du flux vidéo…</string>
     <string name="status_updating_please_wait">Mise à jour de l\'appli voiture… Veuillez patienter</string>
+    <string name="action_uninstall">Désinstaller</string>
+    <string name="action_app_info">Infos de l\'appli</string>
 </resources>

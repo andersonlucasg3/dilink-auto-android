@@ -92,4 +92,6 @@
     <string name="status_vd_failed">VD server muvaffaqiyatsiz tugadi</string>
     <string name="status_waiting_video">Video oqimi kutilmoqda…</string>
     <string name="status_updating_please_wait">Avtomobil ilovasi yangilanmoqda… Iltimos, kuting</string>
+    <string name="action_uninstall">Olib tashlash</string>
+    <string name="action_app_info">Ilova ma\'lumoti</string>
 </resources>

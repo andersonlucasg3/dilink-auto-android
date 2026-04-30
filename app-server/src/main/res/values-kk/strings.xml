@@ -92,4 +92,6 @@
     <string name="status_vd_failed">VD сервері сәтсіз аяқталды</string>
     <string name="status_waiting_video">Бейне ағынын күту…</string>
     <string name="status_updating_please_wait">Автокөлік қолданбасы жаңартылуда… Күте тұрыңыз</string>
+    <string name="action_uninstall">Жою</string>
+    <string name="action_app_info">Қолданба туралы ақпарат</string>
 </resources>

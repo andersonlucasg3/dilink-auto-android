@@ -499,6 +499,110 @@ data class LaunchAppMessage(val packageName: String) {
     }
 }
 
+// ─── App Actions ───
+
+/** Phone → Car: an app was uninstalled (payload in DataMsg.APP_UNINSTALLED) */
+data class AppUninstalledMessage(val packageName: String) {
+    fun encode(): ByteArray = packageName.toByteArray(Charsets.UTF_8)
+
+    companion object {
+        fun decode(data: ByteArray) = AppUninstalledMessage(String(data, Charsets.UTF_8))
+    }
+}
+
+/** Shortcut info for an app */
+data class AppShortcut(
+    val id: String,
+    val shortLabel: String,
+    val longLabel: String = ""
+)
+
+/** Phone → Car: list of shortcuts for a requested app */
+data class AppShortcutsListMessage(
+    val packageName: String,
+    val shortcuts: List<AppShortcut>
+) {
+    fun encode(): ByteArray {
+        val pkgBytes = packageName.toByteArray(Charsets.UTF_8)
+        val shortcutBuffers = shortcuts.map { s ->
+            val idBytes = s.id.toByteArray(Charsets.UTF_8)
+            val shortBytes = s.shortLabel.toByteArray(Charsets.UTF_8)
+            val longBytes = s.longLabel.toByteArray(Charsets.UTF_8)
+            ByteBuffer.allocate(2 + idBytes.size + 2 + shortBytes.size + 2 + longBytes.size)
+                .order(ByteOrder.BIG_ENDIAN)
+                .putShort(idBytes.size.toShort())
+                .apply { put(idBytes) }
+                .putShort(shortBytes.size.toShort())
+                .apply { put(shortBytes) }
+                .putShort(longBytes.size.toShort())
+                .apply { put(longBytes) }
+                .array()
+        }
+        val totalSize = 2 + pkgBytes.size + 2 + shortcutBuffers.sumOf { it.size }
+        val buf = ByteBuffer.allocate(totalSize).order(ByteOrder.BIG_ENDIAN)
+        buf.putShort(pkgBytes.size.toShort())
+        buf.put(pkgBytes)
+        buf.putShort(shortcuts.size.toShort())
+        shortcutBuffers.forEach { buf.put(it) }
+        return buf.array()
+    }
+
+    companion object {
+        fun decode(data: ByteArray): AppShortcutsListMessage {
+            val buf = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
+            val pkgLen = buf.getShort().toInt()
+            val pkgBytes = ByteArray(pkgLen)
+            buf.get(pkgBytes)
+            val pkg = String(pkgBytes, Charsets.UTF_8)
+            val count = buf.getShort().toInt()
+            val shortcuts = (0 until count).map {
+                fun readStr(): String {
+                    val len = buf.getShort().toInt()
+                    val bytes = ByteArray(len)
+                    buf.get(bytes)
+                    return String(bytes, Charsets.UTF_8)
+                }
+                AppShortcut(id = readStr(), shortLabel = readStr(), longLabel = readStr())
+            }
+            return AppShortcutsListMessage(pkg, shortcuts)
+        }
+    }
+}
+
+/** Car → Phone: execute a shortcut action */
+data class AppShortcutActionMessage(
+    val packageName: String,
+    val shortcutId: String
+) {
+    fun encode(): ByteArray {
+        val pkgBytes = packageName.toByteArray(Charsets.UTF_8)
+        val idBytes = shortcutId.toByteArray(Charsets.UTF_8)
+        val buf = ByteBuffer.allocate(2 + pkgBytes.size + 2 + idBytes.size)
+            .order(ByteOrder.BIG_ENDIAN)
+        buf.putShort(pkgBytes.size.toShort())
+        buf.put(pkgBytes)
+        buf.putShort(idBytes.size.toShort())
+        buf.put(idBytes)
+        return buf.array()
+    }
+
+    companion object {
+        fun decode(data: ByteArray): AppShortcutActionMessage {
+            val buf = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
+            val pkgLen = buf.getShort().toInt()
+            val pkgBytes = ByteArray(pkgLen)
+            buf.get(pkgBytes)
+            val idLen = buf.getShort().toInt()
+            val idBytes = ByteArray(idLen)
+            buf.get(idBytes)
+            return AppShortcutActionMessage(
+                String(pkgBytes, Charsets.UTF_8),
+                String(idBytes, Charsets.UTF_8)
+            )
+        }
+    }
+}
+
 // ─── Constants ───
 
 const val PROTOCOL_VERSION = 1
