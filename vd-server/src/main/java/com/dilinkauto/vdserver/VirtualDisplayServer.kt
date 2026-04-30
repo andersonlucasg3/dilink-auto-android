@@ -473,7 +473,16 @@ class VirtualDisplayServer(
                         reader.readFullyBlocking(buf, 0, len)
                         val pkg = String(buf)
                         log("Opening app info on VD for: $pkg")
-                        execShell("am start --display $displayId -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:$pkg")
+                        // Try component-based launch first (more reliable on virtual displays)
+                        val settingsComponent = execShellOutput(
+                            "cmd package resolve-activity --brief -a android.settings.APPLICATION_DETAILS_SETTINGS com.android.settings"
+                        )?.trim()
+                        if (!settingsComponent.isNullOrEmpty()) {
+                            execShell("am start --display $displayId -n $settingsComponent -d \"package:$pkg\"")
+                        } else {
+                            // Fallback: action-based launch
+                            execShell("am start --display $displayId -a android.settings.APPLICATION_DETAILS_SETTINGS -d \"package:$pkg\"")
+                        }
                     }
                     CMD_STOP -> running = false
                     else -> err("Unknown command: 0x${cmd.toString(16)}")

@@ -1086,6 +1086,7 @@ class ConnectionService : Service() {
                 ?: return emptyList()
             val user = android.os.Process.myUserHandle()
             val query = LauncherApps.ShortcutQuery().apply {
+                setPackage(packageName)
                 setQueryFlags(
                     LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
                     LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
@@ -1106,21 +1107,8 @@ class ConnectionService : Service() {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
                 ?: return
             val user = android.os.Process.myUserHandle()
-            val query = LauncherApps.ShortcutQuery().apply {
-                setQueryFlags(
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
-                )
-            }
-            val shortcuts = launcherApps.getShortcuts(query, user) ?: emptyList()
-            val shortcut = shortcuts.find { it.id == shortcutId && it.`package` == packageName }
-            if (shortcut != null) {
-                launcherApps.startShortcut(packageName, shortcutId, null, null, user)
-                FileLog.i(TAG, "Launched shortcut $shortcutId for $packageName")
-            } else {
-                FileLog.w(TAG, "Shortcut $shortcutId not found for $packageName")
-            }
+            launcherApps.startShortcut(packageName, shortcutId, null, null, user)
+            FileLog.i(TAG, "Launched shortcut $shortcutId for $packageName")
         } catch (e: Exception) {
             FileLog.w(TAG, "Failed to launch shortcut $shortcutId: ${e.message}")
         }

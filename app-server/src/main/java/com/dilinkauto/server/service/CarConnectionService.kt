@@ -877,6 +877,8 @@ class CarConnectionService : Service() {
     }
 
     fun requestAppInfo(packageName: String) {
+        // Switch car to mirror mode so the user sees the app info page
+        _focusedApp.value = packageName
         scope.launch(Dispatchers.IO) {
             try {
                 controlConnection?.sendControl(ControlMsg.APP_INFO, packageName.toByteArray(Charsets.UTF_8))
