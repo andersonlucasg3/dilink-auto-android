@@ -91,6 +91,7 @@ class VirtualDisplayServer(
         private const val MSG_DISPLAY_READY: Byte = 0x10
         private const val MSG_STACK_EMPTY: Byte = 0x11
         private const val MSG_FOCUSED_APP: Byte = 0x12
+        private const val MSG_SHORTCUTS_RESULT: Byte = 0x13
 
         private const val CMD_LAUNCH_APP = 0x20
         private const val CMD_GO_BACK = 0x21
@@ -100,6 +101,7 @@ class VirtualDisplayServer(
         private const val CMD_INPUT_TOUCH = 0x32
         private const val CMD_UNINSTALL = 0x23
         private const val CMD_OPEN_APP_INFO = 0x24
+        private const val CMD_QUERY_SHORTCUTS = 0x25
         private const val CMD_STOP = 0xFF
 
         private const val BITRATE = 8_000_000
@@ -484,6 +486,25 @@ class VirtualDisplayServer(
                             execShell("am start --display $displayId -a android.settings.APPLICATION_DETAILS_SETTINGS -d \"package:$pkg\"")
                         }
                     }
+                    CMD_QUERY_SHORTCUTS -> {
+                        val len = reader.readIntBlocking()
+                        val buf = ByteArray(len)
+                        reader.readFullyBlocking(buf, 0, len)
+                        val pkg = String(buf)
+                        log("Querying shortcuts for: $pkg")
+                        val output = execShellFullOutput("cmd shortcut get-shortcuts --package $pkg") ?: ""
+                        log("Shortcut result for $pkg: ${output.length} chars")
+                        val pkgBytes = pkg.toByteArray(Charsets.UTF_8)
+                        val dataBytes = output.toByteArray(Charsets.UTF_8)
+                        val respBuf = ByteBuffer.allocate(1 + 4 + pkgBytes.size + 4 + dataBytes.size)
+                        respBuf.put(MSG_SHORTCUTS_RESULT)
+                        respBuf.putInt(pkgBytes.size)
+                        respBuf.put(pkgBytes)
+                        respBuf.putInt(dataBytes.size)
+                        respBuf.put(dataBytes)
+                        respBuf.flip()
+                        writeAllBlocking(ch, respBuf)
+                    }
                     CMD_STOP -> running = false
                     else -> err("Unknown command: 0x${cmd.toString(16)}")
                 }
@@ -640,6 +661,16 @@ class VirtualDisplayServer(
             val len = p.inputStream.read(buf)
             p.waitFor()
             if (len > 0) String(buf, 0, len).trim() else null
+        } catch (e: Exception) { null }
+    }
+
+    /** Like execShellOutput but reads the full stdout (up to 64 KB). */
+    private fun execShellFullOutput(command: String): String? {
+        return try {
+            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val out = p.inputStream.bufferedReader().use { it.readText() }
+            p.waitFor()
+            out.ifEmpty { null }
         } catch (e: Exception) { null }
     }
 

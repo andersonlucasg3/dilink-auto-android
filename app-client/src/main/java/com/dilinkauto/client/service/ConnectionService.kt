@@ -1100,7 +1100,7 @@ class ConnectionService : Service() {
         }
     }
 
-    private fun queryShortcuts(packageName: String): List<AppShortcut> {
+    private suspend fun queryShortcuts(packageName: String): List<AppShortcut> {
         // Try Shizuku shell first — has full access to shortcut data
         if (ShizukuManager.isAvailable) {
             try {
@@ -1111,6 +1111,22 @@ class ConnectionService : Service() {
                 }
             } catch (e: Exception) {
                 FileLog.w(TAG, "Shizuku shortcut query failed for $packageName: ${e.message}")
+            }
+        }
+        // Try VD server — runs as shell UID, can access all shortcuts
+        val vd = vdClient
+        if (vd != null && vd.isConnected) {
+            try {
+                val output = vd.queryShortcuts(packageName)
+                if (!output.isNullOrBlank()) {
+                    val parsed = parseCmdShortcutOutput(output, packageName)
+                    if (parsed.isNotEmpty()) {
+                        FileLog.i(TAG, "VD server returned ${parsed.size} shortcuts for $packageName")
+                        return parsed
+                    }
+                }
+            } catch (e: Exception) {
+                FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
             }
         }
         // Fallback: LauncherApps API (may fail with "Caller can't access shortcut information")
