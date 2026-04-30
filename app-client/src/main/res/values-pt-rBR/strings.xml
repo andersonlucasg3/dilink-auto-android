@@ -52,6 +52,8 @@
     <string name="updates_downloading">Baixando… %1$d%%</string>
     <string name="updates_ready">Telefone: v%1$s pronto</string>
     <string name="updates_install_btn">Instalar Atualização</string>
+    <string name="updates_installing">Instalando v%1$s via Shizuku…</string>
+    <string name="updates_installed">Telefone atualizado! Reinicie para aplicar.</string>
     <string name="updates_retry">Tentar Novamente</string>
     <string name="updates_available_title">Atualização Disponível</string>
     <string name="updates_update_btn">Atualizar</string>
@@ -76,6 +78,12 @@
     <string name="perm_granted">Concedido</string>
     <string name="perm_usb_debugging">Depuração USB</string>
     <string name="perm_usb_desc">Necessário no telefone e no carro</string>
+    <string name="perm_shizuku">Shizuku</string>
+    <string name="perm_shizuku_desc">Instale o Shizuku para conexão sem ADB. Inicie o Shizuku uma vez via ADB e conceda a permissão aqui.</string>
+    <string name="perm_shizuku_needs_permission">Shizuku — Precisa de Permissão</string>
+    <string name="perm_shizuku_permission_desc">O Shizuku está em execução. Toque para conceder permissão ao DiLink-Auto.</string>
+    <string name="perm_shizuku_available">Shizuku — Conectado</string>
+    <string name="perm_shizuku_granted">Shizuku ativo. O telefone pode implantar o servidor de exibição virtual sem USB ADB.</string>
 
     <!-- Support -->
     <string name="support_title">Apoio</string>
@@ -150,6 +158,11 @@
     <string name="donation_desc">Ajude a manter o DiLink-Auto. Toda contribuição ajuda!</string>
     <string name="donation_github">Patrocinador GitHub</string>
     <string name="donation_pix">Pix (Brasil)</string>
+
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Dispositivo Samsung Detectado</string>
+    <string name="samsung_warning_desc">Samsung One UI requer configuração extra: desabilite o Auto Blocker (bloqueia USB ADB), conceda bateria Irrestrita e permita Acesso a Todos os Arquivos. Veja Configurações para detalhes.</string>
+    <string name="samsung_settings_guide">Guia de Configuração Samsung</string>
 
     <!-- Distribution Channel -->
     <string name="channel_title">Canal de Distribuição</string>

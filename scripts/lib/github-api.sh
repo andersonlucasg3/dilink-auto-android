@@ -3,9 +3,17 @@
 # Dependencies: scripts/lib/logging.sh (sourced automatically)
 # Requires these globals to be set by the caller:
 #   STATE_FILE, ISSUE_NUM, REPO, GITHUB_TOKEN, SERVER_URL, RUN_ID
+#   GITHUB_API_IP (optional) — set by issue-agent.sh to bypass WSL DNS
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/logging.sh"
+GITHUB_API_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$GITHUB_API_LIB_DIR/logging.sh"
+
+# Build --resolve flag for curl if GITHUB_API_IP is known
+_resolve_flag() {
+  if [ -n "${GITHUB_API_IP:-}" ]; then
+    echo "--resolve api.github.com:443:${GITHUB_API_IP}"
+  fi
+}
 
 # Post or update a single status comment — first call creates, later calls edit
 status() {
@@ -21,12 +29,15 @@ status() {
   _status_id=""
   [ -f "$STATE_FILE" ] && _status_id=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || true)
 
+  _resolve=$(_resolve_flag)
+
   _status_http_code=""
   if [ -n "$_status_id" ] && [ "$_status_id" != "null" ]; then
     _status_http_code=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
       -H "Authorization: Bearer ${GITHUB_TOKEN}" \
       -H "Accept: application/vnd.github+json" \
       -H "Content-Type: application/json" \
+      ${_resolve} \
       "https://api.github.com/repos/${REPO}/issues/comments/${_status_id}" \
       -d "@${_status_body_file}" 2>/dev/null || echo "000")
     if [ "$_status_http_code" != "200" ]; then
@@ -40,6 +51,7 @@ status() {
       -H "Authorization: Bearer ${GITHUB_TOKEN}" \
       -H "Accept: application/vnd.github+json" \
       -H "Content-Type: application/json" \
+      ${_resolve} \
       "https://api.github.com/repos/${REPO}/issues/${ISSUE_NUM}/comments" \
       -d "@${_status_body_file}" 2>/dev/null)
     _status_http_code=$(echo "$_status_resp" | tail -1)

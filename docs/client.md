@@ -6,7 +6,7 @@ The phone client manages VD server deployment, car auto-update, and 3-connection
 
 1. Listens for TCP connections from the car on port 9637 (control, NIO ServerSocketChannel)
 2. Responds to the handshake with device info, vdServerJarPath, and reads `targetFps`
-3. Checks appVersionCode from handshake — sends `UPDATING_CAR` and auto-updates car app via dadb if version mismatch
+3. Compares appVersionName from handshake (with versionCode fallback) — sends `UPDATING_CAR` and auto-updates car app via dadb if version mismatch
 4. Accepts video (9638) and input (9639) connections from the car after handshake
 5. Deploys vd-server.jar to `/sdcard/DiLinkAuto/` and starts VD server (with FPS arg)
 6. Accepts reverse connection from VD server on localhost:19637 (NIO ServerSocketChannel)
@@ -19,15 +19,15 @@ The phone client manages VD server deployment, car auto-update, and 3-connection
 
 ### ClientApp
 
-Application class. Creates notification channels (`dilinkauto_service`, `dilinkauto_update`), initializes `UpdateManager` on create.
+Application class. Creates notification channels (`dilinkauto_service`, `dilinkauto_update`), initializes `UpdateManager` and `ShizukuManager` on create.
 
 ### UpdateManager
 
 Self-update mechanism that checks GitHub Releases for new versions.
 - `checkForUpdate(force)`: Queries `https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases/latest`, compares semver from tag name against installed versionName. Respects 6-hour cooldown unless forced.
 - `downloadUpdate()`: Downloads APK via `HttpsURLConnection` with progress reporting. Verifies via `PackageManager.getPackageArchiveInfo()`.
-- `installUpdate(context)`: Opens system package installer via `FileProvider` URI.
-- States: Idle, Checking, Available, Downloading, ReadyToInstall, UpToDate, Error. Exposed via `StateFlow`.
+- `installUpdate(context)`: Uses Shizuku `pm install -r` for silent installation when Shizuku is available; falls back to system package installer via `FileProvider` URI otherwise.
+- States: Idle, Checking, Available, Downloading, ReadyToInstall, Installing, Installed, UpToDate, Error. Exposed via `StateFlow`.
 
 ### MainActivity
 
@@ -45,7 +45,7 @@ Foreground service that manages the phone-car connection lifecycle with 3 dedica
 - **Input connection** (port 9639): accepted after handshake, INPUT frame listener dispatched on `Dispatchers.IO` to avoid NetworkOnMainThreadException on localhost touch writes
 - `deployAssets()`: extracts vd-server.jar to sdcard, app-server.apk to filesDir
 - Detects version mismatch → sends `UPDATING_CAR` → auto-updates car app via dadb (WiFi ADB, dadb 1.2.10)
-- Smart network callback: `onLost` checks if the lost network is the one the connection uses, ignores unrelated drops (mobile data cycling)
+- Smart network callback: `TRANSPORT_WIFI` filtered — only reacts to WiFi changes, ignores 3G/4G mobile data fluctuations
 - Relays video frames (H.264 CONFIG + FRAME) from VD to car via video connection
 - Routes touch events from car (input connection) to VD server
 - Sends app list with 96x96 PNG icons to car via control connection
@@ -99,13 +99,16 @@ Touch events arrive from the car via the input connection as CMD_INPUT_TOUCH (0x
 | Permission | Purpose |
 |-----------|---------|
 | MANAGE_EXTERNAL_STORAGE | All Files Access for sdcard deployment of VD JAR |
-| Accessibility Service | Input injection on physical display (fallback) |
+| Accessibility Service | Touch injection on virtual display via dispatchGesture (no event monitoring) |
 | Notification Access | Forward notifications to car (with progress) |
-| USB Debugging | Required for car USB ADB track (Developer Options) |
+| Shizuku API | Elevated shell access for ADB-free VD server deployment and silent self-update |
+| QUERY_ALL_PACKAGES | App launcher grid |
+| REQUEST_INSTALL_PACKAGES | Car app auto-update via dadb |
 
 ## Dependencies
 
 - Jetpack Compose + Material 3
 - kotlinx-coroutines
 - dadb 1.2.10 (WiFi ADB for car auto-update)
+- Shizuku api/provider/aidl 13.1.5
 - Protocol module (shared with car app)

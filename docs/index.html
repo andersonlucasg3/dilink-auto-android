@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DiLink-Auto — Open-source Android Auto Alternative</title>
+  <meta name="description" content="Use your phone apps on your car's built-in screen. Open-source, no Google Services required. Works with any Android 10+ phone and BYD DiLink 3.0+ cars.">
+  <meta name="theme-color" content="#0d1117">
+  <meta property="og:title" content="DiLink-Auto — Open-source Android Auto Alternative">
+  <meta property="og:description" content="Mirror your phone apps onto your car display with full touch interaction. H.264 video at up to 60fps, no Google Services needed.">
+  <meta property="og:url" content="https://andersonlucasg3.github.io/dilink-auto-android/">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+</head>
+<body>
+  <nav class="topbar">
+    <div class="container topbar-inner">
+      <div class="logo">
+        <span class="logo-icon">🚗</span>
+        <span class="logo-text">DiLink-Auto</span>
+      </div>
+      <div class="topbar-actions">
+        <div class="lang-picker">
+          <select id="langSelect" aria-label="Select language">
+            <option value="en">English</option>
+            <option value="pt-BR">Português</option>
+            <option value="ru">Русский</option>
+            <option value="be">Беларуская</option>
+            <option value="fr">Français</option>
+            <option value="kk">Қазақша</option>
+            <option value="uk">Українська</option>
+            <option value="uz">O'zbekcha</option>
+          </select>
+        </div>
+        <a href="https://github.com/andersonlucasg3/dilink-auto-android" class="btn-ghost" target="_blank" rel="noopener" data-i18n="nav_github">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container">
+        <div class="hero-badge">
+          <span class="badge-version">v0.16.0</span>
+          <span class="badge-oss">Open Source</span>
+        </div>
+        <h1 class="hero-title">DiLink-Auto</h1>
+        <p class="hero-subtitle" data-i18n="hero_subtitle">Open-source alternative to Android Auto — for any Android phone</p>
+        <p class="hero-desc" data-i18n="hero_desc">Mirror your phone apps onto your car display with full touch interaction. No Google Services, no pairing codes, no accounts needed.</p>
+        <div class="hero-cta">
+          <a href="https://github.com/andersonlucasg3/dilink-auto-android/releases/latest" class="btn btn-primary btn-lg" target="_blank" rel="noopener" data-i18n="hero_download">Download Latest Release</a>
+          <a href="https://github.com/andersonlucasg3/dilink-auto-android" class="btn btn-outline btn-lg" target="_blank" rel="noopener" data-i18n="hero_source">View on GitHub</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- What It Does -->
+    <section class="features">
+      <div class="container">
+        <h2 class="section-title" data-i18n="features_title">What It Does</h2>
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="feature-icon">📱</div>
+            <h3 data-i18n="feature_1_title">App Mirroring</h3>
+            <p data-i18n="feature_1_desc">Launch any phone app from your car screen — navigation, music, messaging. Full touch interaction with multi-touch and pinch-to-zoom.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🎥</div>
+            <h3 data-i18n="feature_2_title">60fps Video</h3>
+            <p data-i18n="feature_2_desc">H.264 video streaming at up to 60fps, 8Mbps CBR. GPU-downscaled at phone's native DPI — crisp on any car display.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔋</div>
+            <h3 data-i18n="feature_3_title">Battery Saving</h3>
+            <p data-i18n="feature_3_desc">Phone screen stays off during streaming. Apps run on a virtual display — your phone stays cool and saves battery.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔔</div>
+            <h3 data-i18n="feature_4_title">Notifications</h3>
+            <p data-i18n="feature_4_desc">Phone notifications appear on your car's nav bar with progress indicators. Tap to open the app directly.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔄</div>
+            <h3 data-i18n="feature_5_title">Auto-Update</h3>
+            <p data-i18n="feature_5_desc">Phone auto-updates the car app over WiFi when a new version is available. Self-update checks GitHub Releases.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🌐</div>
+            <h3 data-i18n="feature_6_title">No Google Services</h3>
+            <p data-i18n="feature_6_desc">Works on any Android 10+ phone — with or without Google Play Services. Originally made for Chinese ROM / HyperOS devices.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-it-works">
+      <div class="container">
+        <h2 class="section-title" data-i18n="how_title">How It Works</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <h3 data-i18n="step_1_title">Enable Hotspot</h3>
+              <p data-i18n="step_1_desc">Turn on your phone's WiFi hotspot. The car connects to it — no cables needed for streaming.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <h3 data-i18n="step_2_title">Plug In</h3>
+              <p data-i18n="step_2_desc">Connect your phone to the car's USB port. The car auto-installs on first use, then auto-connects every time.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <h3 data-i18n="step_3_title">Auto-Connect</h3>
+              <p data-i18n="step_3_desc">3 dedicated WiFi TCP streams: video (port 9638), touch input (9639), and control (9637). Auto-discovered via mDNS.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <h3 data-i18n="step_4_title">Use Your Apps</h3>
+              <p data-i18n="step_4_desc">Launch any app from the car launcher. It runs on the phone, appears on the car, and responds to touch.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Requirements -->
+    <section class="requirements">
+      <div class="container">
+        <h2 class="section-title" data-i18n="req_title">Requirements</h2>
+        <div class="req-columns">
+          <div class="req-box">
+            <h3 data-i18n="req_phone_title">Phone</h3>
+            <ul>
+              <li data-i18n="req_phone_1">Any Android 10+ phone</li>
+              <li data-i18n="req_phone_2">USB Debugging enabled (Developer Options)</li>
+              <li data-i18n="req_phone_3">All Files Access permission</li>
+            </ul>
+          </div>
+          <div class="req-box">
+            <h3 data-i18n="req_car_title">Car</h3>
+            <ul>
+              <li data-i18n="req_car_1">BYD DiLink 3.0 or newer</li>
+              <li data-i18n="req_car_2">One free USB-A port</li>
+              <li data-i18n="req_car_3">WiFi enabled (connects to phone hotspot)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tech Specs -->
+    <section class="tech">
+      <div class="container">
+        <h2 class="section-title" data-i18n="tech_title">Technical Highlights</h2>
+        <div class="tech-grid">
+          <div class="tech-item">
+            <span class="tech-label">Video</span>
+            <span class="tech-value">H.264 Main, 8Mbps CBR, up to 60fps</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-label">Protocol</span>
+            <span class="tech-value">Custom binary framing, 3 dedicated TCP connections</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-label">GPU</span>
+            <span class="tech-value">EGL/GLES SurfaceScaler at phone DPI (480dpi)</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-label">I/O</span>
+            <span class="tech-value">NIO non-blocking sockets, Selector-based reads</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-label">Latency</span>
+            <span class="tech-value">~100–200ms under load</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-label">Stack</span>
+            <span class="tech-value">Kotlin, Jetpack Compose, Material 3</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Install -->
+    <section class="install">
+      <div class="container">
+        <h2 class="section-title" data-i18n="install_title">Installation</h2>
+        <div class="install-card">
+          <p data-i18n="install_desc">Download the APK and install it on your phone only. The car app is bundled inside — you never install anything on the car manually.</p>
+          <div class="install-cta">
+            <a href="https://github.com/andersonlucasg3/dilink-auto-android/releases/latest" class="btn btn-primary btn-lg" target="_blank" rel="noopener" data-i18n="install_download">Download APK</a>
+          </div>
+          <div class="install-build">
+            <p data-i18n="install_build_title">Or build from source:</p>
+            <code>./gradlew :app-client:assembleDebug</code>
+            <p class="install-build-path"><span data-i18n="install_build_path">APK at:</span> <code>app-client/build/outputs/apk/debug/app-client-debug.apk</code></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Documentation -->
+    <section class="docs">
+      <div class="container">
+        <h2 class="section-title" data-i18n="docs_title">Documentation</h2>
+        <div class="docs-grid">
+          <a href="setup" class="doc-card">
+            <h3 data-i18n="docs_setup_title">Setup Guide</h3>
+            <p data-i18n="docs_setup_desc">Detailed install instructions, troubleshooting, and device-specific tips.</p>
+          </a>
+          <a href="architecture" class="doc-card">
+            <h3 data-i18n="docs_arch_title">Architecture</h3>
+            <p data-i18n="docs_arch_desc">Module design, connection flow, and key design decisions.</p>
+          </a>
+          <a href="client" class="doc-card">
+            <h3 data-i18n="docs_client_title">Phone Client</h3>
+            <p data-i18n="docs_client_desc">ConnectionService, VD JAR deployment, auto-update, and file logging.</p>
+          </a>
+          <a href="server" class="doc-card">
+            <h3 data-i18n="docs_server_title">Car Server</h3>
+            <p data-i18n="docs_server_desc">State machine, USB ADB, VideoDecoder with catchup, and car UI.</p>
+          </a>
+          <a href="protocol" class="doc-card">
+            <h3 data-i18n="docs_proto_title">Protocol Spec</h3>
+            <p data-i18n="docs_proto_desc">Wire format, message types, port assignment, and binary framing.</p>
+          </a>
+          <a href="progress" class="doc-card">
+            <h3 data-i18n="docs_progress_title">Progress Tracker</h3>
+            <p data-i18n="docs_progress_desc">Feature status, milestones, fix tracker, and roadmap.</p>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Support -->
+    <section class="support">
+      <div class="container">
+        <h2 class="section-title" data-i18n="support_title">Support the Project</h2>
+        <p class="support-desc" data-i18n="support_desc">This project is developed independently and relies on community support. Every contribution helps cover development time, testing devices, and keeping the project alive.</p>
+        <div class="support-actions">
+          <a href="https://github.com/sponsors/andersonlucasg3" class="btn btn-pink btn-lg" target="_blank" rel="noopener">
+            <span data-i18n="support_github">Sponsor on GitHub</span>
+          </a>
+          <a href="https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d" class="btn btn-pix btn-lg" target="_blank" rel="noopener">
+            <span data-i18n="support_pix">Pay with Pix (Brazil)</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tested On -->
+    <section class="tested">
+      <div class="container">
+        <h2 class="section-title" data-i18n="tested_title">Tested On</h2>
+        <div class="tested-grid">
+          <div class="tested-card">
+            <span class="tested-emoji">📱</span>
+            <strong>Xiaomi 17 Pro Max</strong>
+            <span class="tested-meta">HyperOS 3, Android 16, Chinese ROM</span>
+          </div>
+          <div class="tested-card">
+            <span class="tested-emoji">📱</span>
+            <strong>POCO F5</strong>
+            <span class="tested-meta">Confirmed touch input compatibility</span>
+          </div>
+          <div class="tested-card">
+            <span class="tested-emoji">📱</span>
+            <strong>Samsung Galaxy S24</strong>
+            <span class="tested-meta">One UI, confirmed working</span>
+          </div>
+          <div class="tested-card">
+            <span class="tested-emoji">🚗</span>
+            <strong>BYD DiLink 3.0</strong>
+            <span class="tested-meta">1920×990, 240dpi</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-left">
+          <p data-i18n="footer_credit">Developed with ❤️ by Anderson Lucas de Castro Ramos 🇧🇷</p>
+        </div>
+        <div class="footer-right">
+          <a href="https://github.com/andersonlucasg3/dilink-auto-android" target="_blank" rel="noopener">GitHub</a>
+          <span class="footer-sep">·</span>
+          <a href="https://github.com/sponsors/andersonlucasg3" target="_blank" rel="noopener" data-i18n="footer_sponsor">Sponsor</a>
+          <span class="footer-sep">·</span>
+          <a href="https://github.com/andersonlucasg3/dilink-auto-android/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/i18n.js"></script>
+</body>
+</html>

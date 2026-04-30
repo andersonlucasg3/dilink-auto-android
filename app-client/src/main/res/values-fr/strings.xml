@@ -76,6 +76,12 @@
     <string name="perm_granted">Accordé</string>
     <string name="perm_usb_debugging">Débogage USB</string>
     <string name="perm_usb_desc">Requis sur le téléphone et la voiture</string>
+    <string name="perm_shizuku">Shizuku</string>
+    <string name="perm_shizuku_desc">Installez Shizuku pour une connexion sans ADB. Lancez Shizuku une fois via ADB, puis accordez l\'autorisation ici.</string>
+    <string name="perm_shizuku_needs_permission">Shizuku — Autorisation requise</string>
+    <string name="perm_shizuku_permission_desc">Shizuku est en cours d\'exécution. Appuyez pour autoriser DiLink-Auto.</string>
+    <string name="perm_shizuku_available">Shizuku — Connecté</string>
+    <string name="perm_shizuku_granted">Shizuku actif. Le téléphone peut déployer le serveur d\'affichage virtuel sans USB ADB.</string>
 
     <!-- Support -->
     <string name="support_title">Soutenir</string>
@@ -150,6 +156,11 @@
     <string name="donation_desc">Aidez à maintenir DiLink-Auto. Chaque contribution compte !</string>
     <string name="donation_github">Sponsor GitHub</string>
     <string name="donation_pix">Pix (Brésil)</string>
+
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Appareil Samsung détecté</string>
+    <string name="samsung_warning_desc">Samsung One UI nécessite une configuration supplémentaire : désactivez Auto Blocker (bloque USB ADB), accordez un accès illimité à la batterie et autorisez l\'accès à tous les fichiers. Voir Paramètres pour plus de détails.</string>
+    <string name="samsung_settings_guide">Guide de configuration Samsung</string>
 
     <!-- Distribution Channel -->
     <string name="channel_title">Canal de Distribution</string>

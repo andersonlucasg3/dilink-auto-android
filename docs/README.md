@@ -7,6 +7,21 @@ An open-source alternative to Android Auto for **any Android 10+ phone** paired 
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/andersonlucasg3)
 [![Pix](https://img.shields.io/badge/Pix-Brazil-00C2A0)](https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d)
 
+## Documentation / Documentação / Документация / Documentatio / Hujjatlar
+
+GitHub does **not** automatically show documentation in the user's language. Select your language below:
+
+| Language | README | Setup | Architecture | Client | Server | Protocol | Progress |
+|----------|--------|-------|-------------|--------|--------|----------|----------|
+| English | [README](./README.md) | [Setup](./setup.md) | [Arch](./architecture.md) | [Client](./client.md) | [Server](./server.md) | [Proto](./protocol.md) | [Progress](./progress.md) |
+| Português (BR) | [README](./pt-BR/README.md) | [Setup](./pt-BR/setup.md) | [Arch](./pt-BR/architecture.md) | [Client](./pt-BR/client.md) | [Server](./pt-BR/server.md) | [Proto](./pt-BR/protocol.md) | [Progress](./pt-BR/progress.md) |
+| Français | [README](./fr/README.md) | [Setup](./fr/setup.md) | [Arch](./fr/architecture.md) | [Client](./fr/client.md) | [Server](./fr/server.md) | [Proto](./fr/protocol.md) | [Progress](./fr/progress.md) |
+| Русский | [README](./ru/README.md) | [Setup](./ru/setup.md) | [Arch](./ru/architecture.md) | [Client](./ru/client.md) | [Server](./ru/server.md) | [Proto](./ru/protocol.md) | [Progress](./ru/progress.md) |
+| Беларуская | [README](./be/README.md) | [Setup](./be/setup.md) | [Arch](./be/architecture.md) | [Client](./be/client.md) | [Server](./be/server.md) | [Proto](./be/protocol.md) | [Progress](./be/progress.md) |
+| Қазақша | [README](./kk/README.md) | [Setup](./kk/setup.md) | [Arch](./kk/architecture.md) | [Client](./kk/client.md) | [Server](./kk/server.md) | [Proto](./kk/protocol.md) | [Progress](./kk/progress.md) |
+| Українська | [README](./uk/README.md) | [Setup](./uk/setup.md) | [Arch](./uk/architecture.md) | [Client](./uk/client.md) | [Server](./uk/server.md) | [Proto](./uk/protocol.md) | [Progress](./uk/progress.md) |
+| Oʻzbekcha | [README](./uz/README.md) | [Setup](./uz/setup.md) | [Arch](./uz/architecture.md) | [Client](./uz/client.md) | [Server](./uz/server.md) | [Proto](./uz/protocol.md) | [Progress](./uz/progress.md) |
+
 ## What It Does
 
 DiLink-Auto mirrors your phone apps onto your car's display with full touch interaction. Launch navigation, music, messaging — any app on your phone — directly from the car screen. Notifications appear on the car's nav bar with progress indicators. H.264 video at up to 60fps, 8Mbps CBR, with the phone's screen turned off to save battery.
@@ -17,6 +32,7 @@ DiLink-Auto mirrors your phone apps onto your car's display with full touch inte
 |--------|-------|
 | Xiaomi 17 Pro Max (HyperOS 3, Chinese ROM) | No Android Auto — no Google Play Services |
 | BYD Destroyer 05 / King (Brazil market) | Only Android Auto on head unit |
+| Samsung Galaxy (One UI 5+) | Auto Blocker blocks USB ADB, aggressive battery restrictions |
 | Any Android 10+ phone | Works regardless of ROM or Play Services |
 
 ## Requirements
@@ -31,6 +47,8 @@ DiLink-Auto mirrors your phone apps onto your car's display with full touch inte
 - One free USB-A port
 
 **Phone hotspot must be enabled** — the car connects to your phone's WiFi hotspot. No pairing codes, no Google account needed.
+
+**No internet connection required.** DiLink-Auto streams everything locally over your phone's WiFi hotspot — the car and phone talk directly to each other. An internet connection is only needed for the apps running on your phone (e.g., navigation, music streaming), not for DiLink-Auto itself.
 
 ## How It Works
 
@@ -54,31 +72,36 @@ Download the latest release or build from source:
 4. **Open DiLink-Auto** on the phone and grant All Files Access when prompted
 5. **Enable hotspot, then plug into car USB** — the car app auto-installs on first run over WiFi ADB
 
-The car APK and VD server JAR are bundled inside the phone APK — you never install anything on the car yourself.
+The car APK and VD server JAR are bundled inside the phone APK — you never install anything on the car yourself, and no internet connection is needed to install the car app. Just connect your phone to the car's USB port and tap "Install on Car."
 
 ## Current Status
 
 **Working:**
 - 60fps H.264 video streaming (8Mbps CBR, Main profile, configurable via handshake)
 - Full touch input (multi-touch, pinch-to-zoom)
-- App launcher with search, alphabetical sort, 64dp icons
+- App launcher with search, alphabetical sort, 64dp icons, adaptive grid
 - Notifications on car screen with progress bars, tap to open
 - Self-update via GitHub Releases (release) or prereleases (debug)
-- Auto-update: phone detects outdated car app and updates it over WiFi ADB
+- **Shizuku support**: ADB-free connection, silent self-update via pm install
+- Auto-update: phone detects outdated car app (version name comparison) and updates over WiFi ADB
 - Phone screen off during streaming (battery saving)
 - Guided onboarding for all required permissions
 - Internationalization: English, Portuguese, Russian, Belarusian, French, Kazakh, Ukrainian, Uzbek
 - Display restore after USB disconnect (v0.14.0+)
-- Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5
+- Tested on BYD DiLink 3.0 (1920x990) + Xiaomi 17 Pro Max (Android 16) + POCO F5 + Galaxy S24
 
 **Coming:** audio streaming, media controls, navigation widgets
 
 **Known limitations:**
+- Samsung Auto Blocker must be disabled for USB ADB (Settings → Security → Auto Blocker → Off).
+- Samsung battery management requires explicit exemption (see [Setup Guide](./setup.md#samsung-one-ui-tips)).
+- Samsung Knox may show security prompts on first virtual display access.
 - VD server process restarts on USB disconnect (reconnects automatically).
 - Hotspot must be enabled manually (Android 16 limitation).
 - Occasional visual artifacts — decoder restart race, recovers at next keyframe (~1s).
 - Streaming latency ~100-200ms under load. CBR 8Mbps.
 - Display may stay off after abrupt USB disconnect (fixed in v0.14.0).
+- **Some apps don't fill the screen (letterboxed/portrait-only).** DiLink-Auto mirrors a landscape virtual display to the car screen. Apps that don't support landscape orientation will appear letterboxed or narrow — this is entirely controlled by each app, not by DiLink-Auto. Nothing can be done from the mirroring side.
 
 ## Documentation
 

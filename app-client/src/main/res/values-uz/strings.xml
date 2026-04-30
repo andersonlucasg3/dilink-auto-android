@@ -76,6 +76,12 @@
     <string name="perm_granted">Berilgan</string>
     <string name="perm_usb_debugging">USB orqali nosozliklarni tuzatish</string>
     <string name="perm_usb_desc">Telefon va avtomobilda talab qilinadi</string>
+    <string name="perm_shizuku">Shizuku</string>
+    <string name="perm_shizuku_desc">ADB-siz ulanish uchun Shizuku-ni o\'rnating. Shizuku-ni ADB orqali bir marta ishga tushiring, keyin ruxsatni shu yerda bering.</string>
+    <string name="perm_shizuku_needs_permission">Shizuku — Ruxsat kerak</string>
+    <string name="perm_shizuku_permission_desc">Shizuku ishlamoqda. DiLink-Auto-ga ruxsat berish uchun bosing.</string>
+    <string name="perm_shizuku_available">Shizuku — Ulangan</string>
+    <string name="perm_shizuku_granted">Shizuku faol. Telefon virtual displey serverini USB ADB-siz ishga tushirishi mumkin.</string>
 
     <!-- Qo'llab-quvvatlash -->
     <string name="support_title">Qo\'llab-quvvatlash</string>
@@ -150,6 +156,11 @@
     <string name="donation_desc">DiLink-Auto faoliyatini qo\'llab-quvvatlang. Har bir hissa muhim!</string>
     <string name="donation_github">GitHub homiysi</string>
     <string name="donation_pix">Pix (Braziliya)</string>
+
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Samsung qurilmasi aniqlandi</string>
+    <string name="samsung_warning_desc">Samsung One UI qo‘shimcha sozlashni talab qiladi: Auto Blocker-ni o‘chiring (USB ADB-ni bloklaydi), batareyaga cheksiz ruxsat bering va barcha fayllarga kirishga ruxsat eting. Batafsil Sozlamalar bo‘limida.</string>
+    <string name="samsung_settings_guide">Samsung sozlash qo‘llanmasi</string>
 
     <!-- Distribution Channel -->
     <string name="channel_title">Tarqatish kanali</string>

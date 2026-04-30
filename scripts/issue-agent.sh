@@ -65,6 +65,48 @@ git config user.name "DiLink-Auto Agent"
 # Prevent line-ending conversion (repo is Windows/CRLF, runner is Linux/LF)
 git config core.autocrlf false
 
+
+# Configure git push authentication via GITHUB_TOKEN (runs before cd)
+
+# Resolve api.github.com IP once (gh CLI's Go resolver fails on WSL DNS)
+_resolve_github_api_ip() {
+  local ip
+  ip=$(getent hosts api.github.com 2>/dev/null | awk '{print $1; exit}')
+  if [ -z "$ip" ]; then
+    for ip in 140.82.121.5 140.82.121.6 4.228.31.149 4.228.31.150; do
+      if curl -s --max-time 3 --resolve "api.github.com:443:$ip" "https://api.github.com/zen" >/dev/null 2>&1; then
+        echo "$ip"; return 0
+      fi
+    done
+    echo ""
+  else
+    echo "$ip"
+  fi
+}
+
+GITHUB_API_IP="${GITHUB_API_IP:-}"
+if [ -z "$GITHUB_API_IP" ]; then
+  GITHUB_API_IP=$(_resolve_github_api_ip)
+  [ -n "$GITHUB_API_IP" ] && log_ok "api.github.com → $GITHUB_API_IP" || log_err "Cannot resolve api.github.com"
+fi
+
+# Make an authenticated GitHub API call (replaces gh CLI which can't resolve DNS)
+github_api() {
+  local method="$1" path="$2" body="$3"
+  local url="https://api.github.com${path}"
+  local curl_opts=(-s -X "$method" --max-time 30)
+  curl_opts+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  curl_opts+=(-H "Accept: application/vnd.github+json")
+  curl_opts+=(-H "Content-Type: application/json")
+  [ -n "$GITHUB_API_IP" ] && curl_opts+=(--resolve "api.github.com:443:${GITHUB_API_IP}")
+  if [ -n "$body" ]; then
+    echo "$body" | curl "${curl_opts[@]}" -d @- "$url" 2>/dev/null
+  else
+    curl "${curl_opts[@]}" "$url" 2>/dev/null
+  fi
+}
+
+# Helpers are now in scripts/lib/ — sourced at the top of this script
 # --- Main ---
 echo "=========================================="
 echo " DiLink-Auto Issue Agent"
@@ -290,18 +332,16 @@ EOFCOMMENT
   ACTION=$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')
   if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
-    GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+    github_api PATCH "/repos/${REPO}/issues/${ISSUE_NUM}" '{"state":"closed"}' > /dev/null || true
     rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → $RELEASE_TARGET"
-    PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
-      --base "$RELEASE_TARGET" \
-      --head "$BRANCH" \
-      --title "${ISSUE_TITLE}" \
-      --body "Closes #${ISSUE_NUM}" \
-      2>/dev/null || true)
-    if [ -n "$PR_URL" ]; then
+    PR_RESPONSE=$(github_api POST "/repos/${REPO}/pulls" "{\"title\":\"${ISSUE_TITLE}\",\"head\":\"${BRANCH}\",\"base\":\"${RELEASE_TARGET}\",\"body\":\"Closes #${ISSUE_NUM}\"}")
+    PR_URL=$(echo "$PR_RESPONSE" | jq -r '.html_url // ""' 2>/dev/null || true)
+    if [ -n "$PR_URL" ] && [ "$PR_URL" != "null" ]; then
       echo "PR created: $PR_URL"
+    else
+      echo "PR creation failed — response: $(echo "$PR_RESPONSE" | head -3)"
     fi
   fi
 
@@ -342,9 +382,18 @@ elif [ "$EVENT" = "issue_comment" ]; then
     write_initial_prompt
     write_resume_prompt "$COMMENT_BODY"
 
+    # Build prompt with user's comment included directly so Claude sees it on resume
+    cat > "/tmp/resume-msg-${ISSUE_NUM}.txt" << EOFMSG
+The user posted this follow-up comment on issue #${ISSUE_NUM}:
+
+${COMMENT_BODY}
+
+Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt for full context, then complete only the user's request above.
+EOFMSG
     log_step "Claude: $CLAUDE_BIN --resume $SESSION_ID"
+    echo "[resume prompt] $(cat /tmp/resume-msg-${ISSUE_NUM}.txt | head -1)"
     set +e
-    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt and complete the task described there." 2>&1)
+    OUTPUT=$(timeout 600 $CLAUDE_BIN --dangerously-skip-permissions --resume "$SESSION_ID" -p "$(cat /tmp/resume-msg-${ISSUE_NUM}.txt)" 2>&1)
     CLAUDE_EXIT=$?
     set -e
     echo "--- Claude output (resume) ---"
@@ -461,18 +510,16 @@ EOFCOMMENT
   ACTION=$(echo "$SUMMARY_JSON" | jq -r '.action // "none"')
   if [ "$ACTION" = "close" ]; then
     echo "[action] Closing issue #$ISSUE_NUM per agent request"
-    GH_TOKEN="$GITHUB_TOKEN" gh issue close "$ISSUE_NUM" 2>/dev/null || true
+    github_api PATCH "/repos/${REPO}/issues/${ISSUE_NUM}" '{"state":"closed"}' > /dev/null || true
     rm -f "$STATE_FILE" 2>/dev/null || true
   elif [ "$ACTION" = "pr" ]; then
     echo "[action] Creating pull request for $BRANCH → $RELEASE_TARGET"
-    PR_URL=$(GH_TOKEN="$GITHUB_TOKEN" gh pr create \
-      --base "$RELEASE_TARGET" \
-      --head "$BRANCH" \
-      --title "${ISSUE_TITLE}" \
-      --body "Closes #${ISSUE_NUM}" \
-      2>/dev/null || true)
-    if [ -n "$PR_URL" ]; then
+    PR_RESPONSE=$(github_api POST "/repos/${REPO}/pulls" "{\"title\":\"${ISSUE_TITLE}\",\"head\":\"${BRANCH}\",\"base\":\"${RELEASE_TARGET}\",\"body\":\"Closes #${ISSUE_NUM}\"}")
+    PR_URL=$(echo "$PR_RESPONSE" | jq -r '.html_url // ""' 2>/dev/null || true)
+    if [ -n "$PR_URL" ] && [ "$PR_URL" != "null" ]; then
       echo "PR created: $PR_URL"
+    else
+      echo "PR creation failed — response: $(echo "$PR_RESPONSE" | head -3)"
     fi
   fi
 fi

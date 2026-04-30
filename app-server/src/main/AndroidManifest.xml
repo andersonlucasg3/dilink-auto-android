@@ -28,7 +28,7 @@
             android:screenOrientation="landscape"
             android:theme="@style/Theme.DiLinkAuto.Fullscreen"
             android:configChanges="orientation|screenSize|keyboardHidden"
-            android:windowSoftInputMode="adjustNothing">
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

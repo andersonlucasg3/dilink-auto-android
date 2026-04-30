@@ -20,11 +20,13 @@ data class HandshakeRequest(
     val displayMode: Byte = DISPLAY_MODE_VIRTUAL,
     val screenDpi: Int = 160,
     val appVersionCode: Int,
-    val targetFps: Int = 30
+    val targetFps: Int = 30,
+    val appVersionName: String = ""
 ) {
     fun encode(): ByteArray {
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
-        val buf = ByteBuffer.allocate(4 + 2 + nameBytes.size + 4 + 4 + 4 + 1 + 4 + 4 + 4)
+        val verNameBytes = appVersionName.toByteArray(Charsets.UTF_8)
+        val buf = ByteBuffer.allocate(4 + 2 + nameBytes.size + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 2 + verNameBytes.size)
             .order(ByteOrder.BIG_ENDIAN)
         buf.putInt(protocolVersion)
         buf.putShort(nameBytes.size.toShort())
@@ -36,6 +38,8 @@ data class HandshakeRequest(
         buf.putInt(screenDpi)
         buf.putInt(appVersionCode)
         buf.putInt(targetFps)
+        buf.putShort(verNameBytes.size.toShort())
+        buf.put(verNameBytes)
         return buf.array()
     }
 
@@ -55,7 +59,15 @@ data class HandshakeRequest(
                 displayMode = if (buf.hasRemaining()) buf.get() else DISPLAY_MODE_VIRTUAL,
                 screenDpi = if (buf.remaining() >= 4) buf.getInt() else 160,
                 appVersionCode = if (buf.remaining() >= 4) buf.getInt() else 0,
-                targetFps = if (buf.remaining() >= 4) buf.getInt() else 30
+                targetFps = if (buf.remaining() >= 4) buf.getInt() else 30,
+                appVersionName = if (buf.remaining() >= 2) {
+                    val vnLen = buf.getShort().toInt().coerceAtMost(buf.remaining())
+                    if (vnLen > 0) {
+                        val vnBytes = ByteArray(vnLen)
+                        buf.get(vnBytes)
+                        String(vnBytes, Charsets.UTF_8)
+                    } else ""
+                } else ""
             )
             return request
         }
@@ -70,12 +82,13 @@ data class HandshakeResponse(
     val displayHeight: Int,
     val virtualDisplayId: Int = -1,
     val adbPort: Int = 5555,
-    val vdServerJarPath: String = ""
+    val vdServerJarPath: String = "",
+    val connectionMethod: Byte = CONNECTION_METHOD_USB_ADB
 ) {
     fun encode(): ByteArray {
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
         val jarPathBytes = vdServerJarPath.toByteArray(Charsets.UTF_8)
-        val buf = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 4 + 4 + 2 + jarPathBytes.size)
+        val buf = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 4 + 4 + 2 + jarPathBytes.size + 1)
             .order(ByteOrder.BIG_ENDIAN)
         buf.putInt(protocolVersion)
         buf.put(if (accepted) 1.toByte() else 0.toByte())
@@ -87,6 +100,7 @@ data class HandshakeResponse(
         buf.putInt(adbPort)
         buf.putShort(jarPathBytes.size.toShort())
         buf.put(jarPathBytes)
+        buf.put(connectionMethod)
         return buf.array()
     }
 
@@ -110,6 +124,7 @@ data class HandshakeResponse(
                     String(pathBytes, Charsets.UTF_8)
                 } else ""
             } else ""
+            val connMethod = if (buf.hasRemaining()) buf.get() else CONNECTION_METHOD_USB_ADB
             return HandshakeResponse(
                 protocolVersion = version,
                 accepted = accepted,
@@ -118,7 +133,8 @@ data class HandshakeResponse(
                 displayHeight = dh,
                 virtualDisplayId = vdId,
                 adbPort = adbP,
-                vdServerJarPath = jarPath
+                vdServerJarPath = jarPath,
+                connectionMethod = connMethod
             )
         }
     }
@@ -428,4 +444,9 @@ const val FEATURE_AUDIO = 0x02
 const val FEATURE_NOTIFICATIONS = 0x04
 const val FEATURE_MEDIA_CONTROL = 0x08
 const val FEATURE_NAVIGATION = 0x10
+
+// Connection methods (handshake response)
+const val CONNECTION_METHOD_USB_ADB: Byte = 0
+const val CONNECTION_METHOD_WIFI_ADB: Byte = 1
+const val CONNECTION_METHOD_SHIZUKU: Byte = 2
 

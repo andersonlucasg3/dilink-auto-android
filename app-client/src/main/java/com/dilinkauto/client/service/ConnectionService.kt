@@ -16,6 +16,7 @@ import androidx.core.app.NotificationCompat
 import com.dilinkauto.client.ClientApp
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.R
+import com.dilinkauto.client.ShizukuManager
 import com.dilinkauto.client.display.VirtualDisplayClient
 import com.dilinkauto.protocol.*
 import dadb.AdbKeyPair
@@ -108,7 +109,7 @@ class ConnectionService : Service() {
     private fun registerNetworkCallback() {
         val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .build()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
@@ -361,6 +362,7 @@ class ConnectionService : Service() {
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
             "vd-server.jar"
         ).absolutePath
+        val connMethod = if (ShizukuManager.isAvailable) CONNECTION_METHOD_SHIZUKU else CONNECTION_METHOD_USB_ADB
         val resp = HandshakeResponse(
             accepted = true,
             deviceName = android.os.Build.MODEL,
@@ -368,17 +370,20 @@ class ConnectionService : Service() {
             displayHeight = request.screenHeight,
             virtualDisplayId = -1,
             adbPort = 5555,
-            vdServerJarPath = vdJarPath
+            vdServerJarPath = vdJarPath,
+            connectionMethod = connMethod
         )
         serviceScope.launch(Dispatchers.IO) {
             // Check version BEFORE sending response — determines the flow
-            val carVersion = request.appVersionCode
-            @Suppress("DEPRECATION")
-            val myVersion = packageManager.getPackageInfo(packageName, 0).versionCode
+            val carVersionName = request.appVersionName.ifEmpty { request.appVersionCode.toString() }
+            val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
+                it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
+            }
             // Skip auto-update if a previous attempt failed recently (5min cooldown)
             val updateCooldown = autoUpdateFailedAt > 0L &&
                 System.currentTimeMillis() - autoUpdateFailedAt < 5 * 60 * 1000L
-            val needsUpdate = carVersion < myVersion && !autoUpdateAttempted && !updateCooldown
+            val needsUpdate = UpdateManager.compareVersions(myVersionName, carVersionName) > 0
+                && !autoUpdateAttempted && !updateCooldown
 
             if (needsUpdate) {
                 // ─── UPDATE FLOW ───
@@ -399,8 +404,8 @@ class ConnectionService : Service() {
 
                 // Do NOT start VD wait or send app list — the car will restart after update.
                 autoUpdateAttempted = true
-                FileLog.i(TAG, "Car app outdated (v$carVersion < v$myVersion) — updating, then waiting for reconnect")
-                _installStatusStatic.value = getString(R.string.status_auto_update, carVersion.toString(), myVersion.toString())
+                FileLog.i(TAG, "Car app outdated ($carVersionName < $myVersionName) — updating, then waiting for reconnect")
+                _installStatusStatic.value = getString(R.string.status_auto_update, carVersionName, myVersionName)
                 autoUpdateCarApp(conn)
                 // autoUpdateCarApp restarts the car app — it will reconnect with the new version.
                 // We disconnect and go back to WAITING.
@@ -419,10 +424,10 @@ class ConnectionService : Service() {
                     return@launch
                 }
 
-                if (carVersion < myVersion) {
-                    FileLog.i(TAG, "Car app outdated (v$carVersion) — update already attempted this session, proceeding")
+                if (UpdateManager.compareVersions(myVersionName, carVersionName) > 0) {
+                    FileLog.i(TAG, "Car app outdated ($carVersionName) — update already attempted this session, proceeding")
                 } else {
-                    FileLog.i(TAG, "Car app up-to-date (v$carVersion)")
+                    FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
                 }
 
                 // Accept video and input connections from car
@@ -436,6 +441,12 @@ class ConnectionService : Service() {
                     return@launch
                 }
                 waitForVDServer(VD_SERVER_PORT)
+
+                // If Shizuku is available, start the VD server directly
+                // (no need for the car's USB ADB to deploy it)
+                if (ShizukuManager.isAvailable) {
+                    startVdServerViaShizuku(request.screenWidth, request.screenHeight)
+                }
 
                 sendAppList()
             }
@@ -480,6 +491,48 @@ class ConnectionService : Service() {
                 }
             } else {
                 FileLog.w(TAG, "VD server did not connect within timeout")
+            }
+        }
+    }
+
+    /**
+     * Start the VD server process directly on the phone using Shizuku.
+     *
+     * Shizuku provides shell-level privileges so the phone can run app_process
+     * without waiting for the car's USB ADB connection. The VD server will
+     * reverse-connect to localhost:19637 as usual.
+     */
+    private fun startVdServerViaShizuku(carWidth: Int, carHeight: Int) {
+        if (!ShizukuManager.isAvailable) {
+            FileLog.w(TAG, "Shizuku not available — cannot start VD server")
+            return
+        }
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
+                val dpiScale = phoneDpi.toFloat() / 160f
+                val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
+                val scaledW = ((scaledH * carWidth.toFloat() / carHeight).toInt()) and 0x7FFFFFFE.toInt()
+                val jarPath = java.io.File(
+                    java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
+                    "vd-server.jar"
+                ).absolutePath
+                val logFile = "/data/local/tmp/vd-server.log"
+                val args = "$scaledW $scaledH $phoneDpi $VD_SERVER_PORT $carWidth $carHeight $targetFps"
+
+                // Kill any existing VD server process
+                ShizukuManager.execAndWait("pkill -f VirtualDisplayServer 2>/dev/null")
+                delay(200)
+
+                // Launch VD server via app_process (shell UID 2000) using Shizuku.
+                // The command runs detached (&) so it doesn't block the Shizuku service call.
+                val cmd = "CLASSPATH=$jarPath exec app_process / " +
+                        "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
+                        " >$logFile 2>&1"
+                ShizukuManager.execBackground(cmd)
+                FileLog.i(TAG, "VD server started via Shizuku: ${scaledW}x${scaledH}")
+            } catch (e: Exception) {
+                FileLog.e(TAG, "Shizuku VD server start failed", e)
             }
         }
     }
@@ -702,16 +755,17 @@ class ConnectionService : Service() {
                 try {
                     _installStatus.value = getString(R.string.car_install_status_checking_version)
                     val versionOutput = dadb.shell(
-                        "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionCode"
+                        "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionName"
                     ).allOutput
-                    val installedVersion = Regex("""versionCode=(\d+)""")
-                        .find(versionOutput)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                    @Suppress("DEPRECATION")
-                    val myVersion = packageManager.getPackageInfo(packageName, 0).versionCode
-                    FileLog.i(TAG, "Car app: installed=v$installedVersion, embedded=v$myVersion")
+                    val installedVersionName = Regex("""versionName=(\S+)""")
+                        .find(versionOutput)?.groupValues?.get(1) ?: "0"
+                    val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
+                        it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
+                    }
+                    FileLog.i(TAG, "Car app: installed=$installedVersionName, embedded=$myVersionName")
 
-                    if (installedVersion >= myVersion) {
-                        _installStatus.value = getString(R.string.car_install_status_already_up_to_date, installedVersion.toString())
+                    if (UpdateManager.compareVersions(myVersionName, installedVersionName) <= 0) {
+                        _installStatus.value = getString(R.string.car_install_status_already_up_to_date, installedVersionName)
                         return@launch
                     }
 
@@ -720,14 +774,14 @@ class ConnectionService : Service() {
                     dadb.push(apkFile, remotePath)
                     FileLog.i(TAG, "Car APK pushed (${apkFile.length()} bytes)")
 
-                    _installStatus.value = getString(R.string.car_install_status_installing_version, myVersion.toString())
+                    _installStatus.value = getString(R.string.car_install_status_installing_version, myVersionName)
                     val result = dadb.shell("pm install -r $remotePath").allOutput
                     FileLog.i(TAG, "Install result: ${result.trim()}")
 
                     if (result.contains("Success")) {
                         _installStatus.value = getString(R.string.car_install_status_launching_car_app)
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
-                        _installStatus.value = getString(R.string.car_install_status_car_installed, myVersion.toString())
+                        _installStatus.value = getString(R.string.car_install_status_car_installed, myVersionName)
                     } else {
                         _installStatus.value = getString(R.string.car_install_status_failed, result.trim())
                     }
@@ -973,6 +1027,71 @@ class ConnectionService : Service() {
         controlConnection = null
         activeConnection = null
         _serviceState.value = State.WAITING
+
+        // Force screen on after disconnection. VD server uses SurfaceControl-level
+        // display power-off which regular WakeLocks can't reverse. Launch our own
+        // activity with FLAG_TURN_SCREEN_ON — WindowManager wakes the display.
+        forceWakeScreen()
+    }
+
+    /**
+     * Multi-layered display wake after disconnection. The VD server shuts off the
+     * physical display at the SurfaceControl level (or via cmd display power-off),
+     * which puts it in a deeper off state than normal screen timeout. Regular
+     * WakeLocks can't recover from this — only system-level mechanisms can.
+     *
+     * Layers (tried in order, each is independent):
+     * 1. PowerManager.wakeUp() via reflection — system-level wake
+     * 2. FLAG_TURN_SCREEN_ON activity launch — WindowManager triggers display on
+     * 3. WakeLock with ACQUIRE_CAUSES_WAKEUP — framework-level
+     */
+    @android.annotation.SuppressLint("BlockedPrivateApi")
+    private fun forceWakeScreen() {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                FileLog.i(TAG, "Force-waking physical display")
+                val pm = getSystemService(POWER_SERVICE) as PowerManager
+
+                // Layer 1: PowerManager.wakeUp() — direct system call
+                try {
+                    val wakeUp = PowerManager::class.java.getDeclaredMethod(
+                        "wakeUp", Long::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType, String::class.java
+                    )
+                    wakeUp.invoke(pm, android.os.SystemClock.uptimeMillis(),
+                        5 /* WAKE_REASON_APPLICATION */, "DiLink:restore")
+                    FileLog.i(TAG, "Display wakeUp() succeeded from cleanupSession")
+                } catch (e: Exception) {
+                    FileLog.d(TAG, "wakeUp() not available from cleanupSession: ${e.message}")
+                }
+
+                // Layer 2: Launch MainActivity with FLAG_TURN_SCREEN_ON.
+                // WindowManager wakes the display as part of bringing the
+                // activity to the foreground, regardless of the display's
+                // current power state.
+                try {
+                    val intent = Intent(this@ConnectionService, Class.forName("com.dilinkauto.client.MainActivity"))
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    intent.addFlags(0x10000000) // FLAG_TURN_SCREEN_ON
+                    startActivity(intent)
+                    FileLog.i(TAG, "Launched MainActivity with FLAG_TURN_SCREEN_ON from cleanupSession")
+                } catch (e: Exception) {
+                    FileLog.d(TAG, "Activity launch for wake failed from cleanupSession: ${e.message}")
+                }
+
+                // Layer 3: WakeLock with ACQUIRE_CAUSES_WAKEUP
+                @Suppress("DEPRECATION")
+                val flags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    android.os.PowerManager.ON_AFTER_RELEASE
+                val wl = pm.newWakeLock(flags, "DiLink:display:restore2")
+                wl.acquire(3000)
+                wl.release()
+            } catch (e: Exception) {
+                FileLog.w(TAG, "forceWakeScreen error: ${e.message}")
+            }
+        }
     }
 
     private fun stopEverything() {

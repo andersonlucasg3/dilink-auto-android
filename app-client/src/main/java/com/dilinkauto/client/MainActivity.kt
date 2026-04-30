@@ -686,6 +686,8 @@ fun MainScreen(
     val downloadProgress by UpdateManager.downloadProgress.collectAsState()
     val isRunning = serviceState != ConnectionService.State.IDLE
     var updateDismissed by remember { mutableStateOf(false) }
+    val isSamsung = remember { Build.MANUFACTURER.equals("samsung", ignoreCase = true) }
+    var samsungWarningDismissed by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -718,6 +720,36 @@ fun MainScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(16.dp))
+
+        // Samsung device warning
+        if (isSamsung && !samsungWarningDismissed) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF332211))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFFFA726), modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.samsung_warning_title), fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(stringResource(R.string.samsung_warning_desc), fontSize = 12.sp, color = Color(0xFFB0BEC5))
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onOpenSettings) {
+                            Text(stringResource(R.string.samsung_settings_guide), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                        TextButton(onClick = { samsungWarningDismissed = true }) {
+                            Text(stringResource(R.string.onboarding_skip_btn), fontSize = 13.sp, color = Color.Gray)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
         // Service status
         StatusCard(serviceState)
@@ -997,6 +1029,42 @@ fun SettingsScreen(
             onClick = onOpenDeveloperOptions
         )
 
+        Spacer(Modifier.height(8.dp))
+
+        // Shizuku
+        val shizukuInstalled = remember(permissionsKey) { ShizukuManager.isInstalled }
+        val shizukuAvailable = remember(permissionsKey) { ShizukuManager.isAvailable }
+        val shizukuIcon = when {
+            shizukuAvailable -> Icons.Default.Shield
+            shizukuInstalled -> Icons.Default.Security
+            else -> Icons.Default.Info
+        }
+        val shizukuTitle = when {
+            shizukuAvailable -> stringResource(R.string.perm_shizuku_available)
+            shizukuInstalled -> stringResource(R.string.perm_shizuku_needs_permission)
+            else -> stringResource(R.string.perm_shizuku)
+        }
+        val shizukuDesc = when {
+            shizukuAvailable -> stringResource(R.string.perm_shizuku_granted)
+            shizukuInstalled -> stringResource(R.string.perm_shizuku_permission_desc)
+            else -> stringResource(R.string.perm_shizuku_desc)
+        }
+        SetupItem(
+            icon = shizukuIcon,
+            title = shizukuTitle,
+            description = shizukuDesc,
+            onClick = {
+                when {
+                    shizukuAvailable -> { /* already authorized */ }
+                    shizukuInstalled -> {
+                        ShizukuManager.requestPermission()
+                        ShizukuManager.openShizukuApp(context)
+                        permissionsKey++
+                    }
+                }
+            }
+        )
+
         Spacer(Modifier.height(32.dp))
 
         // Distribution Channel
@@ -1200,6 +1268,20 @@ fun UpdatesCard(
                         Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.updates_install_btn))
+                    }
+                }
+                is UpdateState.Installing -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.updates_installing, state.version), fontSize = 13.sp, color = Color.Gray)
+                    }
+                }
+                is UpdateState.Installed -> {
+                    Text(stringResource(R.string.updates_installed), fontSize = 13.sp, color = Color(0xFF4CAF50))
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onCheckForUpdate) {
+                        Text(stringResource(R.string.updates_check_phone), color = MaterialTheme.colorScheme.primary)
                     }
                 }
                 is UpdateState.Error -> {

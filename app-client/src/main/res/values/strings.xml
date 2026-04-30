@@ -52,6 +52,8 @@
     <string name="updates_downloading">Downloading… %1$d%%</string>
     <string name="updates_ready">Phone: v%1$s ready</string>
     <string name="updates_install_btn">Install Update</string>
+    <string name="updates_installing">Installing v%1$s via Shizuku…</string>
+    <string name="updates_installed">Phone updated! Restart to apply.</string>
     <string name="updates_retry">Retry</string>
     <string name="updates_available_title">Update Available</string>
     <string name="updates_update_btn">Update</string>
@@ -76,6 +78,12 @@
     <string name="perm_granted">Granted</string>
     <string name="perm_usb_debugging">USB Debugging</string>
     <string name="perm_usb_desc">Required on both phone and car</string>
+    <string name="perm_shizuku">Shizuku</string>
+    <string name="perm_shizuku_desc">Install Shizuku for ADB-free connection. Start Shizuku once via ADB, then grant permission here.</string>
+    <string name="perm_shizuku_needs_permission">Shizuku — Needs Permission</string>
+    <string name="perm_shizuku_permission_desc">Shizuku is running. Tap to grant DiLink-Auto permission.</string>
+    <string name="perm_shizuku_available">Shizuku — Connected</string>
+    <string name="perm_shizuku_granted">Shizuku is active. The phone can deploy the virtual display server without USB ADB.</string>
 
     <!-- Support -->
     <string name="support_title">Support</string>
@@ -152,6 +160,11 @@
     <string name="donation_desc">Help keep DiLink-Auto going. Every contribution helps!</string>
     <string name="donation_github">GitHub Sponsor</string>
     <string name="donation_pix">Pix (Brazil)</string>
+
+    <!-- Samsung-Specific Warnings -->
+    <string name="samsung_warning_title">Samsung Device Detected</string>
+    <string name="samsung_warning_desc">Samsung One UI requires extra setup: disable Auto Blocker (blocks USB ADB), grant Unrestricted battery, and allow All Files Access. See Settings for details.</string>
+    <string name="samsung_settings_guide">Samsung Setup Guide</string>
 
     <!-- Distribution Channel -->
     <string name="channel_title">Distribution Channel</string>

@@ -8,6 +8,9 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.R
+import com.dilinkauto.client.ShizukuManager
+import dadb.AdbKeyPair
+import dadb.Dadb
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +29,8 @@ sealed class UpdateState {
     data class Available(val version: String, val sizeBytes: Long) : UpdateState()
     data class Downloading(val progress: Int, val version: String) : UpdateState()
     data class ReadyToInstall(val file: File, val version: String) : UpdateState()
+    data class Installing(val version: String) : UpdateState()
+    data object Installed : UpdateState()
     data class UpToDate(val version: String) : UpdateState()
     data class Error(val message: String) : UpdateState()
 }
@@ -212,6 +217,94 @@ object UpdateManager {
             return
         }
 
+        val version = latestRelease?.versionName ?: ""
+
+        if (ShizukuManager.isAvailable) {
+            // Silent install via Shizuku — no system confirmation dialog
+            _updateState.value = UpdateState.Installing(version)
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val result = ShizukuManager.execAndWait("pm install -r ${apkFile.absolutePath}")
+                    if (result != null && result.contains("Success")) {
+                        FileLog.i(TAG, "Shizuku install succeeded: $result")
+                        _updateState.value = UpdateState.Installed
+                        downloadedFile?.delete()
+                        downloadedFile = null
+                        latestRelease = null
+                    } else {
+                        val msg = result ?: "Shizuku command returned null"
+                        FileLog.w(TAG, "Shizuku install failed, trying dadb fallback: $msg")
+                        tryDadbInstall(apkFile, version)
+                    }
+                } catch (e: Exception) {
+                    FileLog.e(TAG, "Shizuku install error, trying dadb fallback", e)
+                    tryDadbInstall(apkFile, version)
+                }
+            }
+        } else {
+            // Fallback to system package installer
+            launchSystemInstaller(context, apkFile)
+        }
+    }
+
+    private suspend fun tryDadbInstall(apkFile: File, version: String) {
+        try {
+            val filesDir = appContext.filesDir
+            val privKey = File(filesDir, "adbkey")
+            val pubKey = File(filesDir, "adbkey.pub")
+            if (!privKey.exists()) {
+                filesDir.mkdirs()
+                AdbKeyPair.generate(privKey, pubKey)
+            }
+            val keyPair = AdbKeyPair.read(privKey, pubKey)
+
+            val dadbExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+            val dadb: Dadb? = try {
+                val future = dadbExecutor.submit<Dadb> {
+                    Dadb.create("127.0.0.1", 5555, keyPair)
+                }
+                try {
+                    future.get(10, java.util.concurrent.TimeUnit.SECONDS)
+                } catch (e: java.util.concurrent.TimeoutException) {
+                    FileLog.w(TAG, "Dadb self-connect timed out")
+                    null
+                }
+            } finally {
+                dadbExecutor.shutdownNow()
+            }
+
+            if (dadb == null) {
+                FileLog.w(TAG, "Dadb self-connect failed, falling back to system installer")
+                launchSystemInstaller(appContext, apkFile)
+                return
+            }
+
+            try {
+                FileLog.i(TAG, "Dadb self-install ($version): pushing APK...")
+                val remotePath = "/data/local/tmp/update.apk"
+                dadb.push(apkFile, remotePath)
+                val result = dadb.shell("pm install -r $remotePath").allOutput
+                FileLog.i(TAG, "Dadb self-install result: ${result.trim()}")
+                if (result.contains("Success")) {
+                    FileLog.i(TAG, "Dadb self-install succeeded")
+                    _updateState.value = UpdateState.Installed
+                    downloadedFile?.delete()
+                    downloadedFile = null
+                    latestRelease = null
+                } else {
+                    FileLog.w(TAG, "Dadb self-install failed: ${result.trim()}, falling back to system installer")
+                    launchSystemInstaller(appContext, apkFile)
+                }
+            } finally {
+                dadb.close()
+            }
+        } catch (e: Exception) {
+            FileLog.e(TAG, "Dadb self-install error, falling back to system installer", e)
+            launchSystemInstaller(appContext, apkFile)
+        }
+    }
+
+    private fun launchSystemInstaller(context: Context, apkFile: File) {
         try {
             val uri = FileProvider.getUriForFile(
                 context,
@@ -224,7 +317,7 @@ object UpdateManager {
             }
             context.startActivity(intent)
         } catch (e: Exception) {
-            FileLog.e(TAG, "Install intent failed", e)
+            FileLog.e(TAG, "System installer also failed", e)
             _updateState.value = UpdateState.Error(appContext.getString(R.string.update_installer_error, e.message ?: "unknown"))
         }
     }
@@ -313,9 +406,9 @@ object UpdateManager {
     // "0.17.0-dev-02" → ("0.17.0", true, 2)
     // "0.17.0-dev"    → ("0.17.0", true, 0)
     // "0.17.0"        → ("0.17.0", false, 0)
-    private data class ParsedVersion(val base: String, val isDev: Boolean, val devNum: Int)
+    internal data class ParsedVersion(val base: String, val isDev: Boolean, val devNum: Int)
 
-    private fun parseVersion(v: String): ParsedVersion {
+    internal fun parseVersion(v: String): ParsedVersion {
         val m = Regex("^(.*)-dev(?:-(\\d+))?\$").find(v)
         return if (m != null) {
             ParsedVersion(m.groupValues[1], true, m.groupValues[2].toIntOrNull() ?: 0)
@@ -324,7 +417,7 @@ object UpdateManager {
         }
     }
 
-    private fun compareVersions(a: String, b: String): Int {
+    internal fun compareVersions(a: String, b: String): Int {
         val (baseA, devA, numA) = parseVersion(a)
         val (baseB, devB, numB) = parseVersion(b)
         val aParts = baseA.split(".").map { it.toIntOrNull() ?: 0 }

@@ -78,6 +78,7 @@ class CarConnectionService : Service() {
     private var connectionScope: Job? = null  // Parent job for all discovery/connect coroutines
     @Volatile private var vdServerStarted = false // VD server process launched
     @Volatile private var updatingFromPhone = false // Phone is pushing an update — don't reconnect
+    @Volatile private var shizukuMode = false  // Phone handles VD server via Shizuku
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val usbPermissionAction = "com.dilinkauto.server.USB_PERMISSION"
@@ -227,6 +228,7 @@ class CarConnectionService : Service() {
         // Reset prerequisite flags (keep usbReady if USB is physically connected)
         wifiReady = false
         vdServerStarted = false
+        shizukuMode = false
         _videoReady.value = false
         if (usbAdb?.isConnected != true) {
             usbReady = false
@@ -259,15 +261,23 @@ class CarConnectionService : Service() {
             State.IDLE -> { /* waiting for user action */ }
 
             State.CONNECTING -> {
-                if (wifiReady && usbReady && !vdServerStarted) {
-                    carLogSend("Both WiFi and USB ready — deploying VD server")
+                if (wifiReady && (usbReady || shizukuMode) && !vdServerStarted) {
+                    carLogSend("WiFi ready${if (shizukuMode) " (Shizuku mode)" else " and USB ready"} — deploying VD server")
                     _state.value = State.CONNECTED
                     _statusMessage.value = getString(R.string.status_deploying_vd)
-                    deployVdServer()
-                } else if (wifiReady && !usbReady) {
+                    if (!shizukuMode) {
+                        deployVdServer()
+                    } else {
+                        // Phone handles VD server via Shizuku — skip car-side deployment
+                        vdServerStarted = true
+                        carLogSend("Shizuku mode: phone deploys VD server, car skipping")
+                    }
+                } else if (wifiReady && !usbReady && !shizukuMode) {
                     _statusMessage.value = getString(R.string.status_waiting_usb)
                 } else if (!wifiReady && usbReady) {
                     _statusMessage.value = getString(R.string.status_waiting_wifi)
+                } else if (!wifiReady && !usbReady) {
+                    _statusMessage.value = getString(R.string.status_connecting)
                 }
             }
 
@@ -287,7 +297,8 @@ class CarConnectionService : Service() {
 
     private fun startWifiTrack() {
         // Strategy 1: Gateway IP retry loop (phone is hotspot)
-        // Retries every 3s — handles hotspot enabled after USB plug
+        // Retries every 3s until wifiReady — handles hotspot enabled after USB plug
+        // and Shizuku mode where phone's service may not be listening on first attempt
         scope.launch(Dispatchers.IO) {
             delay(500)
             while (isActive && !wifiReady && _state.value == State.CONNECTING) {
@@ -295,7 +306,6 @@ class CarConnectionService : Service() {
                 if (gatewayIp != null) {
                     carLogSend("WiFi track: trying gateway $gatewayIp")
                     connectToPhone(gatewayIp, Discovery.DEFAULT_PORT)
-                    break
                 }
                 delay(3000) // retry every 3 seconds
             }
@@ -346,7 +356,10 @@ class CarConnectionService : Service() {
                     appVersionCode = packageManager.getPackageInfo(packageName, 0).let {
                         @Suppress("DEPRECATION") it.versionCode
                     },
-                    targetFps = 60
+                    targetFps = 60,
+                    appVersionName = packageManager.getPackageInfo(packageName, 0).let {
+                        it.versionName ?: ""
+                    }
                 )
                 ctrl.sendControl(ControlMsg.HANDSHAKE_REQUEST, handshake.encode())
 
@@ -585,12 +598,18 @@ class CarConnectionService : Service() {
         when (frame.messageType) {
             ControlMsg.HANDSHAKE_RESPONSE -> {
                 val response = HandshakeResponse.decode(frame.payload)
-                carLogSend("Handshake OK: ${response.deviceName} jarPath=${response.vdServerJarPath}")
+                carLogSend("Handshake OK: ${response.deviceName} jarPath=${response.vdServerJarPath} connMethod=${response.connectionMethod}")
                 _phoneName.value = response.deviceName
                 vdWidth = response.displayWidth
                 vdHeight = response.displayHeight
                 if (response.vdServerJarPath.isNotEmpty()) {
                     vdServerJarPath = response.vdServerJarPath
+                }
+
+                // Detect Shizuku mode — phone handles VD server startup
+                if (response.connectionMethod == CONNECTION_METHOD_SHIZUKU) {
+                    shizukuMode = true
+                    carLogSend("Shizuku mode detected — phone will deploy VD server")
                 }
 
                 // Don't set wifiReady yet — first connect video + input connections.
