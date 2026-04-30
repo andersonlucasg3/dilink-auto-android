@@ -148,11 +148,20 @@ BRANCH=$(branch_name)
 if [ -n "$RELEASE_VERSION" ]; then
   echo " Type:   release → $RELEASE_TARGET (v$RELEASE_VERSION)"
 else
-  echo " Type:   feature → $RELEASE_TARGET"
+  case "$BRANCH" in
+    hotfix/*)   echo " Type:   hotfix → $RELEASE_TARGET" ;;
+    fix/*)      echo " Type:   bug fix → $RELEASE_TARGET" ;;
+    feature/*)  echo " Type:   feature → $RELEASE_TARGET" ;;
+    docs/*)     echo " Type:   docs → $RELEASE_TARGET" ;;
+    investigate/*) echo " Type:   investigation → $RELEASE_TARGET" ;;
+    *)          echo " Type:   $BRANCH → $RELEASE_TARGET" ;;
+  esac
 fi
 
-# Set up branch — reuse if it exists (resume), create fresh if new
-git fetch origin develop "$BRANCH" 2>/dev/null || true
+# Set up branch — reuse if it exists (resume), create fresh if new.
+# For hotfix and release, the base branch is main; otherwise develop.
+BASE_BRANCH="${RELEASE_TARGET:-develop}"
+git fetch origin "$BASE_BRANCH" "$BRANCH" 2>/dev/null || true
 
 # Discard ALL leftover changes — even CRLF conversions from .gitattributes
 git reset --hard HEAD 2>/dev/null || true
@@ -162,17 +171,17 @@ git clean -ffdx -e '.gradle' 2>/dev/null || true
 git fetch origin --prune --prune-tags 2>/dev/null || true
 
 # Set up branch
-git fetch origin develop "$BRANCH" 2>/dev/null || true
+git fetch origin "$BASE_BRANCH" "$BRANCH" 2>/dev/null || true
 if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
-  log_step "Reusing branch: $BRANCH"
+  log_step "Reusing branch: $BRANCH (base: $BASE_BRANCH)"
   git checkout -f "$BRANCH" 2>/dev/null || git checkout -f -b "$BRANCH" "origin/$BRANCH"
   git pull origin "$BRANCH" 2>/dev/null || true
-  # Merge develop to get .gitattributes and prevent CRLF/LF churn
-  git merge origin/develop --no-edit 2>/dev/null || git checkout -f origin/develop -- .gitattributes 2>/dev/null || true
+  # Merge base branch to get .gitattributes and prevent CRLF/LF churn
+  git merge "origin/$BASE_BRANCH" --no-edit 2>/dev/null || git checkout -f "origin/$BASE_BRANCH" -- .gitattributes 2>/dev/null || true
 else
-  log_step "Creating branch: $BRANCH"
-  git checkout -f develop
-  git pull origin develop
+  log_step "Creating branch: $BRANCH (from: $BASE_BRANCH)"
+  git checkout -f "$BASE_BRANCH"
+  git pull origin "$BASE_BRANCH"
   git branch -D "$BRANCH" 2>/dev/null || true
   git checkout -f -b "$BRANCH"
 fi

@@ -19,6 +19,13 @@ branch_name() {
     fi
   fi
 
+  # Hotfix branches are created from main (not develop)
+  if echo "${ISSUE_LABELS:-}" | jq -e 'index("hotfix")' >/dev/null 2>&1; then
+    RELEASE_TARGET="main"
+    echo "hotfix/${ISSUE_NUM}-agent"
+    return
+  fi
+
   # Map label to branch prefix
   RELEASE_TARGET="develop"
   if echo "${ISSUE_LABELS:-}" | jq -e 'index("bug")' >/dev/null 2>&1; then
