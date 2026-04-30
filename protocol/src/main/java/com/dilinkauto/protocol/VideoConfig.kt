@@ -4,12 +4,14 @@ import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Build
+import android.util.Log
 
 /**
  * Shared video pipeline configuration.
  * All waits/polls on the video path should use FRAME_INTERVAL_MS as their max timeout.
  */
 object VideoConfig {
+    private const val TAG = "VideoConfig"
     const val TARGET_FPS = 60
     const val FRAME_INTERVAL_MS = 1000L / TARGET_FPS  // 16ms at 60fps
     const val VIRTUAL_DISPLAY_DPI = 480  // phone DPI used for VD creation and touch mapping
@@ -45,15 +47,17 @@ object VideoConfig {
      * Returns the DPI that should be used for the VirtualDisplay.
      */
     fun getVirtualDisplayDpi(context: Context): Int {
-        return if (isDesktopMode(context)) DESKTOP_MODE_DPI else VIRTUAL_DISPLAY_DPI
+        val desktop = isDesktopMode(context)
+        Log.i(TAG, "getVirtualDisplayDpi: desktopMode=$desktop → dpi=${if (desktop) DESKTOP_MODE_DPI else VIRTUAL_DISPLAY_DPI}")
+        return if (desktop) DESKTOP_MODE_DPI else VIRTUAL_DISPLAY_DPI
     }
 
     /**
      * Returns the smallest-width dp for VD size calculation.
-     * Uses a lower value in desktop mode so UI elements render larger.
      */
     fun getTargetSwDp(context: Context): Int {
-        return if (isDesktopMode(context)) DESKTOP_MODE_TARGET_SW_DP else TARGET_SW_DP
+        val desktop = isDesktopMode(context)
+        return if (desktop) DESKTOP_MODE_TARGET_SW_DP else TARGET_SW_DP
     }
 
     /**
@@ -68,46 +72,138 @@ object VideoConfig {
     // ─── Desktop mode detection ───
 
     /**
-     * Detects whether the device is currently in desktop mode.
-     * Tries multiple detection strategies in order:
-     * 1. UiModeManager.currentModeType == UI_MODE_TYPE_DESK (standard Android API)
-     * 2. Samsung SemDesktopModeManager (reflection, One UI 3+)
-     * 3. Samsung DeX system property (ro.boot.dexstatus or persist.sys.dex_status)
-     * 4. Display-based: checks for TYPE_EXTERNAL displays with desktop flags
+     * Detects whether the device is in desktop mode (Samsung DeX, Android Desktop).
+     * Tries every available detection strategy with detailed diagnostic logging
+     * so failures are visible in logcat for debugging.
      */
     fun isDesktopMode(context: Context): Boolean {
-        // Strategy 1: UiModeManager (Android 8.0+, covers native Desktop Mode and DeX)
+        // Strategy 1: UiModeManager (Android 8.0+)
         try {
             val um = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-            if (um?.currentModeType == Configuration.UI_MODE_TYPE_DESK) return true
-        } catch (_: Exception) {}
+            val modeType = um?.currentModeType
+            Log.d(TAG, "UiModeManager.currentModeType=$modeType (DESK=${Configuration.UI_MODE_TYPE_DESK})")
+            if (modeType == Configuration.UI_MODE_TYPE_DESK) {
+                Log.i(TAG, "Desktop mode: UiModeManager")
+                return true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "UiModeManager failed: ${e.message}")
+        }
 
-        // Strategy 2: Samsung SemDesktopModeManager (One UI 3.0+, Android 11+)
+        // Strategy 2: DisplayManager — non-default displays with DeX/Desktop names
+        try {
+            val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+            dm?.displays?.forEach { display ->
+                val name = display.name ?: ""
+                if (display.displayId != android.view.Display.DEFAULT_DISPLAY) {
+                    Log.d(TAG, "Display id=${display.displayId} name='$name' flags=0x${display.flags.toString(16)}")
+                    if (name.contains("DeX", ignoreCase = true) || name.contains("Desktop", ignoreCase = true)) {
+                        Log.i(TAG, "Desktop mode: display name='$name'")
+                        return true
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "DisplayManager failed: ${e.message}")
+        }
+
+        // Strategy 3: Samsung-specific detection
         if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+            Log.d(TAG, "Samsung device detected — trying Samsung DeX APIs")
+
+            // 3a: SemDesktopModeManager.isDesktopMode() boolean (One UI 4+)
             try {
                 val cls = Class.forName("com.samsung.android.desktopmode.SemDesktopModeManager")
                 val getInstance = cls.getDeclaredMethod("getInstance", Context::class.java)
                 val instance = getInstance.invoke(null, context)
-                val getDesktopModeState = cls.getDeclaredMethod("getDesktopModeState")
-                val state = getDesktopModeState.invoke(instance)
-                // SemDesktopModeState has an enum with DEX_ON, DEX_OFF, etc.
-                // Checking toString() covers historical and future enum names.
-                val stateStr = state.toString()
-                if (stateStr.contains("ON") || stateStr.contains("CONNECTED") ||
-                    stateStr.contains("DEX") && !stateStr.contains("OFF")) {
-                    return true
+
+                try {
+                    val isDm = cls.getDeclaredMethod("isDesktopMode")
+                    val result = isDm.invoke(instance) as? Boolean
+                    Log.d(TAG, "SemDesktopModeManager.isDesktopMode()=$result")
+                    if (result == true) {
+                        Log.i(TAG, "Desktop mode: SemDesktopModeManager.isDesktopMode()")
+                        return true
+                    }
+                } catch (_: NoSuchMethodException) {
+                    Log.d(TAG, "SemDesktopModeManager.isDesktopMode() not found")
                 }
-            } catch (_: Exception) {}
+
+                // 3b: getDesktopModeState() enum
+                try {
+                    val getState = cls.getDeclaredMethod("getDesktopModeState")
+                    val state = getState.invoke(instance)
+                    val stateStr = state.toString()
+                    val stateOrdinal = try {
+                        state.javaClass.getMethod("ordinal").invoke(state) as Int
+                    } catch (_: Exception) { -1 }
+                    val stateName = try {
+                        state.javaClass.getMethod("name").invoke(state) as String
+                    } catch (_: Exception) { "" }
+
+                    Log.d(TAG, "SemDesktopModeManager state=$stateStr name=$stateName ordinal=$stateOrdinal")
+
+                    val lower = stateStr.lowercase()
+                    if (lower.contains("dex") && !lower.contains("off") ||
+                        lower.contains("desktop") && !lower.contains("disab") ||
+                        lower == "enabled" || lower == "on" ||
+                        stateName.contains("DEX", ignoreCase = true) ||
+                        (stateOrdinal > 0 && stateName.isNotEmpty())) {
+                        Log.i(TAG, "Desktop mode: SemDesktopModeManager state=$stateStr")
+                        return true
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "getDesktopModeState() failed: ${e.message}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "SemDesktopModeManager not available: ${e.message}")
+            }
+
+            // 3c: System properties
+            val dexProps = listOf(
+                "persist.sys.dex_status", "ro.boot.dexstatus",
+                "sys.desktopmode", "sys.samsung.desktop",
+                "persist.sys.desktop_mode", "sys.debug.dex"
+            )
+            for (prop in dexProps) {
+                try {
+                    val value = getSystemProperty(prop)
+                    if (value != null) Log.d(TAG, "Property $prop=$value")
+                    if (value == "1" || value.equals("true", ignoreCase = true)) {
+                        Log.i(TAG, "Desktop mode: property $prop=$value")
+                        return true
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 3d: Settings.System
+            val sysKeys = listOf("desktop_mode_enabled", "dex_mode", "samsung_desktop_mode")
+            for (key in sysKeys) {
+                try {
+                    val value = android.provider.Settings.System.getInt(context.contentResolver, key, -1)
+                    Log.d(TAG, "Settings.System $key=$value")
+                    if (value == 1) {
+                        Log.i(TAG, "Desktop mode: Settings.System $key=$value")
+                        return true
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 3e: Settings.Global
+            val globalKeys = listOf("desktop_mode", "dex_mode_enabled")
+            for (key in globalKeys) {
+                try {
+                    val value = android.provider.Settings.Global.getInt(context.contentResolver, key, -1)
+                    Log.d(TAG, "Settings.Global $key=$value")
+                    if (value == 1) {
+                        Log.i(TAG, "Desktop mode: Settings.Global $key=$value")
+                        return true
+                    }
+                } catch (_: Exception) {}
+            }
         }
 
-        // Strategy 3: System properties (Samsung devices)
-        try {
-            val dexStatus = getSystemProperty("persist.sys.dex_status")
-            if (dexStatus == "1" || dexStatus == "true") return true
-            val bootDex = getSystemProperty("ro.boot.dexstatus")
-            if (bootDex == "1" || bootDex == "true") return true
-        } catch (_: Exception) {}
-
+        Log.d(TAG, "Desktop mode NOT detected — using normal VD params")
         return false
     }
 
