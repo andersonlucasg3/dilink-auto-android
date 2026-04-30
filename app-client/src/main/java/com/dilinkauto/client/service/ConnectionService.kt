@@ -427,18 +427,19 @@ class ConnectionService : Service() {
         targetFps = request.targetFps
 
         val phoneDpi = VideoConfig.getVirtualDisplayDpi(this)
+        val targetSwDp = VideoConfig.getTargetSwDp(this)
         val isDesktopMode = VideoConfig.isDesktopMode(this)
         if (isDesktopMode) {
-            FileLog.i(TAG, "Desktop mode detected — using DPI=$phoneDpi for VD")
+            FileLog.i(TAG, "Desktop mode detected — DPI=$phoneDpi SW_DP=$targetSwDp for VD")
         }
         val dpiScale = phoneDpi.toFloat() / 160f
-        val minHeightPx = (VideoConfig.TARGET_SW_DP * dpiScale).toInt()
+        val minHeightPx = (targetSwDp * dpiScale).toInt()
         val carAspect = request.screenWidth.toFloat() / request.screenHeight
         val scaledH = minHeightPx and 0x7FFFFFFE.toInt()
         val scaledW = ((scaledH * carAspect).toInt()) and 0x7FFFFFFE.toInt()
         vdWidth = scaledW
         vdHeight = scaledH
-        FileLog.i(TAG, "Touch mapping: ${scaledW}x${scaledH}")
+        FileLog.i(TAG, "VD dimensions: ${scaledW}x${scaledH} @${phoneDpi}dpi (SW=$targetSwDp dp)")
 
         vdClient?.disconnect()
         vdClient = null
@@ -596,8 +597,9 @@ class ConnectionService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val phoneDpi = VideoConfig.getVirtualDisplayDpi(this@ConnectionService)
+                val targetSwDp = VideoConfig.getTargetSwDp(this@ConnectionService)
                 val dpiScale = phoneDpi.toFloat() / 160f
-                val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
+                val scaledH = ((targetSwDp * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
                 val scaledW = ((scaledH * carWidth.toFloat() / carHeight).toInt()) and 0x7FFFFFFE.toInt()
                 val jarPath = java.io.File(
                     java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),

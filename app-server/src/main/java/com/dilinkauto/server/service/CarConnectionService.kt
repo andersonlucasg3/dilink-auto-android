@@ -723,8 +723,9 @@ class CarConnectionService : Service() {
             val viewportWidth = displayMetrics.widthPixels - navBarPx
             val viewportHeight = displayMetrics.heightPixels
             val phoneDpi = handshakeVdDpi
+            val targetSwDp = VideoConfig.getTargetSwDpForDpi(phoneDpi)
             val dpiScale = phoneDpi.toFloat() / 160f
-            val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
+            val scaledH = ((targetSwDp * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
             val scaledW = ((scaledH * viewportWidth.toFloat() / viewportHeight).toInt()) and 0x7FFFFFFE.toInt()
 
             val jarPath = vdServerJarPath
@@ -742,7 +743,7 @@ class CarConnectionService : Service() {
             // Launch VD server. Uses exec to replace shell with app_process — keeps ADB stream open.
             // VD server will die on disconnect; car re-deploys on reconnect.
             _statusMessage.value = getString(R.string.status_starting_vd)
-            carLogSend("VD server: ${scaledW}x${scaledH}@${phoneDpi}dpi → ${viewportWidth}x${viewportHeight}")
+            carLogSend("VD server: ${scaledW}x${scaledH}@${phoneDpi}dpi (SW=${targetSwDp}dp) → ${viewportWidth}x${viewportHeight}")
 
             val cmd = "CLASSPATH=$jarPath exec app_process / " +
                     "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
