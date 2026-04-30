@@ -45,12 +45,12 @@ import kotlinx.coroutines.flow.*
 class CarConnectionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var controlConnection: Connection? = null
-    private var videoConnection: Connection? = null
-    private var inputConnection: Connection? = null
+    @Volatile private var controlConnection: Connection? = null
+    @Volatile private var videoConnection: Connection? = null
+    @Volatile private var inputConnection: Connection? = null
     val videoDecoder = VideoDecoder()
-    private var adbController: RemoteAdbController? = null
-    private var phoneHost: String? = null
+    @Volatile private var adbController: RemoteAdbController? = null
+    @Volatile private var phoneHost: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var consecutiveFailures = 0
     private var usbAdb: UsbAdbConnection? = null

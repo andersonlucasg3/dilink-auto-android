@@ -33,9 +33,9 @@ import kotlinx.coroutines.flow.asStateFlow
 class ConnectionService : Service() {
 
     private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var controlConnection: Connection? = null
-    private var videoConnection: Connection? = null
-    private var inputConnection: Connection? = null
+    @Volatile private var controlConnection: Connection? = null
+    @Volatile private var videoConnection: Connection? = null
+    @Volatile private var inputConnection: Connection? = null
     @Volatile private var vdClient: VirtualDisplayClient? = null
     private var pendingAppLaunch: String? = null
     private var vdWaitJob: Job? = null
