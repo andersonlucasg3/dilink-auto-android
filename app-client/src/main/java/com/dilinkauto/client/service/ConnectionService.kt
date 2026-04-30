@@ -1131,7 +1131,11 @@ class ConnectionService : Service() {
                 FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
             }
         }
-        // Fallback: LauncherApps API (may fail with "Caller can't access shortcut information")
+        // Fallback: read shortcuts directly from the APK's XML resource.
+        // Necessary on Samsung One UI where "cmd shortcut" service is unavailable.
+        val apkShortcuts = queryShortcutsFromApkXml(packageName)
+        if (apkShortcuts.isNotEmpty()) return apkShortcuts
+        // Last resort: LauncherApps API (may fail with "Caller can't access shortcut information")
         return try {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
                 ?: return emptyList()
@@ -1194,6 +1198,58 @@ class ConnectionService : Service() {
             shortcuts.add(AppShortcut(currentId, shortLabel.ifEmpty { longLabel }, longLabel))
         }
         return shortcuts
+    }
+
+    /**
+     * Reads an app's shortcuts.xml resource directly from its APK using AssetManager.
+     * This bypasses the ShortcutService entirely, working on devices where
+     * "cmd shortcut" is unavailable (e.g. Samsung One UI).
+     */
+    @android.annotation.SuppressLint("BlockedPrivateApi")
+    private fun queryShortcutsFromApkXml(packageName: String): List<AppShortcut> {
+        return try {
+            val ai = packageManager.getApplicationInfo(packageName, 0)
+            val shortcuts = mutableListOf<AppShortcut>()
+
+            // Build an AssetManager pointing at the target APK
+            val am = android.content.res.AssetManager::class.java.newInstance()
+            val addPath = android.content.res.AssetManager::class.java
+                .getMethod("addAssetPath", String::class.java)
+            val cookie = addPath.invoke(am, ai.publicSourceDir) as Int
+            if (cookie == 0) return emptyList()
+
+            val getResId = android.content.res.AssetManager::class.java
+                .getMethod("getResourceIdentifier", String::class.java, String::class.java, String::class.java)
+            val resId = getResId.invoke(am, "shortcuts", "xml", ai.packageName) as Int
+            if (resId == 0) return emptyList()
+
+            val res = android.content.res.Resources(am, resources.displayMetrics, resources.configuration)
+            val parser = res.getXml(resId)
+
+            var eventType = parser.eventType
+            while (eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                if (eventType == org.xmlpull.v1.XmlPullParser.START_TAG && parser.name == "shortcut") {
+                    val id = parser.getAttributeValue(null, "shortcutId")
+                        ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutId")
+                    val label = parser.getAttributeValue(null, "shortcutShortLabel")
+                        ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutShortLabel")
+                    if (id != null) {
+                        val displayLabel = label ?: id
+                        val longLabel = parser.getAttributeValue(null, "shortcutLongLabel")
+                            ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutLongLabel")
+                            ?: displayLabel
+                        shortcuts.add(AppShortcut(id, displayLabel, longLabel))
+                    }
+                }
+                eventType = parser.nextToken()
+            }
+            parser.close()
+            FileLog.i(TAG, "APK XML: ${shortcuts.size} shortcuts for $packageName")
+            shortcuts
+        } catch (e: Exception) {
+            FileLog.w(TAG, "APK XML shortcut parse failed for $packageName: ${e.message}")
+            emptyList()
+        }
     }
 
     private fun launchShortcut(packageName: String, shortcutId: String) {
