@@ -73,6 +73,9 @@
 
     <!-- Notifications -->
     <string name="no_notifications">Няма апавяшчэнняў</string>
+    <string name="notifications_count">Апавяшчэнні (%d)</string>
+    <string name="clear_all">Ачысціць Усё</string>
+    <string name="clear_notification">Ачысціць апавяшчэнне</string>
 
     <!-- Connection Status Messages -->
     <string name="status_deploying_vd">Разгортванне віртуальнага дысплея…</string>

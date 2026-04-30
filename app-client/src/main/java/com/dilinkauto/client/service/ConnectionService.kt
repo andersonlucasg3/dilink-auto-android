@@ -625,6 +625,13 @@ class ConnectionService : Service() {
                 val line = String(frame.payload, Charsets.UTF_8)
                 FileLog.i("CarLog", line)
             }
+            DataMsg.NOTIFICATION_CLEAR -> {
+                val msg = ClearNotificationMessage.decode(frame.payload)
+                NotificationService.instance?.cancelNotification(msg.packageName, msg.id)
+            }
+            DataMsg.NOTIFICATION_CLEAR_ALL -> {
+                NotificationService.instance?.cancelAll()
+            }
         }
     }
 

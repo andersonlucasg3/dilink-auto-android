@@ -1,9 +1,14 @@
 package com.dilinkauto.client.service
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.dilinkauto.protocol.DataMsg
 import com.dilinkauto.protocol.NotificationData
+import java.io.ByteArrayOutputStream
 
 /**
  * Listens for phone notifications and forwards them to the car display.
@@ -12,6 +17,21 @@ import com.dilinkauto.protocol.NotificationData
  * On HyperOS: This service needs Autostart enabled to survive background killing.
  */
 class NotificationService : NotificationListenerService() {
+
+    companion object {
+        var instance: NotificationService? = null
+            private set
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
+
+    override fun onDestroy() {
+        instance = null
+        super.onDestroy()
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val connection = ConnectionService.activeConnection ?: return
@@ -39,7 +59,8 @@ class NotificationService : NotificationListenerService() {
             timestamp = sbn.postTime,
             progress = progress,
             progressMax = progressMax,
-            progressIndeterminate = progressIndeterminate
+            progressIndeterminate = progressIndeterminate,
+            iconPng = loadAppIconPng(sbn.packageName)
         )
 
         try {
@@ -64,5 +85,35 @@ class NotificationService : NotificationListenerService() {
         try {
             connection.sendData(DataMsg.NOTIFICATION_REMOVE, notification.encode())
         } catch (_: Exception) {}
+    }
+
+    fun cancelNotification(packageName: String, id: Int) {
+        val sbn = activeNotifications.find { it.packageName == packageName && it.id == id }
+        if (sbn != null) cancelNotification(sbn.key)
+    }
+
+    @Suppress("NOTHING_TO_INLINE")
+    fun cancelAll() {
+        super.cancelAllNotifications()
+    }
+
+    private fun loadAppIconPng(packageName: String): ByteArray {
+        return try {
+            val icon: Drawable = packageManager.getApplicationIcon(packageName)
+            val bitmap = if (icon is BitmapDrawable) {
+                Bitmap.createScaledBitmap(icon.bitmap, 64, 64, true)
+            } else {
+                val bmp = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bmp)
+                icon.setBounds(0, 0, 64, 64)
+                icon.draw(canvas)
+                bmp
+            }
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 80, stream)
+            stream.toByteArray()
+        } catch (_: Exception) {
+            ByteArray(0)
+        }
     }
 }
