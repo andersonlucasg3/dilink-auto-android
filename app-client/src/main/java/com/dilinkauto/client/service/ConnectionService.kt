@@ -1046,6 +1046,10 @@ class ConnectionService : Service() {
 
     // ─── App List ───
 
+    // Tracks the last icon hash sent per package — survives across reconnections
+    // within the same service lifetime to avoid re-sending unchanged icons.
+    private val lastSentIconHash = mutableMapOf<String, String>()
+
     private fun sendAppList() {
         val conn = controlConnection ?: return
         val pm = packageManager
@@ -1055,17 +1059,28 @@ class ConnectionService : Service() {
                 val apps = pm.queryIntentActivities(
                     Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
                 ).map { info ->
+                    val pkg = info.activityInfo.packageName
+                    val hash = ClientApp.iconCache.getIconHash(pkg, 96)
+                    // Only include icon data if the hash differs from last sent
+                    val prevHash = lastSentIconHash[pkg]
+                    val iconPng = if (hash.isNotEmpty() && hash == prevHash) {
+                        ByteArray(0) // car can use its cached icon
+                    } else {
+                        lastSentIconHash[pkg] = hash
+                        ClientApp.iconCache.getOrLoad(pkg, 96)
+                    }
                     AppInfo(
-                        info.activityInfo.packageName,
+                        pkg,
                         info.loadLabel(pm).toString(),
-                        categorizeApp(info.activityInfo.packageName),
-                        ClientApp.iconCache.getOrLoad(info.activityInfo.packageName, 96)
+                        categorizeApp(pkg),
+                        iconPng,
+                        hash
                     )
                 }.sortedBy { it.category.id }
 
                 conn.sendData(DataMsg.APP_LIST, AppListMessage(apps).encode())
-                val commApps = apps.filter { it.category == AppCategory.COMMUNICATION }.map { it.packageName }
-                FileLog.i(TAG, "App list sent: ${apps.size} apps (comm=${commApps.size}: ${commApps.joinToString()})")
+                val skipped = apps.count { it.iconPng.isEmpty() }
+                FileLog.i(TAG, "App list sent: ${apps.size} apps (${skipped} icons skipped/unchanged)")
             } catch (e: Exception) {
                 FileLog.e(TAG, "Failed to send app list", e)
             }
@@ -1244,6 +1259,7 @@ class ConnectionService : Service() {
         connectionLoopJob?.cancel()
         connectionLoopJob = null
         cleanupSession()
+        lastSentIconHash.clear()
         serviceRegistration?.unregister()
         serviceRegistration = null
         _serviceState.value = State.IDLE

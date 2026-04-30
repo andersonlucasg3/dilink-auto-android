@@ -93,13 +93,13 @@ fun RecentAppIcon(
         else -> OtherColor
     }
 
-    val iconBitmap = remember(app?.packageName, app?.iconPng?.size) {
-        val png = app?.iconPng
-        if (png != null && png.isNotEmpty()) {
-            try {
-                android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
-            } catch (_: Exception) { null }
-        } else null
+    val iconBitmap = remember(app?.packageName, app?.iconHash) {
+        val hash = app?.iconHash ?: ""
+        val png = app?.iconPng ?: ByteArray(0)
+        val bmp = com.dilinkauto.server.ServerApp.iconCache.getOrPut(
+            app?.packageName ?: "", hash, png
+        )
+        bmp?.asImageBitmap()
     }
 
     Row(

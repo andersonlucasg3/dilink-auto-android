@@ -1,7 +1,5 @@
 package com.dilinkauto.server.ui.screen
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -30,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.*
 import com.dilinkauto.server.R
+import com.dilinkauto.server.ServerApp
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
 import kotlin.math.max
@@ -244,12 +243,13 @@ fun AppGrid(
         else sorted.filter { it.appName.contains(searchQuery, ignoreCase = true) }
     }
 
-    // Cache of decoded icons — shared across app tiles, populated lazily
-    val iconCache = remember { mutableMapOf<String, Bitmap?>() }
+    // In-memory cache of decoded ImageBitmaps — survives fast-scroll recompositions.
+    // Backed by CarIconCache for persistence across reconnections.
+    val decodedIconCache = remember { mutableMapOf<String, androidx.compose.ui.graphics.ImageBitmap>() }
 
     // Cleanup stale cache entries when app list changes
     remember(apps) {
-        iconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
+        decodedIconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
     }
 
     Column(modifier = modifier) {
@@ -270,7 +270,7 @@ fun AppGrid(
                     items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
                         AppTile(
                             app = app,
-                            iconCache = iconCache,
+                            decodedIconCache = decodedIconCache,
                             onClick = { onAppClick(app.packageName) },
                             service = service
                         )
@@ -394,7 +394,7 @@ private fun GridScrollbar(
 @Composable
 fun AppTile(
     app: AppInfo,
-    iconCache: MutableMap<String, Bitmap?>,
+    decodedIconCache: MutableMap<String, androidx.compose.ui.graphics.ImageBitmap>,
     onClick: () -> Unit,
     service: CarConnectionService
 ) {
@@ -412,27 +412,23 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
-    // Lazy-decode icon when tile first appears
+    // Lazy-decode icon via CarIconCache (memory → disk → decode, in that order)
     var iconBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
 
     LaunchedEffect(app.packageName) {
-        if (app.iconPng.isEmpty()) return@LaunchedEffect
-        val cached = iconCache[app.packageName]
+        val cached = decodedIconCache[app.packageName]
         if (cached != null) {
-            iconBitmap = cached.asImageBitmap()
+            iconBitmap = cached
             return@LaunchedEffect
         }
         try {
             val bmp = withContext(Dispatchers.IO) {
-                val opts = BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                    inSampleSize = 2
-                }
-                BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size, opts)
+                ServerApp.iconCache.getOrPut(app.packageName, app.iconHash, app.iconPng)
             }
             if (bmp != null) {
-                iconCache[app.packageName] = bmp
-                iconBitmap = bmp.asImageBitmap()
+                val img = bmp.asImageBitmap()
+                decodedIconCache[app.packageName] = img
+                iconBitmap = img
             }
         } catch (e: Exception) {
             Log.w("AppTile", "Decode failed for ${app.packageName}: ${e.message}")

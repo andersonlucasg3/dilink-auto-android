@@ -689,7 +689,26 @@ class CarConnectionService : Service() {
 
     private fun handleDataFrame(frame: FrameCodec.Frame) {
         when (frame.messageType) {
-            DataMsg.APP_LIST -> { _appList.value = AppListMessage.decode(frame.payload).apps }
+            DataMsg.APP_LIST -> {
+                val msg = AppListMessage.decode(frame.payload)
+                val apps = msg.apps.map { app ->
+                    if (app.iconPng.isNotEmpty()) {
+                        // Cache the icon on disk + memory, then strip the raw bytes
+                        // so the StateFlow holds lightweight objects — critical for
+                        // LazyVerticalGrid scroll performance.
+                        ServerApp.iconCache.put(app.packageName, app.iconHash, app.iconPng)
+                        app.copy(iconPng = ByteArray(0))
+                    } else if (app.iconHash.isNotEmpty()) {
+                        // Icon was skipped by phone (unchanged hash) — keep hash so
+                        // the UI can load from disk or memory cache.
+                        app
+                    } else {
+                        app
+                    }
+                }
+                _appList.value = apps
+                carLogSend("App list received: ${apps.size} apps${if (apps.any { it.iconHash.isNotEmpty() }) " (with hashes)" else ""}")
+            }
             DataMsg.NOTIFICATION_POST -> {
                 val n = NotificationData.decode(frame.payload)
                 // Replace existing notification with same ID (handles progress updates)

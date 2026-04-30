@@ -29,6 +29,18 @@ class AppIconCache(private val pm: PackageManager, cacheRoot: File) {
         }
     }
 
+    /**
+     * Returns a content-based hash for the icon at [size]. The hash changes when the
+     * app is updated or the icon is modified, enabling incremental icon sync.
+     */
+    fun getIconHash(packageName: String, size: Int): String {
+        val bytes = getOrLoad(packageName, size)
+        if (bytes.isEmpty()) return ""
+        val digest = java.security.MessageDigest.getInstance("MD5")
+        val hash = digest.digest(bytes)
+        return hash.joinToString("") { "%02x".format(it) }
+    }
+
     private fun loadIconBytes(packageName: String, size: Int): ByteArray {
         val diskFile = File(cacheDir, "${packageName}_${size}.png")
         if (diskFile.exists()) return diskFile.readBytes()
