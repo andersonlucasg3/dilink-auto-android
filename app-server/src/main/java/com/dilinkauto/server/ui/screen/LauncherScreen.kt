@@ -490,23 +490,41 @@ fun AppTile(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
             offset = DpOffset(8.dp, 0.dp),
-            modifier = Modifier.background(Color(0xFF1A1F2B))
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_uninstall), color = Color.White) },
+                text = {
+                    Text(
+                        stringResource(R.string.action_uninstall),
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                },
                 onClick = {
                     menuExpanded = false
                     service.requestUninstall(app.packageName)
                 },
-                leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color(0xFFEF5350)) }
+                leadingIcon = {
+                    Icon(Icons.Default.Delete, null, tint = Color(0xFFEF5350))
+                }
             )
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_app_info), color = Color.White) },
+                text = {
+                    Text(
+                        stringResource(R.string.action_app_info),
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                },
                 onClick = {
                     menuExpanded = false
                     service.requestAppInfo(app.packageName)
                 },
-                leadingIcon = { Icon(Icons.Default.Info, null, tint = Color(0xFF64B5F6)) }
+                leadingIcon = {
+                    Icon(Icons.Default.Info, null, tint = Color(0xFF64B5F6))
+                }
             )
 
             // Shortcut items

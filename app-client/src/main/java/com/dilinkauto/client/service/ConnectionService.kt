@@ -381,6 +381,7 @@ class ConnectionService : Service() {
                 FileLog.i(TAG, "Car requested uninstall: $pkg")
                 serviceScope.launch(Dispatchers.Main) {
                     try {
+                        wakeScreenForAction()
                         val intent = Intent(Intent.ACTION_DELETE).apply {
                             data = Uri.parse("package:$pkg")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -396,6 +397,7 @@ class ConnectionService : Service() {
                 FileLog.i(TAG, "Car requested app info: $pkg")
                 serviceScope.launch(Dispatchers.Main) {
                     try {
+                        wakeScreenForAction()
                         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                             data = Uri.parse("package:$pkg")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -1178,6 +1180,42 @@ class ConnectionService : Service() {
         // display power-off which regular WakeLocks can't reverse. Launch our own
         // activity with FLAG_TURN_SCREEN_ON — WindowManager wakes the display.
         forceWakeScreen()
+    }
+
+    /**
+     * Wake the physical display so the user can see the uninstall or app-info
+     * activity triggered by a car context-menu action. Uses the same multi-layer
+     * approach as forceWakeScreen() because the VD server puts the display into a
+     * deep off state that only system-level mechanisms can recover from.
+     */
+    private suspend fun wakeScreenForAction() {
+        withContext(Dispatchers.IO) {
+            try {
+                val pm = getSystemService(POWER_SERVICE) as PowerManager
+
+                // Layer 1: PowerManager.wakeUp() — direct system call
+                try {
+                    @Suppress("BlockedPrivateApi")
+                    val wakeUp = PowerManager::class.java.getDeclaredMethod(
+                        "wakeUp", Long::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType, String::class.java
+                    )
+                    wakeUp.invoke(pm, android.os.SystemClock.uptimeMillis(),
+                        5 /* WAKE_REASON_APPLICATION */, "DiLink:action")
+                } catch (_: Exception) {}
+
+                // Layer 2: WakeLock with ACQUIRE_CAUSES_WAKEUP
+                @Suppress("DEPRECATION")
+                val flags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    android.os.PowerManager.ON_AFTER_RELEASE
+                val wl = pm.newWakeLock(flags, "DiLink:action:wake")
+                wl.acquire(3000)
+                wl.release()
+            } catch (e: Exception) {
+                FileLog.w(TAG, "wakeScreenForAction error: ${e.message}")
+            }
+        }
     }
 
     /**
