@@ -115,6 +115,30 @@ Same format as LAUNCH_APP. Confirms the app was launched.
 
 Empty payload. Sent after GO_BACK when the VD server detects no remaining app tasks on the virtual display (via `dumpsys activity activities`). The car uses this to switch from mirror view to home screen.
 
+### FOCUSED_APP (0x16) -- Phone -> Car
+
+Payload: UTF-8 package name. Sent when an app gains focus on the virtual display. The car uses this to update its app tracking state.
+
+### APP_INFO (0x17) -- Car -> Phone
+
+Payload: UTF-8 package name. Car requests the phone to open the system app info/settings screen for the given package.
+
+### APP_SHORTCUTS (0x18) -- Car -> Phone
+
+Payload: UTF-8 package name. Car requests available Android 7.1+ app shortcuts for the given package.
+
+### APP_SHORTCUTS_LIST (0x19) -- Phone -> Car
+
+Payload: `AppShortcutsListMessage` — package name + list of shortcut descriptors (id, shortLabel, longLabel). Sent in response to APP_SHORTCUTS request.
+
+### APP_SHORTCUT_ACTION (0x1A) -- Car -> Phone
+
+Payload: `AppShortcutActionMessage` — package name + shortcut id. Starts the specific shortcut on the virtual display.
+
+### APP_UNINSTALL (0x1B) -- Car -> Phone
+
+Payload: UTF-8 package name. Car requests the phone to uninstall the given package. The phone handles the uninstall system dialog and sends back `APP_UNINSTALLED` via the data channel when done.
+
 ### UPDATING_CAR (0x30) -- Phone -> Car
 
 Empty payload. Sent before the phone starts auto-updating the car app. The car shows "Updating car app..." status and stops reconnecting. After the update, the car app restarts fresh.
@@ -131,7 +155,7 @@ H.264 NAL units representing a video frame.
 
 **Encoding parameters** (set by VD server, configurable via handshake):
 - Codec: H.264/AVC
-- Profile: High
+- Profile: Main
 - Resolution: car viewport dimensions (e.g., 1806x990)
 - Bitrate: 8 Mbps CBR
 - Frame rate: configurable via `targetFps` in handshake (default 30, car requests 60)
@@ -140,9 +164,25 @@ H.264 NAL units representing a video frame.
 
 ## Data Channel (0x03)
 
-### NOTIFICATION_POST (0x01) / NOTIFICATION_REMOVE (0x02) -- Phone -> Car
+### NOTIFICATION_POST (0x01) — Phone → Car
 
-Notification data with id, packageName, appName, title, text, timestamp, progressIndeterminate (byte), progress (int32), progressMax (int32). Car deduplicates by ID (updates replace existing). Tapping a notification launches the owner app on the VD.
+Notification data with id, packageName, appName, title, text, timestamp, iconPng, progressIndeterminate (byte), progress (int32), progressMax (int32). Car deduplicates by ID (updates replace existing). Tapping a notification launches the owner app on the VD.
+
+### NOTIFICATION_REMOVE (0x02) — Phone → Car
+
+Notification id to remove from the car's notification list (Android notification was cancelled on the phone).
+
+### NOTIFICATION_CLEAR (0x04) — Car → Phone
+
+Payload: `ClearNotificationMessage` — notification id + package name. Car dismisses a single notification; phone clears the corresponding Android notification.
+
+### NOTIFICATION_CLEAR_ALL (0x05) — Car → Phone
+
+Empty payload. Car dismisses all notifications; phone clears all active notifications.
+
+### APP_UNINSTALLED (0x06) — Phone → Car
+
+Payload: UTF-8 package name. Phone confirms an app was uninstalled (in response to `APP_UNINSTALL`). Car removes the app from its launcher grid.
 
 ### APP_LIST (0x03) -- Phone -> Car
 

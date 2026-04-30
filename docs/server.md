@@ -47,7 +47,7 @@ Foreground service managing the full connection lifecycle with a parallel prereq
 **Track A — WiFi:**
 - Discovery: gateway IP (hotspot/LAN, retries every 3s) → mDNS → manual IP
 - Control connection: NIO non-blocking SocketChannel connect to phone TCP:9637
-- Handshake: sends viewport dimensions + DPI + appVersionCode + appVersionName + targetFps (60) → receives phone info + vdServerJarPath + connectionMethod
+- Handshake: sends viewport dimensions + DPI + appVersionCode + appVersionName + targetFps (60) → receives phone info + vdServerJarPath + connectionMethod + adjusted VD DPI (handshakeVdDpi)
 - On handshake response: opens video (9638) + input (9639) connections in parallel, sets `wifiReady = true` after all 3 established
 - Video: receives H.264 frames via video connection, dispatches to VideoDecoder
 - Touch: dedicated single-thread executor, `sendTouchEvent()` / `sendTouchBatch()` via input connection
@@ -135,10 +135,13 @@ Width computed to guarantee even viewport for H.264 encoder.
 
 ### NotificationScreen
 
-- Notification list sorted by timestamp (newest first)
+- Notification list sorted by timestamp (newest first) with relative time display ("now", "Xm", "Xh", date)
+- App icons shown inline (from phone's `iconPng` payload)
 - Dedup by ID: updates replace existing (handles progress notifications)
 - Progress bars: determinate (filled) and indeterminate (spinning)
 - Tap-to-launch: tapping a notification launches the owner app on the VD and switches to mirror view
+- Per-item dismiss button (×): dismisses with slide-out animation, sends `NOTIFICATION_CLEAR` to phone
+- "Clear All" header button: sends `NOTIFICATION_CLEAR_ALL` to phone, clears all active notifications
 
 ### App Grid (HomeContent)
 
@@ -148,6 +151,9 @@ Shown as the main content area when streaming mode is active and current screen 
 - 64dp app icons in dynamically calculated fixed grid columns (3-12 based on display width)
 - App name text: bodyLarge
 - Alphabetical sort
+- Long-press context menu (`combinedClickable`): Uninstall, App Info, dynamic app shortcuts (Android 7.1+)
+- Shortcuts requested on-demand from phone (`APP_SHORTCUTS` → `APP_SHORTCUTS_LIST`), cached in `shortcutsCache` StateFlow
+- Uninstall flow: car sends `APP_UNINSTALL`, phone handles system dialog, sends back `APP_UNINSTALLED`
 - Manual IP entry
 - Connection status
 

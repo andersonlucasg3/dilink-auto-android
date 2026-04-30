@@ -67,6 +67,14 @@ Accepts reverse connection from the VD server process on `localhost:19637`. Take
 - Touch writes to localhost are synchronous with `FrameCodec.writeAll()` under `writeLock`
 - On disconnect: restores physical display (`cmd display power-on 0` + `KEYCODE_WAKEUP`) as safety net when VD server process is killed before cleanup
 
+### AppIconCache
+
+Shared icon cache that serves both NotificationService and the app list. Persisted to disk so icons survive process restarts.
+
+- `cacheDir`: `/sdcard/DiLinkAuto/icons/` — disk-persisted PNG files named `{packageName}_{size}.png`
+- `getOrLoad(packageName, size)`: Returns PNG bytes from in-memory cache (ConcurrentHashMap), loads from disk, or generates fresh by extracting + scaling the app icon via PackageManager
+- Both `NotificationService` (64x64) and `ConnectionService.sendAppList` (96x96) draw from the same cache, eliminating duplicate icon memory
+
 ### AdbBridge
 
 Fallback shell command helper. Provides `execShell()` and `execFast()` using `Runtime.exec()` for VD server operations and display power management when direct API reflection fails.

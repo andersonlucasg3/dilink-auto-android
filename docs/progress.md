@@ -1,9 +1,17 @@
 # Progress Tracker
 
-Current version: **v0.16.0** (stable)
-Last updated: 2026-04-29
+Current version: **v0.17.0-dev-01** (pre-release)
+Last updated: 2026-04-30
 
 ## Milestones
+
+### v0.17.0-dev-01 (2026-04-30)
+
+- **Samsung DeX / Desktop Mode DPI**: VD server detects desktop mode (Samsung DeX, Android 16 Desktop Mode) via `UiModeManager.currentModeType`. Uses 213dpi (tvdpi) instead of 480dpi when active, keeping desktop system UI readable and touchable on the car viewport. Added `VideoConfig.getVirtualDisplayDpi()` and `VideoConfig.isDesktopMode()`.
+- **Notification per-item dismiss and Clear All**: Car notification screen now has per-item dismiss buttons with slide-out animations and a "Clear All" header button. New protocol messages: `NOTIFICATION_CLEAR` (0x04) and `NOTIFICATION_CLEAR_ALL` (0x05) on data channel.
+- **App context actions**: Long-press on app tiles in car launcher shows dropdown menu with Uninstall, App Info, and dynamic app shortcuts (Android 7.1+). Shortcuts requested on-demand from phone via `APP_SHORTCUTS` (0x18) / `APP_SHORTCUTS_LIST` (0x19) / `APP_SHORTCUT_ACTION` (0x1A). Uninstall propagation via `APP_UNINSTALL` (0x1B) / `APP_UNINSTALLED` (0x06).
+- **AppIconCache**: Single source of truth for app icons with disk persistence (`/sdcard/DiLinkAuto/icons/`). Both NotificationService (64x64) and app list (96x96) draw from the same ConcurrentHashMap cache, eliminating duplicate icon memory.
+- **Back button fix**: GO_BACK now closes activities one-by-one before returning to the home menu, using proper stack tracking and `FOCUSED_APP` (0x16) messages.
 
 ### v0.16.0 (2026-04-29)
 
