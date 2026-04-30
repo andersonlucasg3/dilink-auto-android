@@ -39,6 +39,10 @@ object DataMsg {
     const val NOTIFICATION_POST: Byte = 0x01
     const val NOTIFICATION_REMOVE: Byte = 0x02
     const val APP_LIST: Byte = 0x03
+    /** Car → Phone: clear a single notification by id+packageName */
+    const val NOTIFICATION_CLEAR: Byte = 0x04
+    /** Car → Phone: clear all notifications */
+    const val NOTIFICATION_CLEAR_ALL: Byte = 0x05
     const val MEDIA_METADATA: Byte = 0x10
     const val MEDIA_PLAYBACK_STATE: Byte = 0x11
     const val MEDIA_ACTION: Byte = 0x12

@@ -2,6 +2,7 @@ package com.dilinkauto.client.service
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import com.dilinkauto.client.ClientApp
 import com.dilinkauto.protocol.DataMsg
 import com.dilinkauto.protocol.NotificationData
 
@@ -12,6 +13,21 @@ import com.dilinkauto.protocol.NotificationData
  * On HyperOS: This service needs Autostart enabled to survive background killing.
  */
 class NotificationService : NotificationListenerService() {
+
+    companion object {
+        var instance: NotificationService? = null
+            private set
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
+
+    override fun onDestroy() {
+        instance = null
+        super.onDestroy()
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val connection = ConnectionService.activeConnection ?: return
@@ -39,7 +55,8 @@ class NotificationService : NotificationListenerService() {
             timestamp = sbn.postTime,
             progress = progress,
             progressMax = progressMax,
-            progressIndeterminate = progressIndeterminate
+            progressIndeterminate = progressIndeterminate,
+            iconPng = ClientApp.iconCache.getOrLoad(sbn.packageName, 64)
         )
 
         try {
@@ -64,5 +81,15 @@ class NotificationService : NotificationListenerService() {
         try {
             connection.sendData(DataMsg.NOTIFICATION_REMOVE, notification.encode())
         } catch (_: Exception) {}
+    }
+
+    fun cancelNotification(packageName: String, id: Int) {
+        val sbn = activeNotifications.find { it.packageName == packageName && it.id == id }
+        if (sbn != null) cancelNotification(sbn.key)
+    }
+
+    @Suppress("NOTHING_TO_INLINE")
+    fun cancelAll() {
+        super.cancelAllNotifications()
     }
 }

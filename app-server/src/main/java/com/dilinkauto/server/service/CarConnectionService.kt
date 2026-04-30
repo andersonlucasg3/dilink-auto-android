@@ -841,6 +841,24 @@ class CarConnectionService : Service() {
         }
     }
 
+    fun clearNotification(id: Int, packageName: String) {
+        _notifications.value = _notifications.value.filter { it.id != id || it.packageName != packageName }
+        scope.launch(Dispatchers.IO) {
+            try {
+                val msg = ClearNotificationMessage(id, packageName)
+                controlConnection?.sendData(DataMsg.NOTIFICATION_CLEAR, msg.encode())
+            } catch (e: Exception) { carLogSend("clearNotification failed: ${e.message}", "E") }
+        }
+    }
+
+    fun clearAllNotifications() {
+        _notifications.value = emptyList()
+        scope.launch(Dispatchers.IO) {
+            try { controlConnection?.sendData(DataMsg.NOTIFICATION_CLEAR_ALL, ByteArray(0)) }
+            catch (e: Exception) { carLogSend("clearAllNotifications failed: ${e.message}", "E") }
+        }
+    }
+
     fun disconnectFromPhone() {
         carLogSend("User disconnect — will not auto-reconnect")
         userDisconnected = true

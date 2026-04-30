@@ -73,6 +73,9 @@
 
     <!-- Notifications -->
     <string name="no_notifications">Bildirishnomalar yo\'q</string>
+    <string name="notifications_count">Bildirishnomalar (%d)</string>
+    <string name="clear_all">Hammasini Tozalash</string>
+    <string name="clear_notification">Bildirishnomani tozalash</string>
 
     <!-- Connection Status Messages -->
     <string name="status_deploying_vd">Virtual displey joylashtirilmoqda…</string>
