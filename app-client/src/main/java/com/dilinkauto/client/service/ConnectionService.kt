@@ -1214,12 +1214,12 @@ class ConnectionService : Service() {
             // Build an AssetManager pointing at the target APK
             val am = android.content.res.AssetManager::class.java.newInstance()
             val addPath = android.content.res.AssetManager::class.java
-                .getMethod("addAssetPath", String::class.java)
+                .getDeclaredMethod("addAssetPath", String::class.java).apply { isAccessible = true }
             val cookie = addPath.invoke(am, ai.publicSourceDir) as Int
             if (cookie == 0) return emptyList()
 
             val getResId = android.content.res.AssetManager::class.java
-                .getMethod("getResourceIdentifier", String::class.java, String::class.java, String::class.java)
+                .getDeclaredMethod("getResourceIdentifier", String::class.java, String::class.java, String::class.java).apply { isAccessible = true }
             val resId = getResId.invoke(am, "shortcuts", "xml", ai.packageName) as Int
             if (resId == 0) return emptyList()
 
