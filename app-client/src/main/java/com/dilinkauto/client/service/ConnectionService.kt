@@ -1183,35 +1183,43 @@ class ConnectionService : Service() {
     }
 
     /**
-     * Wake the physical display so the user can see the uninstall or app-info
-     * activity triggered by a car context-menu action. Uses the same multi-layer
-     * approach as forceWakeScreen() because the VD server puts the display into a
-     * deep off state that only system-level mechanisms can recover from.
+     * Wake the physical display and bring the app to the foreground so the
+     * uninstall or app-info activity triggered by a car context-menu action is
+     * visible and not blocked by Android 14 background-launch restrictions.
+     *
+     * The VD server puts the phone display into a deep off state via
+     * SurfaceControl. A WakeLock alone can turn on the backlight but does NOT
+     * make the app's windows "active" — so background-launch restrictions still
+     * block startActivity(). Launching MainActivity with FLAG_TURN_SCREEN_ON
+     * both wakes the display and makes the app visible, satisfying the
+     * restrictions so the subsequent target intent launches successfully.
      */
     private suspend fun wakeScreenForAction() {
         withContext(Dispatchers.IO) {
             try {
+                FileLog.i(TAG, "Waking screen for context-menu action")
                 val pm = getSystemService(POWER_SERVICE) as PowerManager
 
-                // Layer 1: PowerManager.wakeUp() — direct system call
-                try {
-                    @Suppress("BlockedPrivateApi")
-                    val wakeUp = PowerManager::class.java.getDeclaredMethod(
-                        "wakeUp", Long::class.javaPrimitiveType,
-                        Int::class.javaPrimitiveType, String::class.java
-                    )
-                    wakeUp.invoke(pm, android.os.SystemClock.uptimeMillis(),
-                        5 /* WAKE_REASON_APPLICATION */, "DiLink:action")
-                } catch (_: Exception) {}
-
-                // Layer 2: WakeLock with ACQUIRE_CAUSES_WAKEUP
+                // Layer 1: WakeLock with ACQUIRE_CAUSES_WAKEUP — immediate wake
                 @Suppress("DEPRECATION")
-                val flags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                val wlFlags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
                     android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
                     android.os.PowerManager.ON_AFTER_RELEASE
-                val wl = pm.newWakeLock(flags, "DiLink:action:wake")
+                val wl = pm.newWakeLock(wlFlags, "DiLink:action:wake")
                 wl.acquire(3000)
                 wl.release()
+
+                // Layer 2: Launch MainActivity with FLAG_TURN_SCREEN_ON.
+                // This brings the app to the foreground, satisfying Android 14
+                // background-launch restrictions so the subsequent target intent
+                // (uninstall dialog / app info) can start.
+                val intent = Intent(this@ConnectionService,
+                    Class.forName("com.dilinkauto.client.MainActivity"))
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                intent.addFlags(0x10000000) // FLAG_TURN_SCREEN_ON
+                startActivity(intent)
+                FileLog.i(TAG, "MainActivity launched for context-menu action")
             } catch (e: Exception) {
                 FileLog.w(TAG, "wakeScreenForAction error: ${e.message}")
             }
