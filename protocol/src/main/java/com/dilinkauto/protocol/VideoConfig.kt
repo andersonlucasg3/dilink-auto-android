@@ -19,12 +19,18 @@ object VideoConfig {
 
     /**
      * DPI used when desktop mode (Samsung DeX, Android Desktop) is active.
-     * DeX renders system UI at desktop densities (~160-284 dpi). At the phone's
-     * native 480 dpi the system UI — especially the navigation bar — becomes too
-     * small to see or touch on the car's viewport. tvdpi (213) is a standard
-     * Android density bucket used by ~10" tablets, matching the car display.
+     *
+     * Samsung DeX creates external displays at 160 dpi (mdpi) natively — this is
+     * the density its system UI (taskbar, window decorations) is designed for.
+     * At higher DPIs the DeX taskbar renders at a smaller pixel size, making it
+     * too small to see or touch on the car's viewport.
+     *
+     * Using mdpi makes pixel-based DeX system UI elements proportionally larger
+     * (VD has fewer pixels → same pixel size takes up more of the VD → upscaled
+     * to fill car screen = larger on car). dp-based app UI is unaffected because
+     * the dp-to-physical-size formula cancels out DPI.
      */
-    const val DESKTOP_MODE_DPI = 213
+    const val DESKTOP_MODE_DPI = 160
 
     /**
      * Smallest-width dp for the VD when desktop mode is active.
