@@ -1,7 +1,5 @@
 package com.dilinkauto.server.ui.screen
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -30,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.*
 import com.dilinkauto.server.R
+import com.dilinkauto.server.ServerApp
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
 import kotlin.math.max
@@ -244,13 +243,8 @@ fun AppGrid(
         else sorted.filter { it.appName.contains(searchQuery, ignoreCase = true) }
     }
 
-    // Cache of decoded icons — shared across app tiles, populated lazily
-    val iconCache = remember { mutableMapOf<String, Bitmap?>() }
-
-    // Cleanup stale cache entries when app list changes
-    remember(apps) {
-        iconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
-    }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val iconSizePx = with(density) { 64.dp.toPx().toInt() }
 
     Column(modifier = modifier) {
         Row(modifier = Modifier.weight(1f)) {
@@ -270,7 +264,7 @@ fun AppGrid(
                     items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
                         AppTile(
                             app = app,
-                            iconCache = iconCache,
+                            iconSizePx = iconSizePx,
                             onClick = { onAppClick(app.packageName) },
                             service = service
                         )
@@ -394,7 +388,7 @@ private fun GridScrollbar(
 @Composable
 fun AppTile(
     app: AppInfo,
-    iconCache: MutableMap<String, Bitmap?>,
+    iconSizePx: Int,
     onClick: () -> Unit,
     service: CarConnectionService
 ) {
@@ -412,26 +406,16 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
-    // Lazy-decode icon when tile first appears
+    // Lazy-decode icon via car-side cache at the exact pixel size needed
     var iconBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
 
-    LaunchedEffect(app.packageName) {
+    LaunchedEffect(app.packageName, iconSizePx) {
         if (app.iconPng.isEmpty()) return@LaunchedEffect
-        val cached = iconCache[app.packageName]
-        if (cached != null) {
-            iconBitmap = cached.asImageBitmap()
-            return@LaunchedEffect
-        }
         try {
             val bmp = withContext(Dispatchers.IO) {
-                val opts = BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                    inSampleSize = 2
-                }
-                BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size, opts)
+                ServerApp.iconCache.get(app.packageName, iconSizePx)
             }
             if (bmp != null) {
-                iconCache[app.packageName] = bmp
                 iconBitmap = bmp.asImageBitmap()
             }
         } catch (e: Exception) {
