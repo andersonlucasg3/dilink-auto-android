@@ -159,6 +159,7 @@ class CarConnectionService : Service() {
     override fun onCreate() {
         super.onCreate()
         videoDecoder.logSink = { msg -> carLogSend(msg) }
+        VideoConfig.diagLog = { msg -> carLogSend("DeXDetect: $msg") }
         acquireWakeLock()
         registerNetworkCallback()
         val filter = IntentFilter().apply {

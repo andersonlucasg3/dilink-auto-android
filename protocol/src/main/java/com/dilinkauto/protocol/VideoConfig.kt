@@ -44,11 +44,30 @@ object VideoConfig {
     const val DESKTOP_MODE_TARGET_SW_DP = 440
 
     /**
+     * Diagnostic log callback — set by the phone to FileLog and by the car to
+     * carLogSend so all desktop-mode detection details reach the shared log file.
+     * Falls back to Log.d if not set.
+     */
+    var diagLog: ((String) -> Unit)? = null
+
+    private fun diag(msg: String) {
+        diagLog?.invoke(msg) ?: Log.d(TAG, msg)
+    }
+
+    private fun diagWarn(msg: String) {
+        diagLog?.invoke("WARN: $msg") ?: Log.w(TAG, msg)
+    }
+
+    private fun diagInfo(msg: String) {
+        diagLog?.invoke(msg) ?: Log.i(TAG, msg)
+    }
+
+    /**
      * Returns the DPI that should be used for the VirtualDisplay.
      */
     fun getVirtualDisplayDpi(context: Context): Int {
         val desktop = isDesktopMode(context)
-        Log.i(TAG, "getVirtualDisplayDpi: desktopMode=$desktop → dpi=${if (desktop) DESKTOP_MODE_DPI else VIRTUAL_DISPLAY_DPI}")
+        diagInfo("getVirtualDisplayDpi: desktopMode=$desktop → dpi=${if (desktop) DESKTOP_MODE_DPI else VIRTUAL_DISPLAY_DPI}")
         return if (desktop) DESKTOP_MODE_DPI else VIRTUAL_DISPLAY_DPI
     }
 
@@ -73,21 +92,21 @@ object VideoConfig {
 
     /**
      * Detects whether the device is in desktop mode (Samsung DeX, Android Desktop).
-     * Tries every available detection strategy with detailed diagnostic logging
-     * so failures are visible in logcat for debugging.
+     * Every strategy and its result is logged through [diagLog] so failures are
+     * visible in the shared log file (FileLog on phone, carLogSend on car).
      */
     fun isDesktopMode(context: Context): Boolean {
         // Strategy 1: UiModeManager (Android 8.0+)
         try {
             val um = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
             val modeType = um?.currentModeType
-            Log.d(TAG, "UiModeManager.currentModeType=$modeType (DESK=${Configuration.UI_MODE_TYPE_DESK})")
+            diag("UiModeManager.currentModeType=$modeType (DESK=${Configuration.UI_MODE_TYPE_DESK})")
             if (modeType == Configuration.UI_MODE_TYPE_DESK) {
-                Log.i(TAG, "Desktop mode: UiModeManager")
+                diagInfo("Desktop mode detected: UiModeManager")
                 return true
             }
         } catch (e: Exception) {
-            Log.w(TAG, "UiModeManager failed: ${e.message}")
+            diagWarn("UiModeManager failed: ${e.message}")
         }
 
         // Strategy 2: DisplayManager — non-default displays with DeX/Desktop names
@@ -96,20 +115,20 @@ object VideoConfig {
             dm?.displays?.forEach { display ->
                 val name = display.name ?: ""
                 if (display.displayId != android.view.Display.DEFAULT_DISPLAY) {
-                    Log.d(TAG, "Display id=${display.displayId} name='$name' flags=0x${display.flags.toString(16)}")
+                    diag("Display id=${display.displayId} name='$name' flags=0x${display.flags.toString(16)}")
                     if (name.contains("DeX", ignoreCase = true) || name.contains("Desktop", ignoreCase = true)) {
-                        Log.i(TAG, "Desktop mode: display name='$name'")
+                        diagInfo("Desktop mode detected: display name='$name'")
                         return true
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "DisplayManager failed: ${e.message}")
+            diagWarn("DisplayManager failed: ${e.message}")
         }
 
         // Strategy 3: Samsung-specific detection
         if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
-            Log.d(TAG, "Samsung device detected — trying Samsung DeX APIs")
+            diag("Samsung device — trying DeX APIs")
 
             // 3a: SemDesktopModeManager.isDesktopMode() boolean (One UI 4+)
             try {
@@ -120,13 +139,13 @@ object VideoConfig {
                 try {
                     val isDm = cls.getDeclaredMethod("isDesktopMode")
                     val result = isDm.invoke(instance) as? Boolean
-                    Log.d(TAG, "SemDesktopModeManager.isDesktopMode()=$result")
+                    diag("SemDesktopModeManager.isDesktopMode()=$result")
                     if (result == true) {
-                        Log.i(TAG, "Desktop mode: SemDesktopModeManager.isDesktopMode()")
+                        diagInfo("Desktop mode detected: SemDesktopModeManager.isDesktopMode()")
                         return true
                     }
                 } catch (_: NoSuchMethodException) {
-                    Log.d(TAG, "SemDesktopModeManager.isDesktopMode() not found")
+                    diag("SemDesktopModeManager.isDesktopMode() not found")
                 }
 
                 // 3b: getDesktopModeState() enum
@@ -141,7 +160,7 @@ object VideoConfig {
                         state.javaClass.getMethod("name").invoke(state) as String
                     } catch (_: Exception) { "" }
 
-                    Log.d(TAG, "SemDesktopModeManager state=$stateStr name=$stateName ordinal=$stateOrdinal")
+                    diag("SemDesktopModeManager state=$stateStr name=$stateName ordinal=$stateOrdinal")
 
                     val lower = stateStr.lowercase()
                     if (lower.contains("dex") && !lower.contains("off") ||
@@ -149,14 +168,14 @@ object VideoConfig {
                         lower == "enabled" || lower == "on" ||
                         stateName.contains("DEX", ignoreCase = true) ||
                         (stateOrdinal > 0 && stateName.isNotEmpty())) {
-                        Log.i(TAG, "Desktop mode: SemDesktopModeManager state=$stateStr")
+                        diagInfo("Desktop mode detected: SemDesktopModeManager state=$stateStr")
                         return true
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "getDesktopModeState() failed: ${e.message}")
+                    diagWarn("getDesktopModeState() failed: ${e.message}")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "SemDesktopModeManager not available: ${e.message}")
+                diagWarn("SemDesktopModeManager not available: ${e.message}")
             }
 
             // 3c: System properties
@@ -168,9 +187,9 @@ object VideoConfig {
             for (prop in dexProps) {
                 try {
                     val value = getSystemProperty(prop)
-                    if (value != null) Log.d(TAG, "Property $prop=$value")
+                    if (value != null) diag("Property $prop=$value")
                     if (value == "1" || value.equals("true", ignoreCase = true)) {
-                        Log.i(TAG, "Desktop mode: property $prop=$value")
+                        diagInfo("Desktop mode detected: property $prop=$value")
                         return true
                     }
                 } catch (_: Exception) {}
@@ -181,9 +200,9 @@ object VideoConfig {
             for (key in sysKeys) {
                 try {
                     val value = android.provider.Settings.System.getInt(context.contentResolver, key, -1)
-                    Log.d(TAG, "Settings.System $key=$value")
+                    diag("Settings.System $key=$value")
                     if (value == 1) {
-                        Log.i(TAG, "Desktop mode: Settings.System $key=$value")
+                        diagInfo("Desktop mode detected: Settings.System $key=$value")
                         return true
                     }
                 } catch (_: Exception) {}
@@ -194,16 +213,16 @@ object VideoConfig {
             for (key in globalKeys) {
                 try {
                     val value = android.provider.Settings.Global.getInt(context.contentResolver, key, -1)
-                    Log.d(TAG, "Settings.Global $key=$value")
+                    diag("Settings.Global $key=$value")
                     if (value == 1) {
-                        Log.i(TAG, "Desktop mode: Settings.Global $key=$value")
+                        diagInfo("Desktop mode detected: Settings.Global $key=$value")
                         return true
                     }
                 } catch (_: Exception) {}
             }
         }
 
-        Log.d(TAG, "Desktop mode NOT detected — using normal VD params")
+        diag("Desktop mode NOT detected — using normal VD params")
         return false
     }
 
