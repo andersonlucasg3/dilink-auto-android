@@ -1,7 +1,15 @@
 name: Hotfix
-description: Report a critical bug that needs immediate fix from main
-labels: [hotfix, agent]
+description: Critical fix branched from main, versioned like release
+labels: [hotfix]
 body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 0.16.1
+      description: The hotfix version number (e.g. 0.16.1 — follows release version)
+    validations:
+      required: true
   - type: textarea
     id: description
     attributes:

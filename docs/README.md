@@ -142,7 +142,7 @@ Branches are created automatically by the issue agent based on the **issue templ
 
 | Template | Label | Branch Pattern | Purpose |
 |----------|-------|---------------|---------|
-| Hotfix | `hotfix` | `hotfix/N-agent` | Critical fixes from main |
+| Hotfix | `hotfix` | `hotfix/vX.Y.Z` | Critical fixes from main |
 | Bug Fix | `bug` | `fix/N-agent` | Bug fixes |
 | New Feature | `feature` | `feature/N-agent` | New features |
 | Investigation | `investigation` | `investigate/N-agent` | Codebase investigation |
@@ -150,7 +150,7 @@ Branches are created automatically by the issue agent based on the **issue templ
 | Release | `release` | `release/vX.Y.Z` | Release preparation |
 | Agent Task (generic) | — | `issue/N-agent` | Catch-all |
 
-All branches merge to `develop` via PR, except `release/*` and `hotfix/*` which target `main`.
+All branches merge to `develop` via PR, except `release/*` and `hotfix/*` and `hotfix/*` which target `main`.
 
 ### CI Workflows
 

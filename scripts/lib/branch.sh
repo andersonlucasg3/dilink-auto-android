@@ -19,8 +19,15 @@ branch_name() {
     fi
   fi
 
-  # Hotfix branches are created from main (not develop)
+  # Hotfix branches are created from main, versioned like release
   if echo "${ISSUE_LABELS:-}" | jq -e 'index("hotfix")' >/dev/null 2>&1; then
+    RELEASE_VERSION=$(echo "$ISSUE_BODY" | awk '/### Version/{v=1; next} v && /^[0-9]+\.[0-9]+\.[0-9]+/{print $1; exit} /^[[:space:]]*$/{next} {v=0}' | head -1 || true)
+    if [ -n "$RELEASE_VERSION" ]; then
+      RELEASE_TARGET="main"
+      echo "hotfix/v${RELEASE_VERSION}"
+      return
+    fi
+    # Fallback: hotfix without version → use issue number
     RELEASE_TARGET="main"
     echo "hotfix/${ISSUE_NUM}-agent"
     return
