@@ -83,12 +83,13 @@ data class HandshakeResponse(
     val virtualDisplayId: Int = -1,
     val adbPort: Int = 5555,
     val vdServerJarPath: String = "",
-    val connectionMethod: Byte = CONNECTION_METHOD_USB_ADB
+    val connectionMethod: Byte = CONNECTION_METHOD_USB_ADB,
+    val vdDpi: Int = VideoConfig.VIRTUAL_DISPLAY_DPI
 ) {
     fun encode(): ByteArray {
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
         val jarPathBytes = vdServerJarPath.toByteArray(Charsets.UTF_8)
-        val buf = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 4 + 4 + 2 + jarPathBytes.size + 1)
+        val buf = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 4 + 4 + 2 + jarPathBytes.size + 1 + 4)
             .order(ByteOrder.BIG_ENDIAN)
         buf.putInt(protocolVersion)
         buf.put(if (accepted) 1.toByte() else 0.toByte())
@@ -101,6 +102,7 @@ data class HandshakeResponse(
         buf.putShort(jarPathBytes.size.toShort())
         buf.put(jarPathBytes)
         buf.put(connectionMethod)
+        buf.putInt(vdDpi)
         return buf.array()
     }
 
@@ -125,6 +127,7 @@ data class HandshakeResponse(
                 } else ""
             } else ""
             val connMethod = if (buf.hasRemaining()) buf.get() else CONNECTION_METHOD_USB_ADB
+            val vdDpi = if (buf.remaining() >= 4) buf.getInt() else VideoConfig.VIRTUAL_DISPLAY_DPI
             return HandshakeResponse(
                 protocolVersion = version,
                 accepted = accepted,
@@ -134,7 +137,8 @@ data class HandshakeResponse(
                 virtualDisplayId = vdId,
                 adbPort = adbP,
                 vdServerJarPath = jarPath,
-                connectionMethod = connMethod
+                connectionMethod = connMethod,
+                vdDpi = vdDpi
             )
         }
     }
@@ -222,13 +226,16 @@ data class NotificationData(
     val timestamp: Long,
     val progressIndeterminate: Boolean = false,
     val progress: Int = 0,
-    val progressMax: Int = 0
+    val progressMax: Int = 0,
+    val iconPng: ByteArray = ByteArray(0)
 ) {
     fun encode(): ByteArray {
         val fields = listOf(packageName, appName, title, text)
         val fieldBytes = fields.map { it.toByteArray(Charsets.UTF_8) }
         val baseSize = 4 + fieldBytes.sumOf { 2 + it.size } + 8 + 1
-        val totalSize = if (progressIndeterminate) baseSize else baseSize + 4 + 4
+        val progSize = if (progressIndeterminate) 0 else 4 + 4
+        val iconSize = 4 + iconPng.size
+        val totalSize = baseSize + progSize + iconSize
         val buf = ByteBuffer.allocate(totalSize).order(ByteOrder.BIG_ENDIAN)
         buf.putInt(id)
         fieldBytes.forEach { bytes ->
@@ -241,7 +248,34 @@ data class NotificationData(
             buf.putInt(progress)
             buf.putInt(progressMax)
         }
+        buf.putInt(iconPng.size)
+        if (iconPng.isNotEmpty()) buf.put(iconPng)
         return buf.array()
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is NotificationData) return false
+        return id == other.id && packageName == other.packageName &&
+            appName == other.appName && title == other.title &&
+            text == other.text && timestamp == other.timestamp &&
+            progressIndeterminate == other.progressIndeterminate &&
+            progress == other.progress && progressMax == other.progressMax &&
+            iconPng.contentEquals(other.iconPng)
+    }
+
+    override fun hashCode(): Int {
+        var result = id
+        result = 31 * result + packageName.hashCode()
+        result = 31 * result + appName.hashCode()
+        result = 31 * result + title.hashCode()
+        result = 31 * result + text.hashCode()
+        result = 31 * result + timestamp.hashCode()
+        result = 31 * result + progressIndeterminate.hashCode()
+        result = 31 * result + progress
+        result = 31 * result + progressMax
+        result = 31 * result + iconPng.contentHashCode()
+        return result
     }
 
     companion object {
@@ -262,7 +296,13 @@ data class NotificationData(
             val indeterminate = if (buf.remaining() >= 1) buf.get() != 0.toByte() else false
             val prog = if (!indeterminate && buf.remaining() >= 4) buf.getInt() else 0
             val progMax = if (!indeterminate && buf.remaining() >= 4) buf.getInt() else 0
-            return NotificationData(id, pkg, app, title, text, ts, indeterminate, prog, progMax)
+            val iconPng = if (buf.remaining() >= 4) {
+                val iconLen = buf.getInt()
+                if (iconLen > 0 && buf.remaining() >= iconLen) {
+                    ByteArray(iconLen).also { buf.get(it) }
+                } else ByteArray(0)
+            } else ByteArray(0)
+            return NotificationData(id, pkg, app, title, text, ts, indeterminate, prog, progMax, iconPng)
         }
     }
 }
@@ -419,6 +459,33 @@ enum class MediaAction(val id: Byte) {
 
     companion object {
         fun fromId(id: Byte): MediaAction = entries.find { it.id == id } ?: PLAY
+    }
+}
+
+// ─── Notification Clear (car → phone) ───
+
+data class ClearNotificationMessage(
+    val id: Int,
+    val packageName: String
+) {
+    fun encode(): ByteArray {
+        val pkgBytes = packageName.toByteArray(Charsets.UTF_8)
+        val buf = ByteBuffer.allocate(4 + 2 + pkgBytes.size).order(ByteOrder.BIG_ENDIAN)
+        buf.putInt(id)
+        buf.putShort(pkgBytes.size.toShort())
+        buf.put(pkgBytes)
+        return buf.array()
+    }
+
+    companion object {
+        fun decode(data: ByteArray): ClearNotificationMessage {
+            val buf = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
+            val id = buf.getInt()
+            val pkgLen = buf.getShort().toInt()
+            val pkgBytes = ByteArray(pkgLen)
+            buf.get(pkgBytes)
+            return ClearNotificationMessage(id, String(pkgBytes, Charsets.UTF_8))
+        }
     }
 }
 

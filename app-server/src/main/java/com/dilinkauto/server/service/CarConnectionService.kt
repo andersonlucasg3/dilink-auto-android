@@ -66,6 +66,9 @@ class CarConnectionService : Service() {
         set(value) = getSharedPreferences("dilinkauto", MODE_PRIVATE)
             .edit().putBoolean("dev_mode", value).apply()
 
+    // ─── Handshake ───
+    private var handshakeVdDpi = VideoConfig.VIRTUAL_DISPLAY_DPI // DPI from phone (may be adjusted for DeX)
+
     private var vdServerJarPath = "/sdcard/DiLinkAuto/vd-server.jar"
 
     private val touchExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
@@ -604,10 +607,11 @@ class CarConnectionService : Service() {
         when (frame.messageType) {
             ControlMsg.HANDSHAKE_RESPONSE -> {
                 val response = HandshakeResponse.decode(frame.payload)
-                carLogSend("Handshake OK: ${response.deviceName} jarPath=${response.vdServerJarPath} connMethod=${response.connectionMethod}")
+                carLogSend("Handshake OK: ${response.deviceName} jarPath=${response.vdServerJarPath} connMethod=${response.connectionMethod} vdDpi=${response.vdDpi}")
                 _phoneName.value = response.deviceName
                 vdWidth = response.displayWidth
                 vdHeight = response.displayHeight
+                handshakeVdDpi = response.vdDpi
                 if (response.vdServerJarPath.isNotEmpty()) {
                     vdServerJarPath = response.vdServerJarPath
                 }
@@ -718,7 +722,7 @@ class CarConnectionService : Service() {
             val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
             val viewportWidth = displayMetrics.widthPixels - navBarPx
             val viewportHeight = displayMetrics.heightPixels
-            val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
+            val phoneDpi = handshakeVdDpi
             val dpiScale = phoneDpi.toFloat() / 160f
             val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
             val scaledW = ((scaledH * viewportWidth.toFloat() / viewportHeight).toInt()) and 0x7FFFFFFE.toInt()
@@ -890,6 +894,24 @@ class CarConnectionService : Service() {
                 controlConnection?.sendControl(ControlMsg.APP_SHORTCUT_ACTION, msg.encode())
                 carLogSend("Execute shortcut: $shortcutId for $packageName")
             } catch (e: Exception) { carLogSend("executeShortcut failed: ${e.message}", "E") }
+        }
+    }
+
+    fun clearNotification(id: Int, packageName: String) {
+        _notifications.value = _notifications.value.filter { it.id != id || it.packageName != packageName }
+        scope.launch(Dispatchers.IO) {
+            try {
+                val msg = ClearNotificationMessage(id, packageName)
+                controlConnection?.sendData(DataMsg.NOTIFICATION_CLEAR, msg.encode())
+            } catch (e: Exception) { carLogSend("clearNotification failed: ${e.message}", "E") }
+        }
+    }
+
+    fun clearAllNotifications() {
+        _notifications.value = emptyList()
+        scope.launch(Dispatchers.IO) {
+            try { controlConnection?.sendData(DataMsg.NOTIFICATION_CLEAR_ALL, ByteArray(0)) }
+            catch (e: Exception) { carLogSend("clearAllNotifications failed: ${e.message}", "E") }
         }
     }
 

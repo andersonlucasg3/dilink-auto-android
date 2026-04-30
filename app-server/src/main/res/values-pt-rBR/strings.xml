@@ -73,6 +73,9 @@
 
     <!-- Notifications -->
     <string name="no_notifications">Sem notificações</string>
+    <string name="notifications_count">Notificações (%d)</string>
+    <string name="clear_all">Limpar Tudo</string>
+    <string name="clear_notification">Limpar notificação</string>
 
     <!-- Connection Status Messages -->
     <string name="status_deploying_vd">Implantando tela virtual…</string>

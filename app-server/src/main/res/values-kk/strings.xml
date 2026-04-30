@@ -73,6 +73,9 @@
 
     <!-- Notifications -->
     <string name="no_notifications">Хабарландырулар жоқ</string>
+    <string name="notifications_count">Хабарландырулар (%d)</string>
+    <string name="clear_all">Барлығын Тазалау</string>
+    <string name="clear_notification">Хабарландыруды тазалау</string>
 
     <!-- Connection Status Messages -->
     <string name="status_deploying_vd">Виртуалды дисплейді орналастыру…</string>
