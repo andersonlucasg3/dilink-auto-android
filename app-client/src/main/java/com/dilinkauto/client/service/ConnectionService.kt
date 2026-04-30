@@ -1098,43 +1098,66 @@ class ConnectionService : Service() {
 
     private suspend fun queryShortcuts(packageName: String): List<AppShortcut> {
         FileLog.i(TAG, "Querying shortcuts for $packageName: shizuku=${ShizukuManager.isAvailable} vdClient=${vdClient != null} vdConnected=${vdClient?.isConnected}")
+        // True when Shizuku already proved cmd shortcut is unavailable on this device,
+        // so we can skip the redundant VD server attempt (both run the same command).
+        var cmdShortcutUnavailable = false
         // Try Shizuku shell first — has full access to shortcut data
         if (ShizukuManager.isAvailable) {
             try {
                 val output = ShizukuManager.execAndWait("cmd shortcut get-shortcuts --package $packageName")
                 if (!output.isNullOrEmpty()) {
                     val parsed = parseCmdShortcutOutput(output, packageName)
-                    if (parsed.isNotEmpty()) return parsed
+                    if (parsed.isNotEmpty()) {
+                        FileLog.i(TAG, "Shizuku: ${parsed.size} shortcuts for $packageName")
+                        return parsed
+                    }
+                    // cmd shortcut unavailable on this device — try dumpsys via Shizuku
+                    cmdShortcutUnavailable = true
+                    FileLog.d(TAG, "Shizuku: cmd shortcut returned ${output.length} chars but parsed empty, trying dumpsys")
+                    val dumpOutput = ShizukuManager.execAndWait("dumpsys shortcut $packageName 2>&1")
+                    if (!dumpOutput.isNullOrBlank()) {
+                        val dumpParsed = parseCmdShortcutOutput(dumpOutput, packageName)
+                        if (dumpParsed.isNotEmpty()) {
+                            FileLog.i(TAG, "Shizuku dumpsys: ${dumpParsed.size} shortcuts for $packageName")
+                            return dumpParsed
+                        }
+                    }
+                    FileLog.i(TAG, "Shizuku: cmd shortcut unavailable, skipping VD server")
                 }
             } catch (e: Exception) {
                 FileLog.w(TAG, "Shizuku shortcut query failed for $packageName: ${e.message}")
             }
         }
-        // Try VD server — runs as shell UID, can access all shortcuts
-        val vd = vdClient
-        if (vd != null && vd.isConnected) {
-            FileLog.i(TAG, "VD server path: querying shortcuts for $packageName")
-            try {
-                val output = vd.queryShortcuts(packageName)
-                if (!output.isNullOrBlank()) {
-                    val parsed = parseCmdShortcutOutput(output, packageName)
-                    if (parsed.isNotEmpty()) {
-                        FileLog.i(TAG, "VD server returned ${parsed.size} shortcuts for $packageName")
-                        return parsed
+        // Try VD server — skip if Shizuku already proved cmd shortcut is unavailable
+        if (!cmdShortcutUnavailable) {
+            val vd = vdClient
+            if (vd != null && vd.isConnected) {
+                FileLog.i(TAG, "VD server path: querying shortcuts for $packageName")
+                try {
+                    val output = vd.queryShortcuts(packageName)
+                    if (!output.isNullOrBlank()) {
+                        val parsed = parseCmdShortcutOutput(output, packageName)
+                        if (parsed.isNotEmpty()) {
+                            FileLog.i(TAG, "VD server returned ${parsed.size} shortcuts for $packageName")
+                            return parsed
+                        } else {
+                            FileLog.w(TAG, "VD server returned output but parsed empty for $packageName")
+                        }
                     } else {
-                        FileLog.w(TAG, "VD server returned output but parsed empty for $packageName")
+                        FileLog.w(TAG, "VD server returned empty/null output for $packageName")
                     }
-                } else {
-                    FileLog.w(TAG, "VD server returned empty/null output for $packageName")
+                } catch (e: Exception) {
+                    FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
                 }
-            } catch (e: Exception) {
-                FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
             }
         }
         // Fallback: read shortcuts directly from the APK's XML resource.
-        // Necessary on Samsung One UI where "cmd shortcut" service is unavailable.
+        // Necessary when "cmd shortcut" service is unavailable (Samsung, Xiaomi, etc.)
         val apkShortcuts = queryShortcutsFromApkXml(packageName)
-        if (apkShortcuts.isNotEmpty()) return apkShortcuts
+        if (apkShortcuts.isNotEmpty()) {
+            FileLog.i(TAG, "APK XML: ${apkShortcuts.size} shortcuts for $packageName")
+            return apkShortcuts
+        }
         // Last resort: LauncherApps API (may fail with "Caller can't access shortcut information")
         return try {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
