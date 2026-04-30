@@ -138,6 +138,7 @@ Les branches sont créées automatiquement par l'agent de tickets en fonction du
 
 | Modèle | Étiquette | Pattern de branche | Objectif |
 |---------|-----------|-------------------|----------|
+| Hotfix | `hotfix` | `hotfix/vX.Y.Z` | Correctifs critiques depuis main |
 | Correction de bug | `bug` | `fix/N-agent` | Corrections de bugs |
 | Nouvelle fonctionnalité | `feature` | `feature/N-agent` | Nouvelles fonctionnalités |
 | Investigation | `investigation` | `investigate/N-agent` | Investigation du codebase |
