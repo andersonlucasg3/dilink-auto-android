@@ -98,6 +98,8 @@ class VirtualDisplayServer(
         private const val CMD_INPUT_TAP = 0x30
         private const val CMD_INPUT_SWIPE = 0x31
         private const val CMD_INPUT_TOUCH = 0x32
+        private const val CMD_UNINSTALL = 0x23
+        private const val CMD_OPEN_APP_INFO = 0x24
         private const val CMD_STOP = 0xFF
 
         private const val BITRATE = 8_000_000
@@ -456,6 +458,22 @@ class VirtualDisplayServer(
                         if (cmdCount <= 3 || cmdCount % 100 == 0L) {
                             log("Touch cmd #$cmdCount action=$action ptr=$pointerId x=$tx y=$ty")
                         }
+                    }
+                    CMD_UNINSTALL -> {
+                        val len = reader.readIntBlocking()
+                        val buf = ByteArray(len)
+                        reader.readFullyBlocking(buf, 0, len)
+                        val pkg = String(buf)
+                        log("Uninstalling: $pkg")
+                        execShell("pm uninstall $pkg")
+                    }
+                    CMD_OPEN_APP_INFO -> {
+                        val len = reader.readIntBlocking()
+                        val buf = ByteArray(len)
+                        reader.readFullyBlocking(buf, 0, len)
+                        val pkg = String(buf)
+                        log("Opening app info on VD for: $pkg")
+                        execShell("am start --display $displayId -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:$pkg")
                     }
                     CMD_STOP -> running = false
                     else -> err("Unknown command: 0x${cmd.toString(16)}")

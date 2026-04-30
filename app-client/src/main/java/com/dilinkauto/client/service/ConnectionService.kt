@@ -1,6 +1,5 @@
 package com.dilinkauto.client.service
 
-import android.app.Activity
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -13,11 +12,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
-import android.net.Uri
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.UserHandle
-import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.dilinkauto.client.ClientApp
@@ -379,33 +376,21 @@ class ConnectionService : Service() {
             ControlMsg.APP_UNINSTALL -> {
                 val pkg = String(frame.payload, Charsets.UTF_8)
                 FileLog.i(TAG, "Car requested uninstall: $pkg")
-                serviceScope.launch(Dispatchers.Main) {
-                    try {
-                        wakeScreenForAction()
-                        val intent = Intent(Intent.ACTION_DELETE).apply {
-                            data = Uri.parse("package:$pkg")
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        startActivity(intent)
-                    } catch (e: Exception) {
-                        FileLog.w(TAG, "Failed to start uninstall for $pkg: ${e.message}")
-                    }
+                val client = vdClient
+                if (client != null) {
+                    client.uninstallApp(pkg)
+                } else {
+                    FileLog.w(TAG, "VD client not connected, cannot uninstall $pkg")
                 }
             }
             ControlMsg.APP_INFO -> {
                 val pkg = String(frame.payload, Charsets.UTF_8)
                 FileLog.i(TAG, "Car requested app info: $pkg")
-                serviceScope.launch(Dispatchers.Main) {
-                    try {
-                        wakeScreenForAction()
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            data = Uri.parse("package:$pkg")
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        startActivity(intent)
-                    } catch (e: Exception) {
-                        FileLog.w(TAG, "Failed to open app info for $pkg: ${e.message}")
-                    }
+                val client = vdClient
+                if (client != null) {
+                    client.openAppInfo(pkg)
+                } else {
+                    FileLog.w(TAG, "VD client not connected, cannot open app info for $pkg")
                 }
             }
             ControlMsg.APP_SHORTCUTS -> {
@@ -1180,50 +1165,6 @@ class ConnectionService : Service() {
         // display power-off which regular WakeLocks can't reverse. Launch our own
         // activity with FLAG_TURN_SCREEN_ON — WindowManager wakes the display.
         forceWakeScreen()
-    }
-
-    /**
-     * Wake the physical display and bring the app to the foreground so the
-     * uninstall or app-info activity triggered by a car context-menu action is
-     * visible and not blocked by Android 14 background-launch restrictions.
-     *
-     * The VD server puts the phone display into a deep off state via
-     * SurfaceControl. A WakeLock alone can turn on the backlight but does NOT
-     * make the app's windows "active" — so background-launch restrictions still
-     * block startActivity(). Launching MainActivity with FLAG_TURN_SCREEN_ON
-     * both wakes the display and makes the app visible, satisfying the
-     * restrictions so the subsequent target intent launches successfully.
-     */
-    private suspend fun wakeScreenForAction() {
-        withContext(Dispatchers.IO) {
-            try {
-                FileLog.i(TAG, "Waking screen for context-menu action")
-                val pm = getSystemService(POWER_SERVICE) as PowerManager
-
-                // Layer 1: WakeLock with ACQUIRE_CAUSES_WAKEUP — immediate wake
-                @Suppress("DEPRECATION")
-                val wlFlags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                    android.os.PowerManager.ON_AFTER_RELEASE
-                val wl = pm.newWakeLock(wlFlags, "DiLink:action:wake")
-                wl.acquire(3000)
-                wl.release()
-
-                // Layer 2: Launch MainActivity with FLAG_TURN_SCREEN_ON.
-                // This brings the app to the foreground, satisfying Android 14
-                // background-launch restrictions so the subsequent target intent
-                // (uninstall dialog / app info) can start.
-                val intent = Intent(this@ConnectionService,
-                    Class.forName("com.dilinkauto.client.MainActivity"))
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                intent.addFlags(0x10000000) // FLAG_TURN_SCREEN_ON
-                startActivity(intent)
-                FileLog.i(TAG, "MainActivity launched for context-menu action")
-            } catch (e: Exception) {
-                FileLog.w(TAG, "wakeScreenForAction error: ${e.message}")
-            }
-        }
     }
 
     /**

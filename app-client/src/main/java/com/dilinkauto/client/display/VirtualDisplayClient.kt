@@ -276,6 +276,24 @@ class VirtualDisplayClient(
         }
     }
 
+    fun uninstallApp(packageName: String) {
+        sendCommand { buf ->
+            val bytes = packageName.toByteArray(Charsets.UTF_8)
+            buf.put(CMD_UNINSTALL.toByte())
+            buf.putInt(bytes.size)
+            buf.put(bytes)
+        }
+    }
+
+    fun openAppInfo(packageName: String) {
+        sendCommand { buf ->
+            val bytes = packageName.toByteArray(Charsets.UTF_8)
+            buf.put(CMD_OPEN_APP_INFO.toByte())
+            buf.putInt(bytes.size)
+            buf.put(bytes)
+        }
+    }
+
     /**
      * Send a raw touch event for immediate MotionEvent injection on the VD.
      * Synchronous write — avoids coroutine dispatch latency for touch events.
@@ -413,5 +431,7 @@ class VirtualDisplayClient(
         private const val CMD_INPUT_TAP = 0x30
         private const val CMD_INPUT_SWIPE = 0x31
         private const val CMD_INPUT_TOUCH = 0x32
+        private const val CMD_UNINSTALL = 0x23
+        private const val CMD_OPEN_APP_INFO = 0x24
     }
 }
