@@ -83,12 +83,13 @@ data class HandshakeResponse(
     val virtualDisplayId: Int = -1,
     val adbPort: Int = 5555,
     val vdServerJarPath: String = "",
-    val connectionMethod: Byte = CONNECTION_METHOD_USB_ADB
+    val connectionMethod: Byte = CONNECTION_METHOD_USB_ADB,
+    val vdDpi: Int = VideoConfig.VIRTUAL_DISPLAY_DPI
 ) {
     fun encode(): ByteArray {
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
         val jarPathBytes = vdServerJarPath.toByteArray(Charsets.UTF_8)
-        val buf = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 4 + 4 + 2 + jarPathBytes.size + 1)
+        val buf = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 4 + 4 + 2 + jarPathBytes.size + 1 + 4)
             .order(ByteOrder.BIG_ENDIAN)
         buf.putInt(protocolVersion)
         buf.put(if (accepted) 1.toByte() else 0.toByte())
@@ -101,6 +102,7 @@ data class HandshakeResponse(
         buf.putShort(jarPathBytes.size.toShort())
         buf.put(jarPathBytes)
         buf.put(connectionMethod)
+        buf.putInt(vdDpi)
         return buf.array()
     }
 
@@ -125,6 +127,7 @@ data class HandshakeResponse(
                 } else ""
             } else ""
             val connMethod = if (buf.hasRemaining()) buf.get() else CONNECTION_METHOD_USB_ADB
+            val vdDpi = if (buf.remaining() >= 4) buf.getInt() else VideoConfig.VIRTUAL_DISPLAY_DPI
             return HandshakeResponse(
                 protocolVersion = version,
                 accepted = accepted,
@@ -134,7 +137,8 @@ data class HandshakeResponse(
                 virtualDisplayId = vdId,
                 adbPort = adbP,
                 vdServerJarPath = jarPath,
-                connectionMethod = connMethod
+                connectionMethod = connMethod,
+                vdDpi = vdDpi
             )
         }
     }
