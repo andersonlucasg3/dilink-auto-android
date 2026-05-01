@@ -271,11 +271,16 @@ class VideoDecoder {
         if (isConfig || isKey || receiveCount <= 3 || receiveCount % 60 == 0L) {
             log("onFrameReceived #$receiveCount isConfig=$isConfig isKey=$isKey size=${data.size} running=${running.get()} queue=${frameQueue.size}")
         }
+        // Always cache CONFIG — needed to bootstrap the next decoder instance
         if (isConfig) {
             configData = data
         }
-        // Queue frames even before start() — the feed thread will drain them
-        // once the decoder is ready.
+        // When stopped, only cache CONFIG. Dropping frames during surface transitions
+        // prevents the queue from filling up and causing a 400+ frame drop storm on restart.
+        if (!running.get() && !isConfig) {
+            if (isKey) keyFramesDropped++
+            return
+        }
         val frame = FrameData(isConfig, isKey, data)
         if (frameQueue.offer(frame)) return
 
