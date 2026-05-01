@@ -67,7 +67,7 @@ body {
 .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
 .btn-outline:hover { background: var(--bg-card); }
 .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
-.btn-ghost:hover { color: var(--text); }
+.btn-ghost:hover { color: var(--text); border-color: var(--text-muted); }
 .btn-pink { background: var(--pink); color: #0d1117; }
 .btn-pink:hover { background: var(--pink-hover); }
 .btn-pix { background: var(--pix); color: #0d1117; }
