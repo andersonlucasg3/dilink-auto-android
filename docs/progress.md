@@ -1,9 +1,24 @@
 # Progress Tracker
 
-Current version: **v0.16.0** (stable)
-Last updated: 2026-04-29
+Current version: **v0.17.0-dev-02** (pre-release)
+Last updated: 2026-05-01
 
 ## Milestones
+
+### v0.17.0-dev-02 (2026-05-01)
+
+- **Phone overheating fix**: Eliminated CPU spin patterns in the streaming pipeline causing phone overheating during streaming. Replaced `delay(1)` busy-waits with proper blocking/selector-based mechanisms.
+- **AppIconCache moved to car**: Car-side icon cache persists source PNGs (192x192) to disk. `prepareAll()` decodes+resizes all icons on background thread before grid appears; `getPrepared()` is O(1) ConcurrentHashMap lookup with zero I/O during scroll. Eliminated per-tile decode and crash on fast scroll.
+- **AppTile simplified**: Removed per-tile StateFlow collect, lazy DropdownMenu, and click ripple effects. Lightweight tiles with clickable instead of combinedClickable for main tap.
+- **App grid dedup**: Fixed LazyGrid crash by deduplicating items by packageName.
+
+### v0.17.0-dev-01 (2026-04-30)
+
+- **Notification per-item dismiss and Clear All**: Car notification screen now has per-item dismiss buttons with slide-out animations and a "Clear All" header button. New protocol messages: `NOTIFICATION_CLEAR` (0x04) and `NOTIFICATION_CLEAR_ALL` (0x05) on data channel. Per-item icons from phone's `iconPng` payload.
+- **App context actions**: Long-press on app tiles (launcher) and nav bar recent apps shows dropdown menu with Uninstall and App Info. Uninstall propagation via `APP_UNINSTALL` (0x1B) / `APP_UNINSTALLED` (0x06). App Info displays car-side dialog with `APP_INFO_DATA` (0x07) metadata from phone. Context menu actions route through VD server for shell-level access.
+- **App shortcuts infrastructure** (disabled in UI): Protocol messages `APP_SHORTCUTS` (0x18) / `APP_SHORTCUTS_LIST` (0x19) / `APP_SHORTCUT_ACTION` (0x1A) with VD server query + APK XML fallback. Disabled while label resolution is refined (issue #57).
+- **Back button fix**: GO_BACK now closes activities one-by-one before returning to the home menu, using proper stack tracking and `FOCUSED_APP` (0x16) messages.
+- **Samsung DeX / Desktop Mode DPI** (reverted): Initial implementation using `UiModeManager.currentModeType` detection and 213dpi was reverted in dev-02. Replaced by VD-level flag removal approach.
 
 ### v0.16.0 (2026-04-29)
 
