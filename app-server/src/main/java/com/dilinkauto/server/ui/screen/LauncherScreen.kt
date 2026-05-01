@@ -245,6 +245,7 @@ fun AppGrid(
 
     val density = androidx.compose.ui.platform.LocalDensity.current
     val iconSizePx = with(density) { 64.dp.toPx().toInt() }
+    LaunchedEffect(Unit) { Log.i("AppGrid", "iconSizePx=$iconSizePx density=${density.density}") }
 
     Column(modifier = modifier) {
         Row(modifier = Modifier.weight(1f)) {
@@ -406,27 +407,11 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
-    // Try in-memory cache first (instant — no coroutine overhead when pre-warmed).
-    // Falls back to async decode only for cold cache misses.
-    val initialBitmap = remember(app.packageName, iconSizePx) {
-        ServerApp.iconCache.peek(app.packageName, iconSizePx)?.asImageBitmap()
-    }
-    var iconBitmap by remember { mutableStateOf(initialBitmap) }
-
-    if (iconBitmap == null) {
-        LaunchedEffect(app.packageName, iconSizePx) {
-            if (app.iconPng.isEmpty()) return@LaunchedEffect
-            try {
-                val bmp = withContext(Dispatchers.IO) {
-                    ServerApp.iconCache.get(app.packageName, iconSizePx)
-                }
-                if (bmp != null) {
-                    iconBitmap = bmp.asImageBitmap()
-                }
-            } catch (e: Exception) {
-                Log.w("AppTile", "Decode failed for ${app.packageName}: ${e.message}")
-            }
-        }
+    // Re-read when preparedVersion changes (after prepareAll() finishes).
+    // Without the version key, remember would cache the initial null forever.
+    val preparedVersion = ServerApp.iconCache.preparedVersion
+    val iconBitmap = remember(app.packageName, preparedVersion) {
+        ServerApp.iconCache.getPrepared(app.packageName)
     }
 
     // Context menu state — lazy so the DropdownMenu tree is only created on demand

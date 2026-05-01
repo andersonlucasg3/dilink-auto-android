@@ -695,9 +695,7 @@ class CarConnectionService : Service() {
             DataMsg.APP_LIST -> {
                 val apps = AppListMessage.decode(frame.payload).apps
                 _appList.value = apps
-                // Store source icons and pre-warm the cache for grid rendering.
-                // Without pre-warming, every AppTile triggers decode+resize on first
-                // scroll frame — 100+ simultaneous bitmap ops → GC pressure → crash.
+                // Store source PNGs and prepare all icons for instant rendering.
                 var newIcons = 0
                 apps.forEach { app ->
                     if (app.iconPng.isNotEmpty()) {
@@ -705,18 +703,18 @@ class CarConnectionService : Service() {
                         newIcons++
                     }
                 }
-                // Pre-warm at the grid icon size in actual device pixels
-                if (newIcons > 0) {
-                    scope.launch(Dispatchers.IO) {
-                        val density = android.content.res.Resources.getSystem().displayMetrics.density
-                        val gridIconPx = (64 * density).toInt()
-                        apps.forEach { app ->
-                            ServerApp.iconCache.get(app.packageName, gridIconPx)
-                        }
-                        carLogSend("App list: ${apps.size} apps (${newIcons} new icons pre-warmed @ ${gridIconPx}px)")
+                // Decode + resize all icons on a background thread BEFORE the grid
+                // renders. After prepareAll() finishes, getPrepared() is an O(1)
+                // ConcurrentHashMap lookup — zero work during scroll.
+                scope.launch(Dispatchers.IO) {
+                    val density = applicationContext.resources.displayMetrics.density
+                    val gridIconPx = (64 * density).toInt()
+                    val prepared = ServerApp.iconCache.prepareAll(apps, gridIconPx)
+                    carLogSend("App list: ${apps.size} apps, ${prepared} icons prepared @ ${gridIconPx}px")
+                    // Trigger grid recomposition so tiles pick up the prepared icons
+                    if (prepared > 0) {
+                        _appList.value = ArrayList(_appList.value)
                     }
-                } else {
-                    carLogSend("App list: ${apps.size} apps (all icons already cached)")
                 }
             }
             DataMsg.NOTIFICATION_POST -> {

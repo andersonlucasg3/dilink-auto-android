@@ -2,109 +2,105 @@ package com.dilinkauto.server
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Car-side icon cache — the single source of truth for app icons on the car.
+ * Car-side icon cache — decodes and resizes icons once, then serves them instantly.
  *
- * The phone sends high-resolution source PNGs (192×192 for app list, 96×96 for
- * notifications). The cache stores the source and produces resized versions at
- * the exact dimensions each UI area needs. Disk persistence survives restarts.
- *
- * Usage:
- *   AppIconCache.putSource(packageName, sourcePng)   // when APP_LIST arrives
- *   val bitmap = AppIconCache.get(packageName, 96)    // 64dp on 240dpi screen
- *   val bitmap = AppIconCache.get(packageName, 60)    // 40dp on 240dpi screen
+ * The phone sends high-resolution source PNGs (192x192). When APP_LIST arrives,
+ * [prepareAll] decodes and resizes every icon to the grid size on a background
+ * thread. After that, [getPrepared] is an O(1) ConcurrentHashMap lookup — zero
+ * coroutines, zero I/O, zero decode during scroll.
  */
 class AppIconCache(private val cacheDir: File) {
 
     private val sourceCache = ConcurrentHashMap<String, ByteArray>()
-    private val resizedCache = ConcurrentHashMap<String, Bitmap>()
+    private val prepared = ConcurrentHashMap<String, ImageBitmap>()
+
+    /** Incremented after each prepareAll() completes — UI observes this to recompose. */
+    @Volatile var preparedVersion: Int = 0
+        private set
 
     init { cacheDir.mkdirs() }
+
+    /**
+     * Full decode+resize path — used by NotificationScreen and NavBar (few icons).
+     * For the app grid (many icons), use [prepareAll] + [getPrepared] instead.
+     */
+    fun get(packageName: String, sizePx: Int): Bitmap? {
+        val key = "${packageName}_$sizePx"
+        val source = sourceCache[packageName] ?: loadSourceFromDisk(packageName) ?: return null
+        return try {
+            val decoded = BitmapFactory.decodeByteArray(source, 0, source.size) ?: return null
+            val resized = Bitmap.createScaledBitmap(decoded, sizePx, sizePx, true)
+            // Also cache as prepared ImageBitmap for AppTile compatibility
+            prepared[packageName] = resized.asImageBitmap()
+            resized
+        } catch (_: Exception) { null }
+    }
 
     /** Store the high-resolution source PNG received from the phone. */
     fun putSource(packageName: String, pngBytes: ByteArray) {
         if (pngBytes.isEmpty()) return
         sourceCache[packageName] = pngBytes
-        // Persist so icons survive app restarts without re-receiving from phone
-        try {
-            File(cacheDir, "${packageName}_src.png").writeBytes(pngBytes)
-        } catch (_: Exception) {}
+        try { File(cacheDir, "${packageName}_src.png").writeBytes(pngBytes) } catch (_: Exception) {}
     }
 
     /**
-     * Returns a [Bitmap] of the icon at [sizePx]×[sizePx].
-     * Checks in-memory cache first, then disk, then resizes from the source.
+     * Synchronous O(1) lookup — returns a ready-to-render [ImageBitmap] or null.
+     * Call ONLY after [prepareAll] has finished.
      */
-    fun get(packageName: String, sizePx: Int): Bitmap? {
-        val key = "${packageName}_$sizePx"
+    fun getPrepared(packageName: String): ImageBitmap? = prepared[packageName]
 
-        // In-memory hit
-        resizedCache[key]?.let { return it }
+    /** Number of prepared icons ready for instant rendering. */
+    fun preparedCount(): Int = prepared.size
 
-        // Disk hit for this specific size
-        val sizedFile = File(cacheDir, "${packageName}_${sizePx}.png")
-        if (sizedFile.exists()) {
+    /**
+     * Decode + resize all icons on the current thread.
+     * Call from a background coroutine BEFORE the grid becomes visible.
+     *
+     * @param apps list of all apps (reads source PNG from cache/disk for each)
+     * @param sizePx target icon size in pixels (e.g. 64dp in px)
+     * @return how many icons were successfully prepared
+     */
+    fun prepareAll(apps: List<com.dilinkauto.protocol.AppInfo>, sizePx: Int): Int {
+        var count = 0
+        apps.forEach { app ->
+            val key = app.packageName
+            if (prepared.containsKey(key)) {
+                count++
+                return@forEach
+            }
+            val source = sourceCache[key] ?: loadSourceFromDisk(key) ?: return@forEach
             try {
-                val bmp = BitmapFactory.decodeFile(sizedFile.absolutePath)
-                if (bmp != null) {
-                    resizedCache[key] = bmp
-                    return bmp
-                }
+                val decoded = BitmapFactory.decodeByteArray(source, 0, source.size) ?: return@forEach
+                val resized = Bitmap.createScaledBitmap(decoded, sizePx, sizePx, true)
+                prepared[key] = resized.asImageBitmap()
+                count++
             } catch (_: Exception) {}
         }
-
-        // Load source (in-memory or disk)
-        val source = sourceCache[packageName] ?: loadSourceFromDisk(packageName)
-            ?: return null
-
-        // Decode source and resize to requested size
-        return try {
-            val decoded = BitmapFactory.decodeByteArray(source, 0, source.size) ?: return null
-            val resized = Bitmap.createScaledBitmap(decoded, sizePx, sizePx, true)
-            resizedCache[key] = resized
-
-            // Persist resized version to disk
-            try {
-                ByteArrayOutputStream().use { stream ->
-                    resized.compress(Bitmap.CompressFormat.PNG, 80, stream)
-                    sizedFile.writeBytes(stream.toByteArray())
-                }
-            } catch (_: Exception) {}
-
-            resized
-        } catch (_: Exception) {
-            null
-        }
+        if (count > 0) preparedVersion++
+        return count
     }
 
     private fun loadSourceFromDisk(packageName: String): ByteArray? {
-        val srcFile = File(cacheDir, "${packageName}_src.png")
-        if (!srcFile.exists()) return null
+        val f = File(cacheDir, "${packageName}_src.png")
+        if (!f.exists()) return null
         return try {
-            val bytes = srcFile.readBytes()
+            val bytes = f.readBytes()
             sourceCache[packageName] = bytes
             bytes
         } catch (_: Exception) { null }
     }
 
-    /**
-     * Synchronous in-memory lookup only — no disk I/O, no decode.
-     * Returns null if the icon hasn't been pre-warmed (caller should fall back
-     * to [get] which does full decode+resize).
-     */
-    fun peek(packageName: String, sizePx: Int): Bitmap? {
-        return resizedCache["${packageName}_$sizePx"]
-    }
-
     /** Remove all cached data for a package (e.g. when app is uninstalled). */
     fun evict(packageName: String) {
         sourceCache.remove(packageName)
-        resizedCache.keys.removeAll { it.startsWith("${packageName}_") }
+        prepared.remove(packageName)
         File(cacheDir, "${packageName}_src.png").delete()
-        cacheDir.listFiles()?.filter { it.name.startsWith("${packageName}_") }?.forEach { it.delete() }
     }
 }
