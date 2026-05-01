@@ -125,7 +125,7 @@ Payload: UTF-8 package name. Car requests the phone to open the system app info/
 
 ### APP_SHORTCUTS (0x18) -- Car -> Phone
 
-Payload: UTF-8 package name. Car requests available Android 7.1+ app shortcuts for the given package.
+Payload: UTF-8 package name. Car requests available Android 7.1+ app shortcuts for the given package. **Disabled in UI** — infrastructure (VD server query + APK XML fallback) is in place but shortcuts are hidden pending refinement (issue #57).
 
 ### APP_SHORTCUTS_LIST (0x19) -- Phone -> Car
 
@@ -183,6 +183,10 @@ Empty payload. Car dismisses all notifications; phone clears all active notifica
 ### APP_UNINSTALLED (0x06) — Phone → Car
 
 Payload: UTF-8 package name. Phone confirms an app was uninstalled (in response to `APP_UNINSTALL`). Car removes the app from its launcher grid.
+
+### APP_INFO_DATA (0x07) — Phone → Car
+
+Payload: `AppInfoDataMessage` — package name, version name, version code, install time, update time, app size (bytes). Phone sends app metadata for display in a car-side dialog when user selects "App Info" from the context menu.
 
 ### APP_LIST (0x03) -- Phone -> Car
 

@@ -106,7 +106,6 @@ Manages VD server deployment, car auto-update, 3-connection relay, and FileLog.
 | VirtualDisplayClient | `display/VirtualDisplayClient.kt` | NIO accept on localhost:19637, video relay (videoConnection), touch forwarding, stack empty (controlConnection) |
 | NotificationService | `service/NotificationService.kt` | Captures and forwards phone notifications with progress |
 | InputInjectionService | `service/InputInjectionService.kt` | Touch injection fallback (physical display) |
-| AppIconCache | `AppIconCache.kt` | Single source of truth for app icons, disk-persisted, shared by NotificationService (64x64) and app list (96x96) |
 | FileLog | `FileLog.kt` | File-based logging to `/sdcard/DiLinkAuto/client.log`, rotation, bypasses logcat filtering |
 | MainActivity | `MainActivity.kt` | UI — start/stop, permission status, Install on Car button |
 
@@ -116,6 +115,7 @@ Parallel connection model with WiFi (3 connections) and USB tracks.
 
 | Component | File | Purpose |
 |-----------|------|---------|
+| AppIconCache | `AppIconCache.kt` | Car-side icon cache — decodes 192x192 source PNGs once, `prepareAll()` resizes all icons on background thread, `getPrepared()` is O(1) ConcurrentHashMap lookup with zero I/O during scroll |
 | CarConnectionService | `service/CarConnectionService.kt` | Parallel state machine, 3-connection WiFi + USB tracks, UPDATING_CAR handling |
 | VideoDecoder | `decoder/VideoDecoder.kt` | H.264 decode, 30-frame queue, early start on offscreen surface, logSink callback |
 | CarLaunchScreen | `ui/screen/CarLaunchScreen.kt` | Full-screen launch/connection screen (no nav), branding, instructions, manual IP |
@@ -191,9 +191,7 @@ States: IDLE -> CONNECTING -> CONNECTED -> STREAMING
 | **Even viewport width** | Nav bar width adjusted to guarantee H.264-compatible even dimensions. |
 | **Heartbeat on control only** | Video and input connections have no heartbeat overhead. Control connection watchdog detects dead peers. |
 | **FileLog** | Bypasses HyperOS logcat filtering. File-based logging with rotation on `/sdcard/DiLinkAuto/`. |
-| **Desktop mode DPI** | Samsung DeX / Android 16 Desktop Mode renders system UI at desktop densities. VD server uses 213dpi (tvdpi) instead of 480dpi when desktop mode is active, keeping system UI readable and touchable on the car viewport. |
-| **App icon cache** | Disk-persisted single source of truth for app icons. Both NotificationService (64x64) and app list (96x96) draw from the same in-memory cache, eliminating duplicate icon bitmap memory. |
-| **App context menu** | Long-press on app tiles shows dropdown with Uninstall, App Info, and dynamic app shortcuts (Android 7.1+). Car requests shortcuts on-demand; phone handles uninstall intents and propagates removal via APP_UNINSTALLED data message. |
+| **App icon cache** | Car-side cache persists source PNGs (192x192) to disk. `prepareAll()` decodes and resizes all icons to grid size on a background thread after APP_LIST arrives. `getPrepared()` is a zero-cost ConcurrentHashMap lookup — no coroutines, no I/O, no decoding during scroll. |
 | **Notification dismiss/clear** | Per-item dismiss button and header "Clear All" on car notification screen. Car sends NOTIFICATION_CLEAR / NOTIFICATION_CLEAR_ALL data messages to phone, which clears the corresponding Android notifications. |
 | **logSink callbacks** | VideoDecoder and UsbAdbConnection route logs through protocol to phone's FileLog. |
 | **ADB prehashed auth** | AUTH_SIGNATURE uses `NONEwithRSA` + SHA-1 DigestInfo prefix (prehashed). Matches AOSP's `RSA_sign(NID_sha1)`. "Always allow" persists correctly. |
