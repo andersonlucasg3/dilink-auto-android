@@ -337,10 +337,13 @@
   <script>
     (function() {
       var RELEASES_URL = 'https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases?per_page=20';
+      var savedRelease = null;
+      var savedPrerelease = null;
 
       function formatDate(dateStr) {
         var d = new Date(dateStr);
-        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        var locale = typeof getLangLocale === 'function' ? getLangLocale() : 'en-US';
+        return d.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
       }
 
       function getAssetUrl(release) {
@@ -353,6 +356,15 @@
         return apk || release.html_url;
       }
 
+      function renderDates() {
+        if (savedRelease) {
+          document.getElementById('releaseDate').textContent = formatDate(savedRelease.published_at);
+        }
+        if (savedPrerelease) {
+          document.getElementById('prereleaseDate').textContent = formatDate(savedPrerelease.published_at);
+        }
+      }
+
       function showVersionPicker(release, prerelease) {
         var picker = document.getElementById('versionPicker');
         var fallback = document.getElementById('heroCtaFallback');
@@ -360,24 +372,29 @@
         var installFallback = document.getElementById('installCtaFallback');
         if (!picker || !fallback) return;
 
+        savedRelease = release;
+        savedPrerelease = prerelease;
+
         if (release) {
           document.getElementById('releaseVersion').textContent = release.tag_name;
-          document.getElementById('releaseDate').textContent = formatDate(release.published_at);
           document.getElementById('releaseDownload').href = getAssetUrl(release);
           document.getElementById('installReleaseDownload').href = getAssetUrl(release);
         }
         if (prerelease) {
           document.getElementById('prereleaseVersion').textContent = prerelease.tag_name;
-          document.getElementById('prereleaseDate').textContent = formatDate(prerelease.published_at);
           document.getElementById('prereleaseDownload').href = getAssetUrl(prerelease);
           document.getElementById('installPrereleaseDownload').href = getAssetUrl(prerelease);
         }
+        renderDates();
 
         picker.style.display = '';
         fallback.style.display = 'none';
         if (installDynamic) installDynamic.style.display = '';
         if (installFallback) installFallback.style.display = 'none';
       }
+
+      // Re-render dates when language changes
+      onLanguageChange = renderDates;
 
       fetch(RELEASES_URL)
         .then(function(r) { return r.json(); })

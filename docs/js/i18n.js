@@ -566,7 +566,25 @@ function detectLanguage() {
   return match || 'en';
 }
 
+const langToLocale = {
+  en: 'en-US',
+  'pt-BR': 'pt-BR',
+  ru: 'ru-RU',
+  be: 'be-BY',
+  fr: 'fr-FR',
+  kk: 'kk-KZ',
+  uk: 'uk-UA',
+  uz: 'uz-UZ'
+};
+
+function getLangLocale() {
+  return langToLocale[currentLang] || 'en-US';
+}
+
 let currentLang = detectLanguage();
+
+// Called by version script when dates need re-rendering after language change
+var onLanguageChange = null;
 
 function applyLanguage(lang) {
   currentLang = lang;
@@ -579,6 +597,7 @@ function applyLanguage(lang) {
   });
   const sel = document.getElementById('langSelect');
   if (sel) sel.value = lang;
+  if (typeof onLanguageChange === 'function') onLanguageChange();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
