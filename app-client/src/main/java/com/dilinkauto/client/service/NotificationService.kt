@@ -56,7 +56,7 @@ class NotificationService : NotificationListenerService() {
             progress = progress,
             progressMax = progressMax,
             progressIndeterminate = progressIndeterminate,
-            iconPng = ClientApp.iconCache.getOrLoad(sbn.packageName, 64)
+            iconPng = ClientApp.loadIconPng(packageManager, sbn.packageName, 96)
         )
 
         try {

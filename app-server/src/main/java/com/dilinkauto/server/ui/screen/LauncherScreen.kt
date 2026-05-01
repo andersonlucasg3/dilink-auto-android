@@ -1,13 +1,11 @@
 package com.dilinkauto.server.ui.screen
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.protocol.*
 import com.dilinkauto.server.R
+import com.dilinkauto.server.ServerApp
 import com.dilinkauto.server.service.CarConnectionService
 import com.dilinkauto.server.ui.theme.*
 import kotlin.math.max
@@ -239,18 +238,13 @@ fun AppGrid(
     val gridState = rememberLazyGridState()
 
     val filteredApps = remember(apps, searchQuery) {
-        val sorted = apps.sortedBy { it.appName.lowercase() }
+        val sorted = apps.sortedBy { it.appName.lowercase() }.distinctBy { it.packageName }
         if (searchQuery.isBlank()) sorted
         else sorted.filter { it.appName.contains(searchQuery, ignoreCase = true) }
     }
 
-    // Cache of decoded icons — shared across app tiles, populated lazily
-    val iconCache = remember { mutableMapOf<String, Bitmap?>() }
-
-    // Cleanup stale cache entries when app list changes
-    remember(apps) {
-        iconCache.keys.retainAll { key -> apps.any { it.packageName == key } }
-    }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val iconSizePx = with(density) { 64.dp.toPx().toInt() }
 
     Column(modifier = modifier) {
         Row(modifier = Modifier.weight(1f)) {
@@ -270,7 +264,7 @@ fun AppGrid(
                     items(filteredApps, key = { it.packageName }, contentType = { "app_tile" }) { app ->
                         AppTile(
                             app = app,
-                            iconCache = iconCache,
+                            iconSizePx = iconSizePx,
                             onClick = { onAppClick(app.packageName) },
                             service = service
                         )
@@ -278,14 +272,6 @@ fun AppGrid(
                 }
             }
 
-            GridScrollbar(
-                state = gridState,
-                totalItems = filteredApps.size,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(28.dp)
-                    .padding(vertical = 24.dp)
-            )
         }
 
         // Search bar
@@ -334,67 +320,11 @@ fun AppGrid(
     }
 }
 
-/**
- * Visual scrollbar — tracks position, no input handling.
- */
-@Composable
-private fun GridScrollbar(
-    state: LazyGridState,
-    totalItems: Int,
-    modifier: Modifier = Modifier
-) {
-    if (totalItems == 0) return
-
-    val needsScroll by remember { derivedStateOf { state.canScrollForward || state.canScrollBackward } }
-    if (!needsScroll) return
-
-    val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
-    val layoutInfo by remember { derivedStateOf { state.layoutInfo } }
-
-    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
-    if (viewportHeight <= 0) return
-
-    val itemsPerRow = remember(layoutInfo) {
-        val visible = layoutInfo.visibleItemsInfo
-        if (visible.isEmpty()) 1
-        else {
-            val firstOffset = visible.first().offset.y
-            visible.count { it.offset.y == firstOffset }
-        }
-    }
-
-    val totalRows = (totalItems + itemsPerRow - 1) / itemsPerRow
-    if (totalRows <= 1) return
-
-    val thumbHeight = max(40f, viewportHeight.toFloat() / totalRows.toFloat())
-    val maxThumbOffset = viewportHeight.toFloat() - thumbHeight
-    val thumbOffset = if (totalRows > 1) {
-        ((firstVisibleIndex / itemsPerRow).toFloat() / (totalRows - 1).toFloat()) * maxThumbOffset
-    } else 0f
-
-    Box(
-        modifier = modifier
-            .padding(end = 4.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF2A2F3A).copy(alpha = 0.3f))
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(with(androidx.compose.ui.platform.LocalDensity.current) { thumbHeight.toDp() })
-                .offset(y = with(androidx.compose.ui.platform.LocalDensity.current) { thumbOffset.toDp() })
-                .padding(horizontal = 4.dp, vertical = 2.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
-        )
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppTile(
     app: AppInfo,
-    iconCache: MutableMap<String, Bitmap?>,
+    iconSizePx: Int,
     onClick: () -> Unit,
     service: CarConnectionService
 ) {
@@ -412,123 +342,82 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
-    // Lazy-decode icon when tile first appears
-    var iconBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    // O(1) HashMap lookup — bitmap prepared by prepareAll() before grid renders.
+    // NOT wrapped in remember() so it re-reads after prepareAll() finishes + recompose.
+    val iconBitmap = ServerApp.iconCache.getPrepared(app.packageName)
 
-    LaunchedEffect(app.packageName) {
-        if (app.iconPng.isEmpty()) return@LaunchedEffect
-        val cached = iconCache[app.packageName]
-        if (cached != null) {
-            iconBitmap = cached.asImageBitmap()
-            return@LaunchedEffect
-        }
-        try {
-            val bmp = withContext(Dispatchers.IO) {
-                val opts = BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                    inSampleSize = 2
-                }
-                BitmapFactory.decodeByteArray(app.iconPng, 0, app.iconPng.size, opts)
-            }
-            if (bmp != null) {
-                iconCache[app.packageName] = bmp
-                iconBitmap = bmp.asImageBitmap()
-            }
-        } catch (e: Exception) {
-            Log.w("AppTile", "Decode failed for ${app.packageName}: ${e.message}")
-        }
-    }
-
-    // Context menu state
     var menuExpanded by remember { mutableStateOf(false) }
-    val shortcutsCache by service.shortcutsCache.collectAsState()
-    val shortcuts = shortcutsCache[app.packageName]
 
-    Box {
-        Column(
-            modifier = Modifier
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = {
-                        menuExpanded = true
-                        service.requestShortcuts(app.packageName)
-                    }
-                )
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (iconBitmap != null) {
-                Image(
-                    bitmap = iconBitmap!!,
-                    contentDescription = app.appName,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                )
-            } else {
-                Icon(
-                    categoryIcon,
-                    contentDescription = null,
-                    tint = categoryColor,
-                    modifier = Modifier.size(64.dp)
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = app.appName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+    Column(
+        modifier = Modifier
+            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }, onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        if (iconBitmap != null) {
+            Image(
+                bitmap = iconBitmap!!,
+                contentDescription = app.appName,
+                modifier = Modifier
+                    .size(64.dp)
+            )
+        } else {
+            Icon(
+                categoryIcon,
+                contentDescription = null,
+                tint = categoryColor,
+                modifier = Modifier.size(64.dp)
             )
         }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = app.appName,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
 
-        // Dropdown context menu
+    // Dropdown created lazily — only composed when a long-click opens it
+    if (menuExpanded) {
         DropdownMenu(
-            expanded = menuExpanded,
+            expanded = true,
             onDismissRequest = { menuExpanded = false },
             offset = DpOffset(8.dp, 0.dp),
-            modifier = Modifier.background(Color(0xFF1A1F2B))
+            modifier = Modifier
+                .widthIn(min = 220.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_uninstall), color = Color.White) },
+                text = {
+                    Text(stringResource(R.string.action_uninstall), color = Color.White, fontSize = 18.sp)
+                },
                 onClick = {
                     menuExpanded = false
                     service.requestUninstall(app.packageName)
                 },
-                leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color(0xFFEF5350)) }
+                leadingIcon = {
+                    Icon(Icons.Default.Delete, null, tint = Color(0xFFEF5350), modifier = Modifier.size(28.dp))
+                },
+                modifier = Modifier.padding(vertical = 4.dp)
             )
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_app_info), color = Color.White) },
+                text = {
+                    Text(stringResource(R.string.action_app_info), color = Color.White, fontSize = 18.sp)
+                },
                 onClick = {
                     menuExpanded = false
                     service.requestAppInfo(app.packageName)
                 },
-                leadingIcon = { Icon(Icons.Default.Info, null, tint = Color(0xFF64B5F6)) }
+                leadingIcon = {
+                    Icon(Icons.Default.Info, null, tint = Color(0xFF64B5F6), modifier = Modifier.size(28.dp))
+                },
+                modifier = Modifier.padding(vertical = 4.dp)
             )
-
-            // Shortcut items
-            if (shortcuts != null && shortcuts.isNotEmpty()) {
-                Divider(color = Color(0xFF2A2F3A), modifier = Modifier.padding(vertical = 4.dp))
-                shortcuts.forEach { shortcut ->
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                shortcut.shortLabel.ifEmpty { shortcut.longLabel },
-                                color = Color(0xFFB0BEC5),
-                                fontSize = 13.sp
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            service.executeShortcut(app.packageName, shortcut.id)
-                        },
-                        leadingIcon = { Icon(Icons.Default.OpenInNew, null, tint = Color(0xFF81C784)) }
-                    )
-                }
-            }
         }
     }
 }
