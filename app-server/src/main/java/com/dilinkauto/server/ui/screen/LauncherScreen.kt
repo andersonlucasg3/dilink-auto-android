@@ -435,7 +435,8 @@ fun AppTile(
                     onClick = onClick,
                     onLongClick = {
                         menuExpanded = true
-                        service.requestShortcuts(app.packageName)
+                        // TODO: Re-enable when app shortcuts are revisited (see AppTile footer)
+                        // service.requestShortcuts(app.packageName)
                     }
                 )
                 .padding(8.dp),
@@ -522,8 +523,16 @@ fun AppTile(
                 modifier = Modifier.padding(vertical = 4.dp)
             )
 
-            // Shortcut items
-            if (shortcuts != null && shortcuts.isNotEmpty()) {
+            // ── App shortcuts ──────────────────────────────────────────────
+            // TODO: Revisit app shortcuts in a future release.
+            // The phone-side infrastructure (query via VD server + APK XML
+            // fallback, shell-level execution) is in place but disabled here
+            // while label resolution and execution reliability are refined.
+            // To re-enable, change the constant below to true and update the
+            // UI to match any new protocol/cache contract.
+            // See: https://github.com/andersonlucasg3/dilink-auto-android/issues/57
+            val shortcutsEnabled = false
+            if (shortcutsEnabled && shortcuts != null && shortcuts.isNotEmpty()) {
                 Divider(
                     color = Color(0xFF2A2F3A),
                     modifier = Modifier.padding(vertical = 6.dp)
