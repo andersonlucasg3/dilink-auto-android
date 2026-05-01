@@ -7,10 +7,8 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.Canvas
-import android.os.Environment
 import com.dilinkauto.client.service.UpdateManager
 import java.io.ByteArrayOutputStream
-import java.io.File
 
 class ClientApp : Application() {
 
@@ -19,10 +17,6 @@ class ClientApp : Application() {
         createNotificationChannels()
         UpdateManager.init(this)
         ShizukuManager.init(this)
-        iconCache = AppIconCache(
-            packageManager,
-            File(Environment.getExternalStorageDirectory(), "DiLinkAuto")
-        )
     }
 
     private fun createNotificationChannels() {
@@ -49,9 +43,6 @@ class ClientApp : Application() {
     companion object {
         const val CHANNEL_SERVICE = "dilinkauto_service"
         const val CHANNEL_UPDATE = "dilinkauto_update"
-
-        lateinit var iconCache: AppIconCache
-            private set
 
         /** Loads an app icon at [size]×[size] and returns PNG bytes. No caching — phone only transmits. */
         fun loadIconPng(pm: PackageManager, packageName: String, size: Int): ByteArray {

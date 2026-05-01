@@ -1038,14 +1038,19 @@ class ConnectionService : Service() {
                     Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
                 ).map { info ->
                     val pkg = info.activityInfo.packageName
-                    val hash = ClientApp.iconCache.getIconHash(pkg, 96)
+                    // Use lastUpdateTime as a lightweight change indicator.
+                    // The car-side AppIconCache handles persistence, multi-size
+                    // resizing, and in-memory Bitmap caching.
+                    val hash = try {
+                        pm.getPackageInfo(pkg, 0).lastUpdateTime.toString()
+                    } catch (_: Exception) { "" }
                     // Only include icon data if the hash differs from last sent
                     val prevHash = lastSentIconHash[pkg]
                     val iconPng = if (hash.isNotEmpty() && hash == prevHash) {
                         ByteArray(0) // car can use its cached icon
                     } else {
                         lastSentIconHash[pkg] = hash
-                        ClientApp.iconCache.getOrLoad(pkg, 96)
+                        ClientApp.loadIconPng(pm, pkg, 192)
                     }
                     AppInfo(
                         pkg,
