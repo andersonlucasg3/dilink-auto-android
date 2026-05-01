@@ -1242,6 +1242,10 @@ class ConnectionService : Service() {
      * Reads an app's shortcuts.xml resource directly from its APK using AssetManager.
      * This bypasses the ShortcutService entirely, working on devices where
      * "cmd shortcut" is unavailable (e.g. Samsung One UI).
+     *
+     * Shortcut labels in XML can be literal strings or resource references
+     * (e.g. @string/wifi_label). We resolve references against the target
+     * app's resources so labels display correctly.
      */
     @android.annotation.SuppressLint("BlockedPrivateApi")
     private fun queryShortcutsFromApkXml(packageName: String): List<AppShortcut> {
@@ -1262,6 +1266,13 @@ class ConnectionService : Service() {
             if (resId == 0) return emptyList()
 
             val res = android.content.res.Resources(am, resources.displayMetrics, resources.configuration)
+
+            // Try to get the target app's context to resolve its string resources
+            val targetContext = try {
+                createPackageContext(packageName, Context.CONTEXT_RESTRICTED)
+            } catch (_: Exception) { null }
+            val targetRes = targetContext?.resources
+
             val parser = res.getXml(resId)
 
             var eventType = parser.eventType
@@ -1269,13 +1280,14 @@ class ConnectionService : Service() {
                 if (eventType == org.xmlpull.v1.XmlPullParser.START_TAG && parser.name == "shortcut") {
                     val id = parser.getAttributeValue(null, "shortcutId")
                         ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutId")
-                    val label = parser.getAttributeValue(null, "shortcutShortLabel")
+                    val rawLabel = parser.getAttributeValue(null, "shortcutShortLabel")
                         ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutShortLabel")
+                    val rawLongLabel = parser.getAttributeValue(null, "shortcutLongLabel")
+                        ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutLongLabel")
+
                     if (id != null) {
-                        val displayLabel = label ?: id
-                        val longLabel = parser.getAttributeValue(null, "shortcutLongLabel")
-                            ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutLongLabel")
-                            ?: displayLabel
+                        val displayLabel = resolveResourceRef(rawLabel, targetRes, ai) ?: id
+                        val longLabel = resolveResourceRef(rawLongLabel, targetRes, ai) ?: displayLabel
                         shortcuts.add(AppShortcut(id, displayLabel, longLabel))
                     }
                 }
@@ -1290,7 +1302,61 @@ class ConnectionService : Service() {
         }
     }
 
+    /**
+     * Resolves a possibly resource-referenced string value.
+     * e.g. "@string/wifi_label" → "Wi-Fi", "@2131234567" → "Settings", "Wi-Fi" → "Wi-Fi".
+     * Falls back to [targetRes] (the target package's resources), then to null.
+     */
+    private fun resolveResourceRef(value: String?, targetRes: android.content.res.Resources?, appInfo: android.content.pm.ApplicationInfo): String? {
+        if (value.isNullOrEmpty()) return null
+        // Already a literal string, not a reference
+        if (!value.startsWith("@")) return value
+
+        // Try target package resources first
+        if (targetRes != null) {
+            try {
+                val resId = parseResourceRef(value, targetRes, appInfo.packageName)
+                if (resId != 0) {
+                    val resolved = targetRes.getString(resId)
+                    if (resolved.isNotEmpty() && !resolved.startsWith("@")) return resolved
+                }
+            } catch (_: Exception) {}
+        }
+        // Couldn't resolve — return null so caller falls back to shortcutId
+        return null
+    }
+
+    /** Parse a resource reference like "@string/wifi_label" or "@2131234567" to a resource ID. */
+    private fun parseResourceRef(ref: String, res: android.content.res.Resources, pkg: String): Int {
+        // Strip leading @
+        val clean = ref.removePrefix("@")
+        // Format: "type/name" or just numeric ID
+        if (clean.startsWith("string/") || clean.startsWith("0x") || clean.all { it.isDigit() }) {
+            val (type, name) = if (clean.contains("/")) {
+                val parts = clean.split("/", limit = 2)
+                parts[0] to parts[1]
+            } else {
+                // Numeric ID — convert to hex and try direct lookup
+                val id = clean.toIntOrNull() ?: return 0
+                return id
+            }
+            return res.getIdentifier(name, type, pkg)
+        }
+        return 0
+    }
+
     private fun launchShortcut(packageName: String, shortcutId: String) {
+        // Route through VD server which runs as shell UID (2000) — bypasses
+        // LauncherApps permission restrictions that prevent normal apps from
+        // starting shortcuts for other packages.
+        val vd = vdClient
+        if (vd != null && vd.isConnected) {
+            vd.executeShortcut(packageName, shortcutId)
+            FileLog.i(TAG, "VD server executing shortcut $shortcutId for $packageName")
+            return
+        }
+
+        // Fallback: try LauncherApps API (may fail on restricted devices)
         try {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
                 ?: return
