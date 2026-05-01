@@ -695,15 +695,27 @@ class CarConnectionService : Service() {
             DataMsg.APP_LIST -> {
                 val apps = AppListMessage.decode(frame.payload).apps
                 _appList.value = apps
-                // Store source icons in car cache for multi-size access.
-                // Icons with empty payload but present hash were skipped by phone
-                // (unchanged) — the cache already has them from a prior transmission.
+                // Store source icons and pre-warm the cache for grid rendering.
+                // Without pre-warming, every AppTile triggers decode+resize on first
+                // scroll frame — 100+ simultaneous bitmap ops → GC pressure → crash.
+                var newIcons = 0
                 apps.forEach { app ->
                     if (app.iconPng.isNotEmpty()) {
                         ServerApp.iconCache.putSource(app.packageName, app.iconPng)
+                        newIcons++
                     }
                 }
-                carLogSend("App list received: ${apps.size} apps")
+                // Pre-warm at the grid icon size (64dp → px on 240dpi = 96px)
+                if (newIcons > 0) {
+                    scope.launch(Dispatchers.IO) {
+                        apps.forEach { app ->
+                            ServerApp.iconCache.get(app.packageName, 96)
+                        }
+                        carLogSend("App list: ${apps.size} apps (${newIcons} new icons pre-warmed)")
+                    }
+                } else {
+                    carLogSend("App list: ${apps.size} apps (all icons already cached)")
+                }
             }
             DataMsg.NOTIFICATION_POST -> {
                 val n = NotificationData.decode(frame.payload)
