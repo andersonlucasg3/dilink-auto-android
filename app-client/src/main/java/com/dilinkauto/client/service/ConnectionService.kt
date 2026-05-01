@@ -3,6 +3,7 @@ package com.dilinkauto.client.service
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
+import android.content.pm.PackageManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -1036,7 +1037,14 @@ class ConnectionService : Service() {
             try {
                 val apps = pm.queryIntentActivities(
                     Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
-                ).map { info ->
+                ).filter { info ->
+                    // Skip hidden apps (Xiaomi HyperOS, some custom ROMs disable
+                    // the launcher component without removing the package)
+                    val pkg = info.activityInfo.packageName
+                    val cn = android.content.ComponentName(pkg, info.activityInfo.name)
+                    val state = pm.getComponentEnabledSetting(cn)
+                    state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                }.map { info ->
                     val pkg = info.activityInfo.packageName
                     // Use lastUpdateTime as a lightweight change indicator.
                     // The car-side AppIconCache handles persistence, multi-size
