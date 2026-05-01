@@ -5,8 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.Canvas
 import com.dilinkauto.client.service.UpdateManager
 import java.io.ByteArrayOutputStream
 

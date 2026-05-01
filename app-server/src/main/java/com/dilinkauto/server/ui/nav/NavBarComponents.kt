@@ -137,7 +137,9 @@ fun RecentAppIcon(
                     onLongClick = {
                         if (app != null) {
                             menuExpanded = true
-                            service.requestShortcuts(app.packageName)
+                            // TODO: Re-enable when app shortcuts are revisited.
+                            // See LauncherScreen.AppTile and issue #57.
+                            // service.requestShortcuts(app.packageName)
                         }
                     }
                 )
@@ -239,8 +241,15 @@ fun RecentAppIcon(
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
 
-                // Shortcut items
-                if (shortcuts != null && shortcuts.isNotEmpty()) {
+                // ── App shortcuts ──────────────────────────────────────────
+                // TODO: Revisit in a future release. Infrastructure is in
+                // place (VD server query + APK XML fallback, shell execution)
+                // but disabled while label resolution and reliability are
+                // refined. To re-enable, flip the constant and sync with
+                // LauncherScreen.AppTile.
+                // See: https://github.com/andersonlucasg3/dilink-auto-android/issues/57
+                val shortcutsEnabled = false
+                if (shortcutsEnabled && shortcuts != null && shortcuts.isNotEmpty()) {
                     Divider(
                         color = Color(0xFF2A2F3A),
                         modifier = Modifier.padding(vertical = 4.dp)

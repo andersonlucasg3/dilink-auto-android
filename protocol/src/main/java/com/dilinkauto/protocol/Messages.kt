@@ -313,7 +313,8 @@ data class AppInfo(
     val packageName: String,
     val appName: String,
     val category: AppCategory,
-    val iconPng: ByteArray = ByteArray(0)
+    val iconPng: ByteArray = ByteArray(0),
+    val iconHash: String = ""
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -341,7 +342,8 @@ data class AppListMessage(val apps: List<AppInfo>) {
             val pkgBytes = app.packageName.toByteArray(Charsets.UTF_8)
             val nameBytes = app.appName.toByteArray(Charsets.UTF_8)
             val iconBytes = app.iconPng
-            ByteBuffer.allocate(2 + pkgBytes.size + 2 + nameBytes.size + 1 + 4 + iconBytes.size)
+            val hashBytes = app.iconHash.toByteArray(Charsets.UTF_8)
+            ByteBuffer.allocate(2 + pkgBytes.size + 2 + nameBytes.size + 1 + 4 + iconBytes.size + 2 + hashBytes.size)
                 .order(ByteOrder.BIG_ENDIAN)
                 .putShort(pkgBytes.size.toShort())
                 .apply { put(pkgBytes) }
@@ -350,6 +352,8 @@ data class AppListMessage(val apps: List<AppInfo>) {
                 .put(app.category.id)
                 .putInt(iconBytes.size)
                 .apply { put(iconBytes) }
+                .putShort(hashBytes.size.toShort())
+                .apply { put(hashBytes) }
                 .array()
         }
         val totalSize = 2 + appBuffers.sumOf { it.size }
@@ -377,11 +381,20 @@ data class AppListMessage(val apps: List<AppInfo>) {
                 val iconPng = if (iconSize > 0 && buf.remaining() >= iconSize) {
                     ByteArray(iconSize).also { buf.get(it) }
                 } else ByteArray(0)
+                val iconHash = if (buf.remaining() >= 2) {
+                    val hashLen = buf.getShort().toInt().coerceAtMost(buf.remaining())
+                    if (hashLen > 0) {
+                        val hashBytes = ByteArray(hashLen)
+                        buf.get(hashBytes)
+                        String(hashBytes, Charsets.UTF_8)
+                    } else ""
+                } else ""
                 AppInfo(
                     packageName = pkg,
                     appName = name,
                     category = category,
-                    iconPng = iconPng
+                    iconPng = iconPng,
+                    iconHash = iconHash
                 )
             }
             return AppListMessage(apps)

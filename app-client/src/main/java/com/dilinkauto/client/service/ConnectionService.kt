@@ -3,6 +3,7 @@ package com.dilinkauto.client.service
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
+import android.content.pm.PackageManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -1024,6 +1025,10 @@ class ConnectionService : Service() {
 
     // ─── App List ───
 
+    // Tracks the last icon hash sent per package — survives across reconnections
+    // within the same service lifetime to avoid re-sending unchanged icons.
+    private val lastSentIconHash = mutableMapOf<String, String>()
+
     private fun sendAppList() {
         val conn = controlConnection ?: return
         val pm = packageManager
@@ -1032,18 +1037,41 @@ class ConnectionService : Service() {
             try {
                 val apps = pm.queryIntentActivities(
                     Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
-                ).map { info ->
+                ).filter { info ->
+                    // Skip hidden apps (Xiaomi HyperOS, some custom ROMs disable
+                    // the launcher component without removing the package)
+                    val pkg = info.activityInfo.packageName
+                    val cn = android.content.ComponentName(pkg, info.activityInfo.name)
+                    val state = pm.getComponentEnabledSetting(cn)
+                    state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                }.map { info ->
+                    val pkg = info.activityInfo.packageName
+                    // Use lastUpdateTime as a lightweight change indicator.
+                    // The car-side AppIconCache handles persistence, multi-size
+                    // resizing, and in-memory Bitmap caching.
+                    val hash = try {
+                        pm.getPackageInfo(pkg, 0).lastUpdateTime.toString()
+                    } catch (_: Exception) { "" }
+                    // Only include icon data if the hash differs from last sent
+                    val prevHash = lastSentIconHash[pkg]
+                    val iconPng = if (hash.isNotEmpty() && hash == prevHash) {
+                        ByteArray(0) // car can use its cached icon
+                    } else {
+                        lastSentIconHash[pkg] = hash
+                        ClientApp.loadIconPng(pm, pkg, 192)
+                    }
                     AppInfo(
-                        info.activityInfo.packageName,
+                        pkg,
                         info.loadLabel(pm).toString(),
-                        categorizeApp(info.activityInfo.packageName),
-                        ClientApp.loadIconPng(pm, info.activityInfo.packageName, 192)
+                        categorizeApp(pkg),
+                        iconPng,
+                        hash
                     )
                 }.sortedBy { it.category.id }
 
                 conn.sendData(DataMsg.APP_LIST, AppListMessage(apps).encode())
-                val commApps = apps.filter { it.category == AppCategory.COMMUNICATION }.map { it.packageName }
-                FileLog.i(TAG, "App list sent: ${apps.size} apps (comm=${commApps.size}: ${commApps.joinToString()})")
+                val skipped = apps.count { it.iconPng.isEmpty() }
+                FileLog.i(TAG, "App list sent: ${apps.size} apps (${skipped} icons skipped/unchanged)")
             } catch (e: Exception) {
                 FileLog.e(TAG, "Failed to send app list", e)
             }
@@ -1227,6 +1255,10 @@ class ConnectionService : Service() {
      * Reads an app's shortcuts.xml resource directly from its APK using AssetManager.
      * This bypasses the ShortcutService entirely, working on devices where
      * "cmd shortcut" is unavailable (e.g. Samsung One UI).
+     *
+     * Shortcut labels in XML can be literal strings or resource references
+     * (e.g. @string/wifi_label). We resolve references against the target
+     * app's resources so labels display correctly.
      */
     @android.annotation.SuppressLint("BlockedPrivateApi")
     private fun queryShortcutsFromApkXml(packageName: String): List<AppShortcut> {
@@ -1247,6 +1279,13 @@ class ConnectionService : Service() {
             if (resId == 0) return emptyList()
 
             val res = android.content.res.Resources(am, resources.displayMetrics, resources.configuration)
+
+            // Try to get the target app's context to resolve its string resources
+            val targetContext = try {
+                createPackageContext(packageName, Context.CONTEXT_RESTRICTED)
+            } catch (_: Exception) { null }
+            val targetRes = targetContext?.resources
+
             val parser = res.getXml(resId)
 
             var eventType = parser.eventType
@@ -1254,13 +1293,14 @@ class ConnectionService : Service() {
                 if (eventType == org.xmlpull.v1.XmlPullParser.START_TAG && parser.name == "shortcut") {
                     val id = parser.getAttributeValue(null, "shortcutId")
                         ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutId")
-                    val label = parser.getAttributeValue(null, "shortcutShortLabel")
+                    val rawLabel = parser.getAttributeValue(null, "shortcutShortLabel")
                         ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutShortLabel")
+                    val rawLongLabel = parser.getAttributeValue(null, "shortcutLongLabel")
+                        ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutLongLabel")
+
                     if (id != null) {
-                        val displayLabel = label ?: id
-                        val longLabel = parser.getAttributeValue(null, "shortcutLongLabel")
-                            ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutLongLabel")
-                            ?: displayLabel
+                        val displayLabel = resolveResourceRef(rawLabel, targetRes, ai) ?: id
+                        val longLabel = resolveResourceRef(rawLongLabel, targetRes, ai) ?: displayLabel
                         shortcuts.add(AppShortcut(id, displayLabel, longLabel))
                     }
                 }
@@ -1275,7 +1315,61 @@ class ConnectionService : Service() {
         }
     }
 
+    /**
+     * Resolves a possibly resource-referenced string value.
+     * e.g. "@string/wifi_label" → "Wi-Fi", "@2131234567" → "Settings", "Wi-Fi" → "Wi-Fi".
+     * Falls back to [targetRes] (the target package's resources), then to null.
+     */
+    private fun resolveResourceRef(value: String?, targetRes: android.content.res.Resources?, appInfo: android.content.pm.ApplicationInfo): String? {
+        if (value.isNullOrEmpty()) return null
+        // Already a literal string, not a reference
+        if (!value.startsWith("@")) return value
+
+        // Try target package resources first
+        if (targetRes != null) {
+            try {
+                val resId = parseResourceRef(value, targetRes, appInfo.packageName)
+                if (resId != 0) {
+                    val resolved = targetRes.getString(resId)
+                    if (resolved.isNotEmpty() && !resolved.startsWith("@")) return resolved
+                }
+            } catch (_: Exception) {}
+        }
+        // Couldn't resolve — return null so caller falls back to shortcutId
+        return null
+    }
+
+    /** Parse a resource reference like "@string/wifi_label" or "@2131234567" to a resource ID. */
+    private fun parseResourceRef(ref: String, res: android.content.res.Resources, pkg: String): Int {
+        // Strip leading @
+        val clean = ref.removePrefix("@")
+        // Format: "type/name" or just numeric ID
+        if (clean.startsWith("string/") || clean.startsWith("0x") || clean.all { it.isDigit() }) {
+            val (type, name) = if (clean.contains("/")) {
+                val parts = clean.split("/", limit = 2)
+                parts[0] to parts[1]
+            } else {
+                // Numeric ID — convert to hex and try direct lookup
+                val id = clean.toIntOrNull() ?: return 0
+                return id
+            }
+            return res.getIdentifier(name, type, pkg)
+        }
+        return 0
+    }
+
     private fun launchShortcut(packageName: String, shortcutId: String) {
+        // Route through VD server which runs as shell UID (2000) — bypasses
+        // LauncherApps permission restrictions that prevent normal apps from
+        // starting shortcuts for other packages.
+        val vd = vdClient
+        if (vd != null && vd.isConnected) {
+            vd.executeShortcut(packageName, shortcutId)
+            FileLog.i(TAG, "VD server executing shortcut $shortcutId for $packageName")
+            return
+        }
+
+        // Fallback: try LauncherApps API (may fail on restricted devices)
         try {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
                 ?: return
@@ -1400,6 +1494,7 @@ class ConnectionService : Service() {
         connectionLoopJob?.cancel()
         connectionLoopJob = null
         cleanupSession()
+        lastSentIconHash.clear()
         serviceRegistration?.unregister()
         serviceRegistration = null
         _serviceState.value = State.IDLE

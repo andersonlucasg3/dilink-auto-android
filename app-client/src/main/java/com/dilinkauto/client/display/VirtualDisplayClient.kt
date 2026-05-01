@@ -341,6 +341,22 @@ class VirtualDisplayClient(
     }
 
     /**
+     * Execute a shortcut via the VD server (which has shell access).
+     * Uses "am start" with shortcut intents — bypasses LauncherApps permission checks.
+     */
+    fun executeShortcut(packageName: String, shortcutId: String) {
+        sendCommand { buf ->
+            val pkgBytes = packageName.toByteArray(Charsets.UTF_8)
+            val idBytes = shortcutId.toByteArray(Charsets.UTF_8)
+            buf.put(CMD_EXECUTE_SHORTCUT.toByte())
+            buf.putInt(pkgBytes.size)
+            buf.put(pkgBytes)
+            buf.putInt(idBytes.size)
+            buf.put(idBytes)
+        }
+    }
+
+    /**
      * Send a raw touch event for immediate MotionEvent injection on the VD.
      * Synchronous write — avoids coroutine dispatch latency for touch events.
      */
@@ -484,5 +500,6 @@ class VirtualDisplayClient(
         private const val CMD_UNINSTALL = 0x23
         private const val CMD_OPEN_APP_INFO = 0x24
         private const val CMD_QUERY_SHORTCUTS = 0x25
+        private const val CMD_EXECUTE_SHORTCUT = 0x26
     }
 }

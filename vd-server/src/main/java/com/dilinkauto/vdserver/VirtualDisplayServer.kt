@@ -102,6 +102,7 @@ class VirtualDisplayServer(
         private const val CMD_UNINSTALL = 0x23
         private const val CMD_OPEN_APP_INFO = 0x24
         private const val CMD_QUERY_SHORTCUTS = 0x25
+        private const val CMD_EXECUTE_SHORTCUT = 0x26
         private const val CMD_STOP = 0xFF
 
         private const val BITRATE = 8_000_000
@@ -285,7 +286,7 @@ class VirtualDisplayServer(
         while (running) {
             val buf = writeQueue.poll()
             if (buf == null) {
-                LockSupport.parkNanos(frameIntervalMs * 1_000_000L)
+                LockSupport.park() // unparked by enqueueWrite
                 continue
             }
             writeQueueDepth--
@@ -507,6 +508,35 @@ class VirtualDisplayServer(
                         writeQueueDepth++
                         val wt = writerThread
                         if (wt != null) LockSupport.unpark(wt)
+                    }
+                    CMD_EXECUTE_SHORTCUT -> {
+                        val pkgLen = reader.readIntBlocking()
+                        val pkgBuf = ByteArray(pkgLen)
+                        reader.readFullyBlocking(pkgBuf, 0, pkgLen)
+                        val pkg = String(pkgBuf)
+                        val idLen = reader.readIntBlocking()
+                        val idBuf = ByteArray(idLen)
+                        reader.readFullyBlocking(idBuf, 0, idLen)
+                        val shortcutId = String(idBuf)
+                        log("Executing shortcut: $shortcutId for $pkg")
+                        // Try 'cmd shortcut execute' first — has full access under shell UID
+                        var result = execShellFullOutput(
+                            "cmd shortcut execute -s $pkg $shortcutId $displayId 2>&1"
+                        ) ?: ""
+                        log("cmd shortcut execute result: ${result.take(200)}")
+                        if (result.contains("Error") || result.contains("Unknown cmd")) {
+                            // Fall back to am start with the shortcut intent
+                            log("cmd shortcut failed, trying am start")
+                            result = execShellFullOutput(
+                                "am start --display $displayId " +
+                                "-a android.intent.action.MAIN " +
+                                "-c android.intent.category.LAUNCHER " +
+                                "-f 0x10200000 " +
+                                "--es shortcut_id \"$shortcutId\" " +
+                                "$pkg 2>&1"
+                            ) ?: ""
+                            log("am start result: ${result.take(200)}")
+                        }
                     }
                     CMD_STOP -> running = false
                     else -> err("Unknown command: 0x${cmd.toString(16)}")
