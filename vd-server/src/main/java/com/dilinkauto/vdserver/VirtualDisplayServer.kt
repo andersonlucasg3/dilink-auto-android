@@ -286,7 +286,7 @@ class VirtualDisplayServer(
         while (running) {
             val buf = writeQueue.poll()
             if (buf == null) {
-                LockSupport.parkNanos(frameIntervalMs * 1_000_000L)
+                LockSupport.park() // unparked by enqueueWrite
                 continue
             }
             writeQueueDepth--

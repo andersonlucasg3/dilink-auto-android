@@ -21,7 +21,7 @@ import kotlin.Throws
 class NioReader(
     private val channel: SocketChannel,
     initialCapacity: Int = DEFAULT_CAPACITY,
-    private val selectTimeoutMs: Long = VideoConfig.FRAME_INTERVAL_MS
+    private val selectTimeoutMs: Long = 500 // reduced from 16ms — select() wakes on data anyway
 ) {
 
     init {
