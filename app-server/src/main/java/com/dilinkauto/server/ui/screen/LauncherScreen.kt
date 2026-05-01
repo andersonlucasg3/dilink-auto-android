@@ -238,7 +238,7 @@ fun AppGrid(
     val gridState = rememberLazyGridState()
 
     val filteredApps = remember(apps, searchQuery) {
-        val sorted = apps.sortedBy { it.appName.lowercase() }
+        val sorted = apps.sortedBy { it.appName.lowercase() }.distinctBy { it.packageName }
         if (searchQuery.isBlank()) sorted
         else sorted.filter { it.appName.contains(searchQuery, ignoreCase = true) }
     }
