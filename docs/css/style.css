@@ -226,6 +226,33 @@ section { padding: 64px 0; }
 .support-desc { font-size: 15px; color: var(--text-muted); max-width: 560px; margin: 0 auto 24px; }
 .support-actions { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
 
+/* Floating support card */
+.floating-support {
+  position: fixed; bottom: 20px; right: 20px; z-index: 200;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 18px;
+  display: flex; align-items: center; gap: 16px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  backdrop-filter: blur(12px);
+  max-width: calc(100vw - 40px);
+}
+.floating-support-label {
+  font-size: 13px; font-weight: 600; color: var(--text-muted);
+  white-space: nowrap;
+}
+.floating-support-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.floating-support .btn { font-size: 13px; padding: 8px 14px; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .floating-support {
+    left: 20px; right: 20px; bottom: 12px;
+    justify-content: center; gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+  .floating-support-actions { justify-content: center; }
+}
+
 /* Tested */
 .tested { border-top: 1px solid var(--border); }
 .tested-grid {
