@@ -245,7 +245,6 @@ fun AppGrid(
 
     val density = androidx.compose.ui.platform.LocalDensity.current
     val iconSizePx = with(density) { 64.dp.toPx().toInt() }
-    LaunchedEffect(Unit) { Log.i("AppGrid", "iconSizePx=$iconSizePx density=${density.density}") }
 
     Column(modifier = modifier) {
         Row(modifier = Modifier.weight(1f)) {
@@ -273,14 +272,6 @@ fun AppGrid(
                 }
             }
 
-            GridScrollbar(
-                state = gridState,
-                totalItems = filteredApps.size,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(28.dp)
-                    .padding(vertical = 24.dp)
-            )
         }
 
         // Search bar
@@ -329,62 +320,6 @@ fun AppGrid(
     }
 }
 
-/**
- * Visual scrollbar — tracks position, no input handling.
- */
-@Composable
-private fun GridScrollbar(
-    state: LazyGridState,
-    totalItems: Int,
-    modifier: Modifier = Modifier
-) {
-    if (totalItems == 0) return
-
-    val needsScroll by remember { derivedStateOf { state.canScrollForward || state.canScrollBackward } }
-    if (!needsScroll) return
-
-    val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
-    val layoutInfo by remember { derivedStateOf { state.layoutInfo } }
-
-    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
-    if (viewportHeight <= 0) return
-
-    val itemsPerRow = remember(layoutInfo) {
-        val visible = layoutInfo.visibleItemsInfo
-        if (visible.isEmpty()) 1
-        else {
-            val firstOffset = visible.first().offset.y
-            visible.count { it.offset.y == firstOffset }
-        }
-    }
-
-    val totalRows = (totalItems + itemsPerRow - 1) / itemsPerRow
-    if (totalRows <= 1) return
-
-    val thumbHeight = max(40f, viewportHeight.toFloat() / totalRows.toFloat())
-    val maxThumbOffset = viewportHeight.toFloat() - thumbHeight
-    val thumbOffset = if (totalRows > 1) {
-        ((firstVisibleIndex / itemsPerRow).toFloat() / (totalRows - 1).toFloat()) * maxThumbOffset
-    } else 0f
-
-    Box(
-        modifier = modifier
-            .padding(end = 4.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF2A2F3A).copy(alpha = 0.3f))
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(with(androidx.compose.ui.platform.LocalDensity.current) { thumbHeight.toDp() })
-                .offset(y = with(androidx.compose.ui.platform.LocalDensity.current) { thumbOffset.toDp() })
-                .padding(horizontal = 4.dp, vertical = 2.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
-        )
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppTile(
@@ -407,22 +342,15 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
-    // Re-read when preparedVersion changes (after prepareAll() finishes).
-    // Without the version key, remember would cache the initial null forever.
-    val preparedVersion = ServerApp.iconCache.preparedVersion
-    val iconBitmap = remember(app.packageName, preparedVersion) {
-        ServerApp.iconCache.getPrepared(app.packageName)
-    }
+    // O(1) HashMap lookup — bitmap prepared by prepareAll() before grid renders.
+    // NOT wrapped in remember() so it re-reads after prepareAll() finishes + recompose.
+    val iconBitmap = ServerApp.iconCache.getPrepared(app.packageName)
 
-    // Context menu state — lazy so the DropdownMenu tree is only created on demand
     var menuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = { menuExpanded = true }
-            )
+            .clickable(onClick = onClick)
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
