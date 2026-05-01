@@ -6,6 +6,7 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.SocketChannel
+import java.util.concurrent.locks.LockSupport
 
 /**
  * Binary frame codec for the DiLink-Auto protocol.
@@ -203,7 +204,7 @@ object FrameCodec {
                 if (System.nanoTime() > deadline) {
                     throw IOException("Write timed out: ${buf.remaining()} bytes remaining, send buffer full for 5s")
                 }
-                Thread.yield()
+                LockSupport.parkNanos(100_000) // 100us — prevents tight spin on full buffer
             }
         }
     }

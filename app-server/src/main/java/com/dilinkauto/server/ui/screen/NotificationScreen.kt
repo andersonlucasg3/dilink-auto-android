@@ -23,13 +23,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dilinkauto.protocol.NotificationData
 import com.dilinkauto.server.R
+import com.dilinkauto.server.ServerApp
 import com.dilinkauto.server.service.CarConnectionService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Notification list content — header with "Clear All", scrollable cards
@@ -128,7 +131,7 @@ fun NotificationCard(
                 verticalAlignment = Alignment.Top
             ) {
                 // App icon or fallback
-                AppIcon(iconPng = notification.iconPng, modifier = Modifier.size(40.dp))
+                AppIcon(iconPng = notification.iconPng, packageName = notification.packageName, modifier = Modifier.size(40.dp))
 
                 Spacer(Modifier.width(12.dp))
 
@@ -204,18 +207,31 @@ fun NotificationCard(
 }
 
 @Composable
-private fun AppIcon(iconPng: ByteArray, modifier: Modifier = Modifier) {
-    val bitmap = remember(iconPng) {
-        if (iconPng.isNotEmpty()) {
-            try {
-                android.graphics.BitmapFactory.decodeByteArray(iconPng, 0, iconPng.size)
-            } catch (_: Exception) { null }
-        } else null
+private fun AppIcon(iconPng: ByteArray, packageName: String, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    val iconSizePx = with(density) { 40.dp.toPx().toInt() }
+    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+
+    LaunchedEffect(packageName, iconSizePx) {
+        withContext(Dispatchers.IO) {
+            // Try car cache first (has high-res source from app list)
+            val cached = ServerApp.iconCache.get(packageName, iconSizePx)
+            if (cached != null) {
+                bitmap = cached
+                return@withContext
+            }
+            // Fall back to notification's own icon data
+            if (iconPng.isNotEmpty()) {
+                try {
+                    bitmap = android.graphics.BitmapFactory.decodeByteArray(iconPng, 0, iconPng.size)
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     if (bitmap != null) {
         Image(
-            painter = BitmapPainter(bitmap.asImageBitmap()),
+            painter = BitmapPainter(bitmap!!.asImageBitmap()),
             contentDescription = null,
             modifier = modifier.clip(RoundedCornerShape(8.dp))
         )

@@ -55,6 +55,8 @@ object DataMsg {
     const val NOTIFICATION_CLEAR_ALL: Byte = 0x05
     /** Phone → Car: an app was uninstalled (payload: package name UTF-8) */
     const val APP_UNINSTALLED: Byte = 0x06
+    /** Phone → Car: app info data (payload: AppInfoDataMessage) */
+    const val APP_INFO_DATA: Byte = 0x07
     const val MEDIA_METADATA: Byte = 0x10
     const val MEDIA_PLAYBACK_STATE: Byte = 0x11
     const val MEDIA_ACTION: Byte = 0x12

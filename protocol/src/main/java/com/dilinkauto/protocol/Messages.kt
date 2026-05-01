@@ -313,7 +313,8 @@ data class AppInfo(
     val packageName: String,
     val appName: String,
     val category: AppCategory,
-    val iconPng: ByteArray = ByteArray(0)
+    val iconPng: ByteArray = ByteArray(0),
+    val iconHash: String = ""
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -341,7 +342,8 @@ data class AppListMessage(val apps: List<AppInfo>) {
             val pkgBytes = app.packageName.toByteArray(Charsets.UTF_8)
             val nameBytes = app.appName.toByteArray(Charsets.UTF_8)
             val iconBytes = app.iconPng
-            ByteBuffer.allocate(2 + pkgBytes.size + 2 + nameBytes.size + 1 + 4 + iconBytes.size)
+            val hashBytes = app.iconHash.toByteArray(Charsets.UTF_8)
+            ByteBuffer.allocate(2 + pkgBytes.size + 2 + nameBytes.size + 1 + 4 + iconBytes.size + 2 + hashBytes.size)
                 .order(ByteOrder.BIG_ENDIAN)
                 .putShort(pkgBytes.size.toShort())
                 .apply { put(pkgBytes) }
@@ -350,6 +352,8 @@ data class AppListMessage(val apps: List<AppInfo>) {
                 .put(app.category.id)
                 .putInt(iconBytes.size)
                 .apply { put(iconBytes) }
+                .putShort(hashBytes.size.toShort())
+                .apply { put(hashBytes) }
                 .array()
         }
         val totalSize = 2 + appBuffers.sumOf { it.size }
@@ -377,11 +381,20 @@ data class AppListMessage(val apps: List<AppInfo>) {
                 val iconPng = if (iconSize > 0 && buf.remaining() >= iconSize) {
                     ByteArray(iconSize).also { buf.get(it) }
                 } else ByteArray(0)
+                val iconHash = if (buf.remaining() >= 2) {
+                    val hashLen = buf.getShort().toInt().coerceAtMost(buf.remaining())
+                    if (hashLen > 0) {
+                        val hashBytes = ByteArray(hashLen)
+                        buf.get(hashBytes)
+                        String(hashBytes, Charsets.UTF_8)
+                    } else ""
+                } else ""
                 AppInfo(
                     packageName = pkg,
                     appName = name,
                     category = category,
-                    iconPng = iconPng
+                    iconPng = iconPng,
+                    iconHash = iconHash
                 )
             }
             return AppListMessage(apps)
@@ -507,6 +520,52 @@ data class AppUninstalledMessage(val packageName: String) {
 
     companion object {
         fun decode(data: ByteArray) = AppUninstalledMessage(String(data, Charsets.UTF_8))
+    }
+}
+
+/** Phone → Car: app info data for display on car screen (payload in DataMsg.APP_INFO_DATA) */
+data class AppInfoDataMessage(
+    val packageName: String,
+    val appName: String,
+    val versionName: String,
+    val versionCode: Long,
+    val installTime: Long,
+    val targetSdk: Int
+) {
+    fun encode(): ByteArray {
+        val pkgBytes = packageName.toByteArray(Charsets.UTF_8)
+        val nameBytes = appName.toByteArray(Charsets.UTF_8)
+        val verBytes = versionName.toByteArray(Charsets.UTF_8)
+        val buf = java.nio.ByteBuffer.allocate(
+            2 + pkgBytes.size + 2 + nameBytes.size + 2 + verBytes.size + 8 + 8 + 4
+        )
+        buf.putShort(pkgBytes.size.toShort()); buf.put(pkgBytes)
+        buf.putShort(nameBytes.size.toShort()); buf.put(nameBytes)
+        buf.putShort(verBytes.size.toShort()); buf.put(verBytes)
+        buf.putLong(versionCode)
+        buf.putLong(installTime)
+        buf.putInt(targetSdk)
+        return buf.array()
+    }
+
+    companion object {
+        fun decode(data: ByteArray): AppInfoDataMessage {
+            val buf = java.nio.ByteBuffer.wrap(data)
+            fun readStr(): String {
+                val len = buf.short.toInt() and 0xFFFF
+                val bytes = ByteArray(len)
+                buf.get(bytes)
+                return String(bytes, Charsets.UTF_8)
+            }
+            return AppInfoDataMessage(
+                packageName = readStr(),
+                appName = readStr(),
+                versionName = readStr(),
+                versionCode = buf.long,
+                installTime = buf.long,
+                targetSdk = buf.int
+            )
+        }
     }
 }
 
