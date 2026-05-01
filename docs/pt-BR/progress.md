@@ -1,9 +1,24 @@
 # Rastreador de Progresso
 
-Versao atual: **v0.16.0** (estavel)
-Ultima atualizacao: 2026-04-29
+Versao atual: **v0.17.0-dev-02** (pre-release)
+Ultima atualizacao: 2026-05-01
 
 ## Marcos
+
+### v0.17.0-dev-02 (2026-05-01)
+
+- **Correcao de superaquecimento do telefone**: Eliminados padroes de espera ocupada da CPU no pipeline de streaming que causavam superaquecimento do telefone. Substituidos busy-waits `delay(1)` por mecanismos adequados baseados em blocking/selector.
+- **AppIconCache movido para o carro**: Cache de icones do lado do carro persiste PNGs fonte (192x192) no disco. `prepareAll()` decodifica+redimensiona todos os icones em thread de fundo antes da grade aparecer; `getPrepared()` e busca O(1) ConcurrentHashMap sem I/O durante a rolagem. Eliminada a decodificacao por tile e crash na rolagem rapida.
+- **AppTile simplificado**: Removido StateFlow collect por tile, DropdownMenu lazy e efeitos click ripple. Tiles leves com clickable em vez de combinedClickable para o toque principal.
+- **Deduplicacao da grade de apps**: Corrigido crash do LazyGrid ao deduplicar itens por packageName.
+
+### v0.17.0-dev-01 (2026-04-30)
+
+- **Dispensa individual de notificacoes e Limpar Tudo**: A tela de notificacoes do carro agora tem botoes de dispensar por item com animacoes slide-out e um botao "Limpar Tudo" no cabecalho. Novas mensagens de protocolo: `NOTIFICATION_CLEAR` (0x04) e `NOTIFICATION_CLEAR_ALL` (0x05) no canal de dados. Icones por item do payload `iconPng` do celular.
+- **Acoes de contexto de apps**: Toque longo nos tiles de apps (launcher) e apps recentes da barra de nav mostra menu suspenso com Desinstalar e Info do App. Propagacao de desinstalacao via `APP_UNINSTALL` (0x1B) / `APP_UNINSTALLED` (0x06). Info do App exibe dialogo do lado do carro com metadados `APP_INFO_DATA` (0x07) do celular. Acoes do menu de contexto passam pelo servidor VD para acesso em nivel shell.
+- **Infraestrutura de atalhos de apps** (desativada na UI): Mensagens de protocolo `APP_SHORTCUTS` (0x18) / `APP_SHORTCUTS_LIST` (0x19) / `APP_SHORTCUT_ACTION` (0x1A) com consulta ao servidor VD + fallback APK XML. Desativada enquanto a resolucao de rotulos e refinada (issue #57).
+- **Correcao do botao voltar**: GO_BACK agora fecha atividades uma por uma antes de retornar ao menu inicial, usando rastreamento de pilha adequado e mensagens `FOCUSED_APP` (0x16).
+- **DPI Samsung DeX / Modo Desktop** (revertido): Implementacao inicial usando deteccao `UiModeManager.currentModeType` e 213dpi foi revertida no dev-02. Substituida por abordagem de remocao de flag no nivel VD.
 
 ### v0.16.0 (2026-04-29)
 
