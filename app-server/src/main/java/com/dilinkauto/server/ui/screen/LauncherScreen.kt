@@ -429,56 +429,50 @@ fun AppTile(
         }
     }
 
-    // Context menu state
+    // Context menu state — lazy so the DropdownMenu tree is only created on demand
     var menuExpanded by remember { mutableStateOf(false) }
-    val shortcutsCache by service.shortcutsCache.collectAsState()
-    val shortcuts = shortcutsCache[app.packageName]
 
-    Box {
-        Column(
-            modifier = Modifier
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = {
-                        menuExpanded = true
-                        // TODO: Re-enable when app shortcuts are revisited (see AppTile footer)
-                        // service.requestShortcuts(app.packageName)
-                    }
-                )
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (iconBitmap != null) {
-                Image(
-                    bitmap = iconBitmap!!,
-                    contentDescription = app.appName,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                )
-            } else {
-                Icon(
-                    categoryIcon,
-                    contentDescription = null,
-                    tint = categoryColor,
-                    modifier = Modifier.size(64.dp)
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = app.appName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+    Column(
+        modifier = Modifier
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { menuExpanded = true }
+            )
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        if (iconBitmap != null) {
+            Image(
+                bitmap = iconBitmap!!,
+                contentDescription = app.appName,
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
+        } else {
+            Icon(
+                categoryIcon,
+                contentDescription = null,
+                tint = categoryColor,
+                modifier = Modifier.size(64.dp)
             )
         }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = app.appName,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
 
-        // Dropdown context menu — sized generously for car touchscreen interaction
+    // Dropdown created lazily — only composed when a long-click opens it
+    if (menuExpanded) {
         DropdownMenu(
-            expanded = menuExpanded,
+            expanded = true,
             onDismissRequest = { menuExpanded = false },
             offset = DpOffset(8.dp, 0.dp),
             modifier = Modifier
@@ -488,85 +482,30 @@ fun AppTile(
         ) {
             DropdownMenuItem(
                 text = {
-                    Text(
-                        stringResource(R.string.action_uninstall),
-                        color = Color.White,
-                        fontSize = 18.sp
-                    )
+                    Text(stringResource(R.string.action_uninstall), color = Color.White, fontSize = 18.sp)
                 },
                 onClick = {
                     menuExpanded = false
                     service.requestUninstall(app.packageName)
                 },
                 leadingIcon = {
-                    Icon(
-                        Icons.Default.Delete, null,
-                        tint = Color(0xFFEF5350),
-                        modifier = Modifier.size(28.dp)
-                    )
+                    Icon(Icons.Default.Delete, null, tint = Color(0xFFEF5350), modifier = Modifier.size(28.dp))
                 },
                 modifier = Modifier.padding(vertical = 4.dp)
             )
             DropdownMenuItem(
                 text = {
-                    Text(
-                        stringResource(R.string.action_app_info),
-                        color = Color.White,
-                        fontSize = 18.sp
-                    )
+                    Text(stringResource(R.string.action_app_info), color = Color.White, fontSize = 18.sp)
                 },
                 onClick = {
                     menuExpanded = false
                     service.requestAppInfo(app.packageName)
                 },
                 leadingIcon = {
-                    Icon(
-                        Icons.Default.Info, null,
-                        tint = Color(0xFF64B5F6),
-                        modifier = Modifier.size(28.dp)
-                    )
+                    Icon(Icons.Default.Info, null, tint = Color(0xFF64B5F6), modifier = Modifier.size(28.dp))
                 },
                 modifier = Modifier.padding(vertical = 4.dp)
             )
-
-            // ── App shortcuts ──────────────────────────────────────────────
-            // TODO: Revisit app shortcuts in a future release.
-            // The phone-side infrastructure (query via VD server + APK XML
-            // fallback, shell-level execution) is in place but disabled here
-            // while label resolution and execution reliability are refined.
-            // To re-enable, change the constant below to true and update the
-            // UI to match any new protocol/cache contract.
-            // See: https://github.com/andersonlucasg3/dilink-auto-android/issues/57
-            val shortcutsEnabled = false
-            if (shortcutsEnabled && shortcuts != null && shortcuts.isNotEmpty()) {
-                Divider(
-                    color = Color(0xFF2A2F3A),
-                    modifier = Modifier.padding(vertical = 6.dp)
-                )
-                shortcuts.forEach { shortcut ->
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                shortcut.shortLabel.ifEmpty { shortcut.longLabel },
-                                color = Color(0xFFB0BEC5),
-                                fontSize = 16.sp
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            service.executeShortcut(app.packageName, shortcut.id)
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.OpenInNew, null,
-                                tint = Color(0xFF81C784),
-                                modifier = Modifier.size(28.dp)
-                            )
-                        },
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                }
-            }
         }
     }
 }
