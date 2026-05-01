@@ -91,6 +91,15 @@ class AppIconCache(private val cacheDir: File) {
         } catch (_: Exception) { null }
     }
 
+    /**
+     * Synchronous in-memory lookup only — no disk I/O, no decode.
+     * Returns null if the icon hasn't been pre-warmed (caller should fall back
+     * to [get] which does full decode+resize).
+     */
+    fun peek(packageName: String, sizePx: Int): Bitmap? {
+        return resizedCache["${packageName}_$sizePx"]
+    }
+
     /** Remove all cached data for a package (e.g. when app is uninstalled). */
     fun evict(packageName: String) {
         sourceCache.remove(packageName)

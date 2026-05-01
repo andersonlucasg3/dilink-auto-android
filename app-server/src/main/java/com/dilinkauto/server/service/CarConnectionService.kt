@@ -705,13 +705,15 @@ class CarConnectionService : Service() {
                         newIcons++
                     }
                 }
-                // Pre-warm at the grid icon size (64dp → px on 240dpi = 96px)
+                // Pre-warm at the grid icon size in actual device pixels
                 if (newIcons > 0) {
                     scope.launch(Dispatchers.IO) {
+                        val density = android.content.res.Resources.getSystem().displayMetrics.density
+                        val gridIconPx = (64 * density).toInt()
                         apps.forEach { app ->
-                            ServerApp.iconCache.get(app.packageName, 96)
+                            ServerApp.iconCache.get(app.packageName, gridIconPx)
                         }
-                        carLogSend("App list: ${apps.size} apps (${newIcons} new icons pre-warmed)")
+                        carLogSend("App list: ${apps.size} apps (${newIcons} new icons pre-warmed @ ${gridIconPx}px)")
                     }
                 } else {
                     carLogSend("App list: ${apps.size} apps (all icons already cached)")

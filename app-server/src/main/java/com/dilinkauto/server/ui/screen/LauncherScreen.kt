@@ -406,20 +406,26 @@ fun AppTile(
         AppCategory.OTHER -> OtherColor
     }
 
-    // Lazy-decode icon via car-side cache at the exact pixel size needed
-    var iconBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    // Try in-memory cache first (instant — no coroutine overhead when pre-warmed).
+    // Falls back to async decode only for cold cache misses.
+    val initialBitmap = remember(app.packageName, iconSizePx) {
+        ServerApp.iconCache.peek(app.packageName, iconSizePx)?.asImageBitmap()
+    }
+    var iconBitmap by remember { mutableStateOf(initialBitmap) }
 
-    LaunchedEffect(app.packageName, iconSizePx) {
-        if (app.iconPng.isEmpty()) return@LaunchedEffect
-        try {
-            val bmp = withContext(Dispatchers.IO) {
-                ServerApp.iconCache.get(app.packageName, iconSizePx)
+    if (iconBitmap == null) {
+        LaunchedEffect(app.packageName, iconSizePx) {
+            if (app.iconPng.isEmpty()) return@LaunchedEffect
+            try {
+                val bmp = withContext(Dispatchers.IO) {
+                    ServerApp.iconCache.get(app.packageName, iconSizePx)
+                }
+                if (bmp != null) {
+                    iconBitmap = bmp.asImageBitmap()
+                }
+            } catch (e: Exception) {
+                Log.w("AppTile", "Decode failed for ${app.packageName}: ${e.message}")
             }
-            if (bmp != null) {
-                iconBitmap = bmp.asImageBitmap()
-            }
-        } catch (e: Exception) {
-            Log.w("AppTile", "Decode failed for ${app.packageName}: ${e.message}")
         }
     }
 
