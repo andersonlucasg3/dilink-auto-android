@@ -1,9 +1,16 @@
 # Rastreador de Progresso
 
-Versao atual: **v0.17.0-dev-02** (pre-release)
-Ultima atualizacao: 2026-05-01
+Versão atual: **v0.17.0** (estável)
+Última atualização: 2026-05-02
 
 ## Marcos
+
+### v0.17.0 (2026-05-02)
+
+- **Reinicialização do decoder eliminada**: `MediaCodec.setOutputSurface()` substitui `stop()`+`start()` quando a superfície TextureView muda. MirrorContent mantido vivo na árvore Compose com toggle `View.INVISIBLE` — zero perda de frames na navegação HOME↔APP↔NOTIFICATIONS. Eliminados ~3s de artefatos de keyframe-drop por transição de tela.
+- **30fps fixo**: Reduzido de 60fps para 30fps fixo. Telefone não superaquece mais durante streaming. Carga CPU/GPU reduzida pela metade. Tráfego WiFi reduzido ~40%.
+- **Framerate adaptativo removido**: Modo estático inicial de 15fps causava queda de frames durante troca de apps. Revertido para 30fps fixo — determinístico, transições suaves entre apps.
+- **Documentação**: Todas as mudanças da v0.17.0 documentadas com traduções completas em 8 idiomas. Card de suporte flutuante adicionado ao GitHub Pages. Seletor de idioma com locale para datas de release.
 
 ### v0.17.0-dev-02 (2026-05-01)
 
