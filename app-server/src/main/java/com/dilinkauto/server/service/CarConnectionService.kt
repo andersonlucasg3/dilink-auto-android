@@ -368,7 +368,7 @@ class CarConnectionService : Service() {
                     appVersionCode = packageManager.getPackageInfo(packageName, 0).let {
                         @Suppress("DEPRECATION") it.versionCode
                     },
-                    targetFps = 60,
+                    targetFps = targetFps,
                     appVersionName = packageManager.getPackageInfo(packageName, 0).let {
                         it.versionName ?: ""
                     }
@@ -679,7 +679,7 @@ class CarConnectionService : Service() {
             val surf = android.view.Surface(tex)
             offscreenTexture = tex
             offscreenSurface = surf
-            videoDecoder.start(surf, vdWidth, vdHeight)
+            videoDecoder.start(surf, vdWidth, vdHeight, targetFps)
         }
 
         if (!_videoReady.value && !isConfig) {
@@ -763,7 +763,6 @@ class CarConnectionService : Service() {
             val serverPort = 19637
 
             val logFile = "/data/local/tmp/vd-server.log"
-            val targetFps = 60  // matches handshake request
             val args = "$scaledW $scaledH $phoneDpi $serverPort $viewportWidth $viewportHeight $targetFps"
 
             // Kill any existing VD server
@@ -796,6 +795,8 @@ class CarConnectionService : Service() {
     var vdWidth = 1408
         private set
     var vdHeight = 792
+        private set
+    var targetFps: Int = VideoConfig.TARGET_FPS
         private set
 
     /** Public log method for UI components (MirrorScreen, etc.) to route logs to phone */

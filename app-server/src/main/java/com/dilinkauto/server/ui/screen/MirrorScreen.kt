@@ -48,7 +48,7 @@ fun MirrorContent(service: CarConnectionService, visible: Boolean = true) {
                             service.log("[MirrorScreen] Decoder surface switched to TextureView (no restart)")
                         } else {
                             // First start — decoder hasn't been created yet
-                            service.videoDecoder.start(surface, service.vdWidth, service.vdHeight)
+                            service.videoDecoder.start(surface, service.vdWidth, service.vdHeight, service.targetFps)
                             service.releaseOffscreenSurface()
                             service.log("[MirrorScreen] Decoder started on TextureView surface")
                         }
