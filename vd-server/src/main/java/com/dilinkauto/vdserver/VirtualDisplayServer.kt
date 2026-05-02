@@ -43,10 +43,7 @@ class VirtualDisplayServer(
     private val encodeHeight: Int,
     private val fps: Int
 ) {
-    // Adaptive framerate — adjusted dynamically based on content motion.
-    // Static scenes drop to 15fps; scene changes (large keyframes) jump to 30fps.
-    @Volatile private var currentFps = fps
-    @Volatile private var frameIntervalMs = 1000L / fps
+    private val frameIntervalMs = 1000L / fps
 
     private var displayId = -1
     private var virtualDisplay: VirtualDisplay? = null
@@ -336,17 +333,6 @@ class VirtualDisplayServer(
         var lastKeyFrameAt = 0L
         var skippedFrameCount = 0L
 
-        // Adaptive framerate: track consecutive small P-frames to detect static content.
-        // When the scene is static (battery / overheating saving), drop to ADAPTIVE_FPS_STATIC.
-        // A large keyframe (>10KB) signals a scene change — jump back to ADAPTIVE_FPS_MAX.
-        val ADAPTIVE_FPS_STATIC = 15
-        val ADAPTIVE_FPS_MAX = fps
-        val STATIC_FRAME_THRESHOLD = 500  // bytes — frames smaller than this are "static"
-        val STATIC_CONSECUTIVE_TRIGGER = 45 // ~1.5s at 30fps of static content
-        val SCENE_CHANGE_KEYFRAME_BYTES = 10000 // 10KB keyframe = scene change
-        var staticStreak = 0
-        var lowFpsMode = false
-
         while (running) {
             try {
                 val outputIndex = enc.dequeueOutputBuffer(info, frameIntervalMs * 1000)
@@ -375,27 +361,6 @@ class VirtualDisplayServer(
                         val sinceLast = if (lastKeyFrameAt > 0) now - lastKeyFrameAt else 0
                         log("KEYFRAME #$keyFrameCount at frame $frameCount size=$size sinceLast=${sinceLast}ms")
                         lastKeyFrameAt = now
-                        // Scene change detection: large keyframe → ramp to max fps
-                        if (size > SCENE_CHANGE_KEYFRAME_BYTES && lowFpsMode) {
-                            adjustFps(ADAPTIVE_FPS_MAX)
-                            lowFpsMode = false
-                            staticStreak = 0
-                        }
-                    }
-
-                    // Adaptive framerate: track static streaks on P-frames
-                    if (!isConfig && !isKeyFrame) {
-                        if (size <= STATIC_FRAME_THRESHOLD) {
-                            staticStreak++
-                            if (staticStreak >= STATIC_CONSECUTIVE_TRIGGER && !lowFpsMode) {
-                                adjustFps(ADAPTIVE_FPS_STATIC)
-                                lowFpsMode = true
-                                log("Adaptive FPS: static scene detected → ${ADAPTIVE_FPS_STATIC}fps (streak=$staticStreak)")
-                            }
-                        } else {
-                            // Moving content — reset streak
-                            if (staticStreak > 0 && !lowFpsMode) staticStreak = 0
-                        }
                     }
 
                     // Encoder backpressure: when the write queue is backed up (TCP send buffer
@@ -447,22 +412,6 @@ class VirtualDisplayServer(
                 running = false
                 break
             }
-        }
-    }
-
-    /** Dynamically adjust encoder frame rate at runtime via setParameters. */
-    private fun adjustFps(newFps: Int) {
-        if (newFps == currentFps) return
-        val enc = encoder ?: return
-        try {
-            val params = android.os.Bundle()
-            params.putInt(MediaFormat.KEY_FRAME_RATE, newFps)
-            enc.setParameters(params)
-            currentFps = newFps
-            frameIntervalMs = 1000L / newFps
-            log("Encoder FPS adjusted: $currentFps (interval=${frameIntervalMs}ms)")
-        } catch (e: Exception) {
-            err("Failed to adjust encoder FPS: ${e.message}")
         }
     }
 
