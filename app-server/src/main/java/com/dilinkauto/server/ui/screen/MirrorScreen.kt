@@ -4,6 +4,7 @@ import android.graphics.SurfaceTexture
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
+import android.view.View
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -18,9 +19,15 @@ import com.dilinkauto.server.service.CarConnectionService
  * Mirror content — TextureView for video + touch forwarding.
  * Uses TextureView instead of SurfaceView to avoid z-ordering issues
  * where SurfaceView would punch through the persistent nav bar.
+ *
+ * The decoder is never stopped during screen navigation. When the TextureView
+ * surface is available and the decoder is already running (early start on offscreen
+ * surface), we switch the surface with setOutputSurface(). When it's the first
+ * time, we start normally. When the surface is destroyed, the decoder stays running
+ * — CarConnectionService.handleDisconnect/shutdown handles the final stop.
  */
 @Composable
-fun MirrorContent(service: CarConnectionService) {
+fun MirrorContent(service: CarConnectionService, visible: Boolean = true) {
     AndroidView(
         factory = { context ->
             TextureView(context).apply {
@@ -32,18 +39,19 @@ fun MirrorContent(service: CarConnectionService) {
                     ) {
                         service.log("[MirrorScreen] TextureView surface available: ${width}x${height}, decoder.isRunning=${service.videoDecoder.isRunning}")
                         val surface = Surface(surfaceTexture)
-                        // Restart decoder with the real TextureView surface.
-                        // The decoder may already be running on an offscreen surface
-                        // (started early in handleVideoFrame to avoid frame loss).
-                        service.videoDecoder.stop()
-                        service.log("[MirrorScreen] Decoder stopped, restarting with real surface")
-                        service.videoDecoder.start(
-                            surface,
-                            service.vdWidth,
-                            service.vdHeight
-                        )
-                        service.releaseOffscreenSurface()
-                        service.log("[MirrorScreen] Decoder restarted on TextureView surface")
+                        if (service.videoDecoder.isRunning) {
+                            // Decoder already running (early start on offscreen surface
+                            // or survived a navigation hide/show). Switch surface without
+                            // restarting — zero frame loss, zero keyframe drops.
+                            service.videoDecoder.switchSurface(surface)
+                            service.releaseOffscreenSurface()
+                            service.log("[MirrorScreen] Decoder surface switched to TextureView (no restart)")
+                        } else {
+                            // First start — decoder hasn't been created yet
+                            service.videoDecoder.start(surface, service.vdWidth, service.vdHeight)
+                            service.releaseOffscreenSurface()
+                            service.log("[MirrorScreen] Decoder started on TextureView surface")
+                        }
                     }
 
                     override fun onSurfaceTextureSizeChanged(
@@ -53,8 +61,10 @@ fun MirrorContent(service: CarConnectionService) {
                     ) {}
 
                     override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
-                        service.log("[MirrorScreen] TextureView surface destroyed, stopping decoder")
-                        service.videoDecoder.stop()
+                        // During normal screen navigation the TextureView is kept alive
+                        // (INVISIBLE, not GONE), so this only fires on activity teardown.
+                        // The decoder is stopped by handleDisconnect/shutdown — just log.
+                        service.log("[MirrorScreen] TextureView surface destroyed")
                         return true
                     }
 
@@ -118,6 +128,9 @@ fun MirrorContent(service: CarConnectionService) {
                     true
                 }
             }
+        },
+        update = { view ->
+            view.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         },
         modifier = Modifier
             .fillMaxSize()

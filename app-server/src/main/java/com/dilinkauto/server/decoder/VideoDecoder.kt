@@ -333,6 +333,25 @@ class VideoDecoder {
         }
     }
 
+    /**
+     * Switches the decoder output to a new Surface without stopping/restarting.
+     * Uses MediaCodec.setOutputSurface() — available since API 23 (Android 10+ BYD).
+     * Eliminates the keyframe-drop storm that happens with stop()+start().
+     */
+    fun switchSurface(newSurface: Surface) {
+        val c = codec
+        if (c == null) {
+            logW("switchSurface: codec is null, ignoring")
+            return
+        }
+        try {
+            c.setOutputSurface(newSurface)
+            log("Switched decoder output to new Surface")
+        } catch (e: Exception) {
+            logE("switchSurface failed: ${e.message}")
+        }
+    }
+
     fun stop() {
         if (!running.getAndSet(false)) return
         log("Stopping decoder: fed=$frameCount rendered=$renderCount drops=$dropCount inputFails=$inputFailCount")

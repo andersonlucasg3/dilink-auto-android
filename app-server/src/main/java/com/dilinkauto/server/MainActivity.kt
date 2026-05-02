@@ -236,7 +236,13 @@ fun CarShell(service: CarConnectionService) {
 
             // Content area
             Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                // Show a brief transition overlay while waiting for the first video frame
+                // MirrorContent is always composed — never removed during screen navigation.
+                // INVISIBLE when not on Screen.APP keeps the TextureView surface alive.
+                // This eliminates decoder restart storms (stop+start = 3 keyframes dropped,
+                // ~3s of visual artifacts per navigation event).
+                MirrorContent(service = service, visible = currentScreen == Screen.APP)
+
+                // Content overlays — rendered on top of the TextureView
                 val showVideoWaitOverlay = !videoReady && currentScreen != Screen.NOTIFICATIONS
                 when {
                     showVideoWaitOverlay -> {
@@ -260,7 +266,6 @@ fun CarShell(service: CarConnectionService) {
                         }
                     }
                     currentScreen == Screen.HOME -> HomeContent(service = service, onAppClick = launchApp)
-                    currentScreen == Screen.APP -> MirrorContent(service = service)
                     currentScreen == Screen.NOTIFICATIONS -> NotificationContent(service = service, onAppLaunch = launchApp)
                 }
             }
