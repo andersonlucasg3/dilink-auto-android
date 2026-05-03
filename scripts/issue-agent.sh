@@ -106,6 +106,37 @@ github_api() {
   fi
 }
 
+# Fetch all pending user comments since the last processed one.
+# Sets PENDING_COMMENTS (array of "id|body") and NEW_LAST_ID.
+get_pending_comments() {
+  local last_id="${1:-0}"
+  PENDING_COMMENTS=""
+  NEW_LAST_ID="$last_id"
+
+  local resp
+  resp=$(github_api GET "/repos/${REPO}/issues/${ISSUE_NUM}/comments?per_page=100&sort=created&direction=asc")
+  if [ -z "$resp" ]; then
+    echo "[comments] Failed to fetch comments — falling back to trigger comment only"
+    return 1
+  fi
+
+  # Filter: user comments (not github-actions bot), with id > last_id
+  local filtered
+  filtered=$(echo "$resp" | jq -r --argjson last "$last_id" \
+    '.[] | select(.id > $last) | select(.user.login != "github-actions") | "\(.id)|\(.body)"' 2>/dev/null)
+
+  if [ -z "$filtered" ]; then
+    echo "[comments] No pending user comments found after id=$last_id"
+    return 1
+  fi
+
+  PENDING_COMMENTS="$filtered"
+  NEW_LAST_ID=$(echo "$filtered" | tail -1 | cut -d'|' -f1)
+  local count=$(echo "$filtered" | wc -l | tr -d ' ')
+  echo "[comments] Found $count pending user comment(s), last_id=$last_id → new_last_id=$NEW_LAST_ID"
+  return 0
+}
+
 # Helpers are now in scripts/lib/ — sourced at the top of this script
 # --- Main ---
 echo "=========================================="
@@ -117,11 +148,20 @@ BRANCH=$(branch_name)
 if [ -n "$RELEASE_VERSION" ]; then
   echo " Type:   release → $RELEASE_TARGET (v$RELEASE_VERSION)"
 else
-  echo " Type:   feature → $RELEASE_TARGET"
+  case "$BRANCH" in
+    hotfix/*)   echo " Type:   hotfix → $RELEASE_TARGET" ;;
+    fix/*)      echo " Type:   bug fix → $RELEASE_TARGET" ;;
+    feature/*)  echo " Type:   feature → $RELEASE_TARGET" ;;
+    docs/*)     echo " Type:   docs → $RELEASE_TARGET" ;;
+    investigate/*) echo " Type:   investigation → $RELEASE_TARGET" ;;
+    *)          echo " Type:   $BRANCH → $RELEASE_TARGET" ;;
+  esac
 fi
 
-# Set up branch — reuse if it exists (resume), create fresh if new
-git fetch origin develop "$BRANCH" 2>/dev/null || true
+# Set up branch — reuse if it exists (resume), create fresh if new.
+# For hotfix and release, the base branch is main; otherwise develop.
+BASE_BRANCH="${RELEASE_TARGET:-develop}"
+git fetch origin "$BASE_BRANCH" "$BRANCH" 2>/dev/null || true
 
 # Discard ALL leftover changes — even CRLF conversions from .gitattributes
 git reset --hard HEAD 2>/dev/null || true
@@ -131,17 +171,17 @@ git clean -ffdx -e '.gradle' 2>/dev/null || true
 git fetch origin --prune --prune-tags 2>/dev/null || true
 
 # Set up branch
-git fetch origin develop "$BRANCH" 2>/dev/null || true
+git fetch origin "$BASE_BRANCH" "$BRANCH" 2>/dev/null || true
 if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
-  log_step "Reusing branch: $BRANCH"
+  log_step "Reusing branch: $BRANCH (base: $BASE_BRANCH)"
   git checkout -f "$BRANCH" 2>/dev/null || git checkout -f -b "$BRANCH" "origin/$BRANCH"
   git pull origin "$BRANCH" 2>/dev/null || true
-  # Merge develop to get .gitattributes and prevent CRLF/LF churn
-  git merge origin/develop --no-edit 2>/dev/null || git checkout -f origin/develop -- .gitattributes 2>/dev/null || true
+  # Merge base branch to get .gitattributes and prevent CRLF/LF churn
+  git merge "origin/$BASE_BRANCH" --no-edit 2>/dev/null || git checkout -f "origin/$BASE_BRANCH" -- .gitattributes 2>/dev/null || true
 else
-  log_step "Creating branch: $BRANCH"
-  git checkout -f develop
-  git pull origin develop
+  log_step "Creating branch: $BRANCH (from: $BASE_BRANCH)"
+  git checkout -f "$BASE_BRANCH"
+  git pull origin "$BASE_BRANCH"
   git branch -D "$BRANCH" 2>/dev/null || true
   git checkout -f -b "$BRANCH"
 fi
@@ -236,7 +276,7 @@ if [ "$EVENT" = "issues" ]; then
       --arg issue "$ISSUE_NUM" \
       --arg title "$ISSUE_TITLE" \
       --arg csid "$_existing_sid" \
-      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid}' \
+      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid, last_processed_comment_id: 0}' \
       > "$STATE_FILE"
     echo "State saved to $STATE_FILE (session=$AGENT_SESSION_ID)"
     register_session "$AGENT_SESSION_ID"
@@ -348,6 +388,39 @@ EOFCOMMENT
 elif [ "$EVENT" = "issue_comment" ]; then
   echo "--- Issue comment: resuming or starting conversation ---"
 
+  # Fetch all pending user comments since the last processed one.
+  # This solves the problem where GitHub concurrency cancels queued runs.
+  LAST_PROCESSED_ID=$(jq -r '.last_processed_comment_id // 0' "$STATE_FILE" 2>/dev/null || echo "0")
+  if [ "$LAST_PROCESSED_ID" = "null" ]; then LAST_PROCESSED_ID=0; fi
+
+  COMBINED_COMMENT=""
+  if get_pending_comments "$LAST_PROCESSED_ID"; then
+    # Build combined comment from all pending
+    _pending_count=0
+    while IFS='|' read -r cid cbody; do
+      _pending_count=$((_pending_count + 1))
+      if [ -z "$COMBINED_COMMENT" ]; then
+        COMBINED_COMMENT="$cbody"
+      else
+        COMBINED_COMMENT="$COMBINED_COMMENT
+
+---
+**Next request (comment #$cid):**
+
+$cbody"
+      fi
+    done <<< "$PENDING_COMMENTS"
+    echo "[comments] Combined $_pending_count comment(s) into single prompt"
+    # Use the last (newest) comment ID as the effective trigger
+    if [ -n "$NEW_LAST_ID" ] && [ "$NEW_LAST_ID" != "0" ]; then
+      COMMENT_ID="$NEW_LAST_ID"
+    fi
+  else
+    # Fallback: use only the triggering comment
+    COMBINED_COMMENT="$COMMENT_BODY"
+    echo "[comments] Using trigger comment only (id=$COMMENT_ID)"
+  fi
+
   # Determine if we can resume a prior session
   SESSION_ID=""
   if [ -f "$STATE_FILE" ]; then
@@ -364,7 +437,6 @@ elif [ "$EVENT" = "issue_comment" ]; then
     log_step "Resuming session: $SESSION_ID"
 
     # Clear old status_comment_id so this run gets its own status comment.
-    # If jq fails, remove the state file — a corrupt state is worse than a fresh start.
     if [ -f "$STATE_FILE" ]; then
       if ! jq 'del(.status_comment_id)' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null; then
         echo "WARNING: jq del(.status_comment_id) failed — removing corrupt state file"
@@ -374,21 +446,18 @@ elif [ "$EVENT" = "issue_comment" ]; then
       fi
     fi
 
-    # Create this run's unique status comment BEFORE writing prompts so
-    # STATUS_COMMENT_ID in the agent prompt points to the correct comment.
     status "🔄 Continuing..."
     STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
 
     write_initial_prompt
-    write_resume_prompt "$COMMENT_BODY"
+    write_resume_prompt "$COMBINED_COMMENT"
 
-    # Build prompt with user's comment included directly so Claude sees it on resume
     cat > "/tmp/resume-msg-${ISSUE_NUM}.txt" << EOFMSG
-The user posted this follow-up comment on issue #${ISSUE_NUM}:
+The user posted the following request(s) on issue #${ISSUE_NUM}:
 
-${COMMENT_BODY}
+${COMBINED_COMMENT}
 
-Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt for full context, then complete only the user's request above.
+Start by reading /tmp/agent-prompt-${ISSUE_NUM}.txt for full context, then complete ALL of the user's requests above, in order.
 EOFMSG
     log_step "Claude: $CLAUDE_BIN --resume $SESSION_ID"
     echo "[resume prompt] $(cat /tmp/resume-msg-${ISSUE_NUM}.txt | head -1)"
@@ -415,7 +484,7 @@ EOFMSG
     STATUS_COMMENT_ID=$(jq -r '.status_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
     log_step "STATUS_COMMENT_ID=$STATUS_COMMENT_ID"
     write_initial_prompt
-    write_resume_prompt "$COMMENT_BODY"
+    write_resume_prompt "$COMBINED_COMMENT"
 
     AGENT_SESSION_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "issue-${ISSUE_NUM}-$(date +%s)")
     log_step "Claude: $CLAUDE_BIN --session-id $AGENT_SESSION_ID"
@@ -437,7 +506,7 @@ EOFMSG
       --arg issue "$ISSUE_NUM" \
       --arg title "$ISSUE_TITLE" \
       --arg csid "$_existing_sid" \
-      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid}' \
+      '{session_id: $sid, branch: $branch, issue_number: $issue, title: $title, status_comment_id: $csid, last_processed_comment_id: 0}' \
       > "$STATE_FILE"
     register_session "${AGENT_SESSION_ID:-unknown}"
   fi
@@ -522,10 +591,15 @@ EOFCOMMENT
       echo "PR creation failed — response: $(echo "$PR_RESPONSE" | head -3)"
     fi
   fi
+
+  # Save last processed comment ID so next run only fetches newer comments
+  if [ -f "$STATE_FILE" ] && [ -n "${NEW_LAST_ID:-}" ] && [ "$NEW_LAST_ID" != "${LAST_PROCESSED_ID:-0}" ]; then
+    jq --arg lid "$NEW_LAST_ID" '. + {last_processed_comment_id: $lid}' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && \
+      mv "${STATE_FILE}.tmp" "$STATE_FILE" || true
+    echo "[comments] Updated last_processed_comment_id=$NEW_LAST_ID"
+  fi
 fi
 
-# Stop Gradle daemon to free resources for the next job
-./gradlew --stop 2>/dev/null || true
 echo "=========================================="
 echo " Done"
 echo "=========================================="

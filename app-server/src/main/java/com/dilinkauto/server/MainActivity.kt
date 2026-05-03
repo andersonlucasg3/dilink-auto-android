@@ -11,9 +11,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -138,6 +142,17 @@ fun CarShell(service: CarConnectionService) {
         }
     }
 
+    // When the focused app changes on the VD (after back presses close an app),
+    // update the nav bar to reflect the new active app
+    LaunchedEffect(Unit) {
+        service.focusedApp.collect { pkg ->
+            if (pkg != null) {
+                activeAppPackage = pkg
+                currentScreen = Screen.APP
+            }
+        }
+    }
+
     // Prune recent apps when the app list updates
     LaunchedEffect(appList) {
         if (appList.isNotEmpty()) {
@@ -150,6 +165,37 @@ fun CarShell(service: CarConnectionService) {
         activeAppPackage = pkg
         recentAppsState.onAppLaunched(pkg)
         currentScreen = Screen.APP
+    }
+
+    // App info dialog
+    val appInfoData by service.appInfoData.collectAsState()
+    if (appInfoData != null) {
+        val info = appInfoData!!
+        val dateStr = remember(info.installTime) {
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date(info.installTime))
+        }
+        AlertDialog(
+            onDismissRequest = { service.clearAppInfoData() },
+            title = { Text(info.appName, color = Color.White, fontSize = 20.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    InfoRow("Package", info.packageName)
+                    InfoRow("Version", info.versionName)
+                    InfoRow("Version code", info.versionCode.toString())
+                    InfoRow("Target SDK", info.targetSdk.toString())
+                    InfoRow("Installed", dateStr)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { service.clearAppInfoData() }) {
+                    Text("OK", fontSize = 16.sp)
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = Color.White,
+            textContentColor = Color(0xFFCCCCCC)
+        )
     }
 
     val showStreamingMode = appList.isNotEmpty() && isConnected
@@ -166,6 +212,7 @@ fun CarShell(service: CarConnectionService) {
                 activeAppPackage = activeAppPackage,
                 isPhoneConnected = isConnected,
                 appList = appList,
+                service = service,
                 notificationCount = notifications.size,
                 onAppClick = launchApp,
                 onBack = {
@@ -189,7 +236,13 @@ fun CarShell(service: CarConnectionService) {
 
             // Content area
             Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                // Show a brief transition overlay while waiting for the first video frame
+                // MirrorContent is always composed — never removed during screen navigation.
+                // INVISIBLE when not on Screen.APP keeps the TextureView surface alive.
+                // This eliminates decoder restart storms (stop+start = 3 keyframes dropped,
+                // ~3s of visual artifacts per navigation event).
+                MirrorContent(service = service, visible = currentScreen == Screen.APP)
+
+                // Content overlays — rendered on top of the TextureView
                 val showVideoWaitOverlay = !videoReady && currentScreen != Screen.NOTIFICATIONS
                 when {
                     showVideoWaitOverlay -> {
@@ -213,7 +266,6 @@ fun CarShell(service: CarConnectionService) {
                         }
                     }
                     currentScreen == Screen.HOME -> HomeContent(service = service, onAppClick = launchApp)
-                    currentScreen == Screen.APP -> MirrorContent(service = service)
                     currentScreen == Screen.NOTIFICATIONS -> NotificationContent(service = service, onAppLaunch = launchApp)
                 }
             }
@@ -221,5 +273,24 @@ fun CarShell(service: CarConnectionService) {
     } else {
         // Full-screen launch / connection screen — no nav bar, connection-focused
         CarLaunchScreen(service = service)
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            "$label:",
+            color = Color(0xFF888888),
+            fontSize = 14.sp
+        )
+        Text(
+            value,
+            color = Color.White,
+            fontSize = 14.sp
+        )
     }
 }

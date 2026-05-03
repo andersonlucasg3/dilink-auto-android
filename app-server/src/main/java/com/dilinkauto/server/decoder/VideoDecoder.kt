@@ -77,13 +77,13 @@ class VideoDecoder {
     /**
      * Starts the decoder, rendering to the provided Surface.
      */
-    fun start(surface: Surface, width: Int, height: Int) {
+    fun start(surface: Surface, width: Int, height: Int, fps: Int = VideoConfig.TARGET_FPS) {
         if (running.getAndSet(true)) {
             logW("start() called but already running")
             return
         }
 
-        log("Starting decoder: ${width}x${height}, cached config=${configData != null}, queued=${frameQueue.size}")
+        log("Starting decoder: ${width}x${height} @${fps}fps, cached config=${configData != null}, queued=${frameQueue.size}")
 
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
@@ -122,19 +122,20 @@ class VideoDecoder {
             // When severely backed up, aggressive 3x catchup to recover quickly.
             // Always feeds keyframes — skipping them would prolong artifacts.
             //
-            // Thresholds in frames (at 60fps each frame ≈ 16.7ms):
-            //   0-6   normal  (0-100ms latency)
-            //   7-12  gentle  (100-200ms) — skip 1 of 3 non-keyframes
-            //  13-20  medium  (200-333ms) — skip 1 of 2 non-keyframes
-            //  21+    aggressive (333ms+) — skip 2 of 3 non-keyframes
-            val catchupGentle = (100L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(3)  // 6 at 60fps
-            val catchupMedium = (200L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(6)  // 12 at 60fps
-            val catchupAggressive = (333L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(10) // 20 at 60fps
+            // Thresholds tuned for BYD DiLink 3.0 hardware (Android 10, ~25-28fps
+            // effective decode). Tighter than ideal to prevent progressive degradation:
+            //   normal  (0-67ms)  — feed all frames
+            //   gentle  (67-133ms)  — skip 1 of 3 non-keyframes (1.5x catchup)
+            //   medium  (133-200ms) — skip 1 of 2 non-keyframes (2x catchup)
+            //   aggressive (200ms+)  — skip 2 of 3 non-keyframes (3x catchup)
+            val catchupGentle = (67L * fps / 1000).toInt().coerceAtLeast(2)
+            val catchupMedium = (133L * fps / 1000).toInt().coerceAtLeast(4)
+            val catchupAggressive = (200L * fps / 1000).toInt().coerceAtLeast(6)
             var skipCount = 0L
 
             while (running.get()) {
                 val frame = try {
-                    frameQueue.poll(VideoConfig.FRAME_INTERVAL_MS, TimeUnit.MILLISECONDS)
+                    frameQueue.poll(1000L / fps, TimeUnit.MILLISECONDS)
                 } catch (_: InterruptedException) {
                     continue
                 } ?: continue
@@ -271,11 +272,16 @@ class VideoDecoder {
         if (isConfig || isKey || receiveCount <= 3 || receiveCount % 60 == 0L) {
             log("onFrameReceived #$receiveCount isConfig=$isConfig isKey=$isKey size=${data.size} running=${running.get()} queue=${frameQueue.size}")
         }
+        // Always cache CONFIG — needed to bootstrap the next decoder instance
         if (isConfig) {
             configData = data
         }
-        // Queue frames even before start() — the feed thread will drain them
-        // once the decoder is ready.
+        // When stopped, only cache CONFIG. Dropping frames during surface transitions
+        // prevents the queue from filling up and causing a 400+ frame drop storm on restart.
+        if (!running.get() && !isConfig) {
+            if (isKey) keyFramesDropped++
+            return
+        }
         val frame = FrameData(isConfig, isKey, data)
         if (frameQueue.offer(frame)) return
 
@@ -325,6 +331,25 @@ class VideoDecoder {
             if (dropCount <= 5 || dropCount % 30 == 0L) {
                 logW("Queue full — dropped oldest as last resort #$dropCount")
             }
+        }
+    }
+
+    /**
+     * Switches the decoder output to a new Surface without stopping/restarting.
+     * Uses MediaCodec.setOutputSurface() — available since API 23 (Android 10+ BYD).
+     * Eliminates the keyframe-drop storm that happens with stop()+start().
+     */
+    fun switchSurface(newSurface: Surface) {
+        val c = codec
+        if (c == null) {
+            logW("switchSurface: codec is null, ignoring")
+            return
+        }
+        try {
+            c.setOutputSurface(newSurface)
+            log("Switched decoder output to new Surface")
+        } catch (e: Exception) {
+            logE("switchSurface failed: ${e.message}")
         }
     }
 

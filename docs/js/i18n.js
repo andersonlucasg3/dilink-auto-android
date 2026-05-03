@@ -8,6 +8,11 @@ const translations = {
     hero_desc: "Mirror your phone apps onto your car display with full touch interaction. No Google Services, no pairing codes, no accounts needed.",
     hero_download: "Download Latest Release",
     hero_source: "View on GitHub",
+    version_stable: "Stable",
+    version_dev: "Dev",
+    version_download_release: "Download Release",
+    version_download_prerelease: "Download Pre-release",
+    install_download_prerelease: "Download Pre-release APK",
     features_title: "What It Does",
     feature_1_title: "App Mirroring",
     feature_1_desc: "Launch any phone app from your car screen — navigation, music, messaging. Full touch interaction with multi-touch and pinch-to-zoom.",
@@ -72,6 +77,11 @@ const translations = {
     hero_desc: "Espelhe os apps do seu celular na tela do carro com interação por toque. Sem Google Services, sem códigos de pareamento, sem contas.",
     hero_download: "Baixar Última Versão",
     hero_source: "Ver no GitHub",
+    version_stable: "Estável",
+    version_dev: "Dev",
+    version_download_release: "Baixar Release",
+    version_download_prerelease: "Baixar Pre-release",
+    install_download_prerelease: "Baixar APK Pre-release",
     features_title: "O Que Faz",
     feature_1_title: "Espelhamento de Apps",
     feature_1_desc: "Lance qualquer app do celular na tela do carro — navegação, música, mensagens. Interação por toque completa com multi-toque e pinch-to-zoom.",
@@ -136,6 +146,11 @@ const translations = {
     hero_desc: "Зеркалируйте приложения телефона на дисплей автомобиля с полным сенсорным управлением. Без Google Services, кодов сопряжения и аккаунтов.",
     hero_download: "Скачать последнюю версию",
     hero_source: "Смотреть на GitHub",
+    version_stable: "Стабильная",
+    version_dev: "Dev",
+    version_download_release: "Скачать релиз",
+    version_download_prerelease: "Скачать пре-релиз",
+    install_download_prerelease: "Скачать APK пре-релиз",
     features_title: "Что делает",
     feature_1_title: "Зеркалирование приложений",
     feature_1_desc: "Запускайте любые приложения с экрана автомобиля — навигация, музыка, сообщения. Полное сенсорное управление с мультитач и масштабированием.",
@@ -200,6 +215,11 @@ const translations = {
     hero_desc: "Люструйце прыкладанні тэлефона на дысплей аўтамабіля з поўным сэнсарным кіраваннем. Без Google Services, кодаў спалучэння і акаўнтаў.",
     hero_download: "Спампаваць апошнюю версію",
     hero_source: "Глядзець на GitHub",
+    version_stable: "Стабільная",
+    version_dev: "Dev",
+    version_download_release: "Спампаваць рэліз",
+    version_download_prerelease: "Спампаваць прэ-рэліз",
+    install_download_prerelease: "Спампаваць APK прэ-рэліз",
     features_title: "Што робіць",
     feature_1_title: "Люстраванне прыкладанняў",
     feature_1_desc: "Запускайце любыя прыкладанні з экрана аўтамабіля — навігацыя, музыка, паведамленні. Поўнае сэнсарнае кіраванне з мультытач.",
@@ -264,6 +284,11 @@ const translations = {
     hero_desc: "Dupliquez les applications de votre téléphone sur l'écran de la voiture avec interaction tactile complète. Sans Google Services, sans codes de couplage, sans compte.",
     hero_download: "Télécharger la dernière version",
     hero_source: "Voir sur GitHub",
+    version_stable: "Stable",
+    version_dev: "Dev",
+    version_download_release: "Télécharger la release",
+    version_download_prerelease: "Télécharger la pre-release",
+    install_download_prerelease: "Télécharger l'APK pre-release",
     features_title: "Ce que ça fait",
     feature_1_title: "Duplication d'applications",
     feature_1_desc: "Lancez n'importe quelle application depuis l'écran de la voiture — navigation, musique, messagerie. Interaction tactile complète avec multi-touch et pincement.",
@@ -328,6 +353,11 @@ const translations = {
     hero_desc: "Телефон қолданбаларын толық сенсорлық басқарумен автокөлік дисплейіне айналандырыңыз. Google Services, жұптау кодтары және аккаунттарсыз.",
     hero_download: "Соңғы нұсқаны жүктеу",
     hero_source: "GitHub-та көру",
+    version_stable: "Тұрақты",
+    version_dev: "Dev",
+    version_download_release: "Релизді жүктеу",
+    version_download_prerelease: "Пре-релизді жүктеу",
+    install_download_prerelease: "APK пре-релизін жүктеу",
     features_title: "Не істейді",
     feature_1_title: "Қолданбаларды айналандыру",
     feature_1_desc: "Автокөлік экранынан кез келген қолданбаны іске қосыңыз — навигация, музыка, хабарламалар. Мультитач және масштабтаумен толық сенсорлық басқару.",
@@ -392,6 +422,11 @@ const translations = {
     hero_desc: "Дзеркальте додатки телефону на дисплей автомобіля з повним сенсорним керуванням. Без Google Services, кодів сполучення та облікових записів.",
     hero_download: "Завантажити останню версію",
     hero_source: "Дивитись на GitHub",
+    version_stable: "Стабільна",
+    version_dev: "Dev",
+    version_download_release: "Завантажити реліз",
+    version_download_prerelease: "Завантажити пре-реліз",
+    install_download_prerelease: "Завантажити APK пре-реліз",
     features_title: "Що робить",
     feature_1_title: "Дзеркалювання додатків",
     feature_1_desc: "Запускайте будь-які додатки з екрана автомобіля — навігація, музика, повідомлення. Повне сенсорне керування з мультитач і масштабуванням.",
@@ -456,6 +491,11 @@ const translations = {
     hero_desc: "Telefon ilovalaringizni to'liq sensorli boshqaruv bilan avtomobil displeyida aks ettiring. Google Services, juftlash kodlari va akkauntlarsiz.",
     hero_download: "So'nggi versiyani yuklash",
     hero_source: "GitHub da ko'rish",
+    version_stable: "Barqaror",
+    version_dev: "Dev",
+    version_download_release: "Relizni yuklash",
+    version_download_prerelease: "Pre-relizni yuklash",
+    install_download_prerelease: "APK pre-relizni yuklash",
     features_title: "Nima qiladi",
     feature_1_title: "Ilovalarni aks ettirish",
     feature_1_desc: "Avtomobil ekranidan istalgan ilovani ishga tushiring — navigatsiya, musiqa, xabarlar. Multi-touch va masshtablash bilan to'liq sensorli boshqaruv.",
@@ -526,7 +566,25 @@ function detectLanguage() {
   return match || 'en';
 }
 
+const langToLocale = {
+  en: 'en-US',
+  'pt-BR': 'pt-BR',
+  ru: 'ru-RU',
+  be: 'be-BY',
+  fr: 'fr-FR',
+  kk: 'kk-KZ',
+  uk: 'uk-UA',
+  uz: 'uz-UZ'
+};
+
+function getLangLocale() {
+  return langToLocale[currentLang] || 'en-US';
+}
+
 let currentLang = detectLanguage();
+
+// Called by version script when dates need re-rendering after language change
+var onLanguageChange = null;
 
 function applyLanguage(lang) {
   currentLang = lang;
@@ -539,6 +597,7 @@ function applyLanguage(lang) {
   });
   const sel = document.getElementById('langSelect');
   if (sel) sel.value = lang;
+  if (typeof onLanguageChange === 'function') onLanguageChange();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

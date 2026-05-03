@@ -90,6 +90,8 @@ class VirtualDisplayServer(
         private const val MSG_VIDEO_FRAME: Byte = 0x02
         private const val MSG_DISPLAY_READY: Byte = 0x10
         private const val MSG_STACK_EMPTY: Byte = 0x11
+        private const val MSG_FOCUSED_APP: Byte = 0x12
+        private const val MSG_SHORTCUTS_RESULT: Byte = 0x13
 
         private const val CMD_LAUNCH_APP = 0x20
         private const val CMD_GO_BACK = 0x21
@@ -97,6 +99,10 @@ class VirtualDisplayServer(
         private const val CMD_INPUT_TAP = 0x30
         private const val CMD_INPUT_SWIPE = 0x31
         private const val CMD_INPUT_TOUCH = 0x32
+        private const val CMD_UNINSTALL = 0x23
+        private const val CMD_OPEN_APP_INFO = 0x24
+        private const val CMD_QUERY_SHORTCUTS = 0x25
+        private const val CMD_EXECUTE_SHORTCUT = 0x26
         private const val CMD_STOP = 0xFF
 
         private const val BITRATE = 8_000_000
@@ -280,7 +286,7 @@ class VirtualDisplayServer(
         while (running) {
             val buf = writeQueue.poll()
             if (buf == null) {
-                LockSupport.parkNanos(frameIntervalMs * 1_000_000L)
+                LockSupport.park() // unparked by enqueueWrite
                 continue
             }
             writeQueueDepth--
@@ -456,6 +462,82 @@ class VirtualDisplayServer(
                             log("Touch cmd #$cmdCount action=$action ptr=$pointerId x=$tx y=$ty")
                         }
                     }
+                    CMD_UNINSTALL -> {
+                        val len = reader.readIntBlocking()
+                        val buf = ByteArray(len)
+                        reader.readFullyBlocking(buf, 0, len)
+                        val pkg = String(buf)
+                        log("Uninstalling: $pkg")
+                        execShell("pm uninstall $pkg")
+                    }
+                    CMD_OPEN_APP_INFO -> {
+                        val len = reader.readIntBlocking()
+                        val buf = ByteArray(len)
+                        reader.readFullyBlocking(buf, 0, len)
+                        val pkg = String(buf)
+                        log("Opening app info on VD for: $pkg")
+                        // Try component-based launch first (more reliable on virtual displays)
+                        val settingsComponent = execShellOutput(
+                            "cmd package resolve-activity --brief -a android.settings.APPLICATION_DETAILS_SETTINGS com.android.settings"
+                        )?.trim()
+                        if (!settingsComponent.isNullOrEmpty()) {
+                            execShell("am start --display $displayId -n $settingsComponent -d \"package:$pkg\"")
+                        } else {
+                            // Fallback: action-based launch
+                            execShell("am start --display $displayId -a android.settings.APPLICATION_DETAILS_SETTINGS -d \"package:$pkg\"")
+                        }
+                    }
+                    CMD_QUERY_SHORTCUTS -> {
+                        val len = reader.readIntBlocking()
+                        val buf = ByteArray(len)
+                        reader.readFullyBlocking(buf, 0, len)
+                        val pkg = String(buf)
+                        log("Querying shortcuts for: $pkg")
+                        val output = execShellFullOutput("cmd shortcut get-shortcuts --package $pkg 2>&1") ?: ""
+                        log("Shortcut result for $pkg: ${output.length} chars")
+                        val pkgBytes = pkg.toByteArray(Charsets.UTF_8)
+                        val dataBytes = output.toByteArray(Charsets.UTF_8)
+                        val respBuf = ByteBuffer.allocate(1 + 4 + pkgBytes.size + 4 + dataBytes.size)
+                        respBuf.put(MSG_SHORTCUTS_RESULT)
+                        respBuf.putInt(pkgBytes.size)
+                        respBuf.put(pkgBytes)
+                        respBuf.putInt(dataBytes.size)
+                        respBuf.put(dataBytes)
+                        respBuf.flip()
+                        writeQueue.add(respBuf)
+                        writeQueueDepth++
+                        val wt = writerThread
+                        if (wt != null) LockSupport.unpark(wt)
+                    }
+                    CMD_EXECUTE_SHORTCUT -> {
+                        val pkgLen = reader.readIntBlocking()
+                        val pkgBuf = ByteArray(pkgLen)
+                        reader.readFullyBlocking(pkgBuf, 0, pkgLen)
+                        val pkg = String(pkgBuf)
+                        val idLen = reader.readIntBlocking()
+                        val idBuf = ByteArray(idLen)
+                        reader.readFullyBlocking(idBuf, 0, idLen)
+                        val shortcutId = String(idBuf)
+                        log("Executing shortcut: $shortcutId for $pkg")
+                        // Try 'cmd shortcut execute' first — has full access under shell UID
+                        var result = execShellFullOutput(
+                            "cmd shortcut execute -s $pkg $shortcutId $displayId 2>&1"
+                        ) ?: ""
+                        log("cmd shortcut execute result: ${result.take(200)}")
+                        if (result.contains("Error") || result.contains("Unknown cmd")) {
+                            // Fall back to am start with the shortcut intent
+                            log("cmd shortcut failed, trying am start")
+                            result = execShellFullOutput(
+                                "am start --display $displayId " +
+                                "-a android.intent.action.MAIN " +
+                                "-c android.intent.category.LAUNCHER " +
+                                "-f 0x10200000 " +
+                                "--es shortcut_id \"$shortcutId\" " +
+                                "$pkg 2>&1"
+                            ) ?: ""
+                            log("am start result: ${result.take(200)}")
+                        }
+                    }
                     CMD_STOP -> running = false
                     else -> err("Unknown command: 0x${cmd.toString(16)}")
                 }
@@ -615,6 +697,16 @@ class VirtualDisplayServer(
         } catch (e: Exception) { null }
     }
 
+    /** Like execShellOutput but reads the full stdout (up to 64 KB). */
+    private fun execShellFullOutput(command: String): String? {
+        return try {
+            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val out = p.inputStream.bufferedReader().use { it.readText() }
+            p.waitFor()
+            out.ifEmpty { null }
+        } catch (e: Exception) { null }
+    }
+
     private fun execShell(command: String) {
         try {
             val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
@@ -674,16 +766,19 @@ class VirtualDisplayServer(
                 err("mDisplayIdToMirror reflection failed: ${e.javaClass.simpleName}: ${e.message}")
             }
 
+            // SHOULD_SHOW_SYSTEM_DECORATIONS (1<<9) intentionally NOT set.
+            // On Samsung devices it activates DeX desktop UI (taskbar, window
+            // decorations) on the VD, rendering them too small for the car display.
+            // The car's own PersistentNavBar and status UI provide all chrome.
             val flags = (DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
                     or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
                     or (1 shl 6)   // ROTATES_WITH_CONTENT
-                    or (1 shl 9)   // SHOULD_SHOW_SYSTEM_DECORATIONS
                     or (1 shl 10)  // TRUSTED
                     or (1 shl 11)  // OWN_DISPLAY_GROUP
                     or (1 shl 13)  // ALWAYS_UNLOCKED
                     or (1 shl 14)) // OWN_FOCUS
 
-            log("Creating VD with flags=0x${flags.toString(16)}")
+            log("Creating VD with flags=0x${flags.toString(16)} (no system decorations)")
             virtualDisplay = dm.createVirtualDisplay("DiLinkAutoVD", width, height, dpi, vdSurface, flags)
 
             if (virtualDisplay != null) {
@@ -720,9 +815,10 @@ class VirtualDisplayServer(
         val dmg = getInstance.invoke(null)
         log("Got DisplayManagerGlobal instance")
 
+        // SHOULD_SHOW_SYSTEM_DECORATIONS (1<<9) intentionally NOT set — see comment above.
         val flags = (DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
                 or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
-                or (1 shl 6) or (1 shl 9) or (1 shl 10) or (1 shl 11) or (1 shl 13) or (1 shl 14))
+                or (1 shl 6) or (1 shl 10) or (1 shl 11) or (1 shl 13) or (1 shl 14))
 
         val configBuilderClass = Class.forName("android.hardware.display.VirtualDisplayConfig\$Builder")
         val builderCtor = configBuilderClass.getDeclaredConstructor(
@@ -798,10 +894,14 @@ class VirtualDisplayServer(
     private fun checkStackEmptyImpl() {
         try {
             Thread.sleep(300)
+            // Count tasks on this display by looking for Task{ near display annotations.
+            // The -B 20 context ensures the display annotation and Task{ can be on
+            // different lines (varies by Android version).
             val p = Runtime.getRuntime().exec(arrayOf("sh", "-c",
                 "dumpsys activity activities 2>/dev/null" +
+                " | grep -B 20 'Task{'" +
                 " | grep -E 'display(Id)?=#?$displayId'" +
-                " | grep -c 'Task{'"))
+                " | wc -l"))
             val buf = ByteArray(64)
             val len = p.inputStream.read(buf)
             p.waitFor()
@@ -811,9 +911,53 @@ class VirtualDisplayServer(
             if (taskCount == 0) {
                 log("Display $displayId stack is empty")
                 enqueueWriteByte(MSG_STACK_EMPTY)
+            } else {
+                // Detect the focused app package on this display
+                val focusedPkg = getFocusedPackageOnDisplay()
+                if (focusedPkg != null) {
+                    log("Focused app on display $displayId: $focusedPkg")
+                    val pkgBytes = focusedPkg.toByteArray(Charsets.UTF_8)
+                    val msgBuf = java.nio.ByteBuffer.allocate(1 + 4 + pkgBytes.size)
+                    msgBuf.put(MSG_FOCUSED_APP)
+                    msgBuf.putInt(pkgBytes.size)
+                    msgBuf.put(pkgBytes)
+                    msgBuf.flip()
+                    writeQueue.add(msgBuf)
+                    writeQueueDepth++
+                    val wt = writerThread
+                    if (wt != null) java.util.concurrent.locks.LockSupport.unpark(wt)
+                } else {
+                    log("Display $displayId has tasks but no focused app — treating as empty")
+                    enqueueWriteByte(MSG_STACK_EMPTY)
+                }
             }
         } catch (e: Exception) {
             err("checkStackEmpty failed: ${e.message}")
+        }
+    }
+
+    /** Detects the package name of the currently focused (resumed) activity on the VD display. */
+    private fun getFocusedPackageOnDisplay(): String? {
+        return try {
+            // The globally resumed activity is the one with input focus.
+            // During streaming, this is on the VD (OWN_FOCUS flag).
+            val fp = Runtime.getRuntime().exec(arrayOf("sh", "-c",
+                "dumpsys activity activities 2>/dev/null" +
+                " | grep -B 5 'mResumedActivity'" +
+                " | grep -oP '[a-zA-Z][a-zA-Z0-9_.]+(?=/)'" +
+                " | head -1"))
+            val fbuf = ByteArray(256)
+            val flen = fp.inputStream.read(fbuf)
+            fp.waitFor()
+            if (flen > 0) {
+                val pkg = String(fbuf, 0, flen).trim()
+                // Exclude system/home packages — we only care about user apps
+                if (pkg.isNotEmpty() && !pkg.startsWith("com.android.") && pkg != "android") {
+                    pkg
+                } else null
+            } else null
+        } catch (e: Exception) {
+            null
         }
     }
 

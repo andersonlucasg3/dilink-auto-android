@@ -138,6 +138,7 @@ Tarmoqlar ishlatilgan **muammo shabloniga** asoslanib muammo agenti tomonidan av
 
 | Shablon | Yorliq | Tarmoq Namunasi | Maqsadi |
 |----------|-------|---------------|---------|
+| Hotfix | `hotfix` | `hotfix/vX.Y.Z` | Main dan kritik tuzatishlar |
 | Xatoni Tuzatish | `bug` | `fix/N-agent` | Xatolarni tuzatish |
 | Yangi Funksiya | `feature` | `feature/N-agent` | Yangi funksiyalar |
 | Tekshiruv | `investigation` | `investigate/N-agent` | Kod bazasini tekshirish |
@@ -145,7 +146,7 @@ Tarmoqlar ishlatilgan **muammo shabloniga** asoslanib muammo agenti tomonidan av
 | Reliz | `release` | `release/vX.Y.Z` | Reliz tayyorlash |
 | Agent Vazifasi (umumiy) | — | `issue/N-agent` | Umumiy |
 
-`release/*` dan tashqari barcha tarmoqlar PR orqali `develop` ga birlashtiriladi, `release/*` esa `main` ga yo'naltiriladi.
+`release/*` va `hotfix/*` dan tashqari barcha tarmoqlar PR orqali `develop` ga birlashtiriladi, `release/*` esa `main` ga yo'naltiriladi.
 
 ### CI Ish Jarayonlari
 

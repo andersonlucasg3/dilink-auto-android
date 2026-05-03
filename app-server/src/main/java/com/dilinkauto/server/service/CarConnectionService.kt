@@ -45,12 +45,12 @@ import kotlinx.coroutines.flow.*
 class CarConnectionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var controlConnection: Connection? = null
-    private var videoConnection: Connection? = null
-    private var inputConnection: Connection? = null
+    @Volatile private var controlConnection: Connection? = null
+    @Volatile private var videoConnection: Connection? = null
+    @Volatile private var inputConnection: Connection? = null
     val videoDecoder = VideoDecoder()
-    private var adbController: RemoteAdbController? = null
-    private var phoneHost: String? = null
+    @Volatile private var adbController: RemoteAdbController? = null
+    @Volatile private var phoneHost: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var consecutiveFailures = 0
     private var usbAdb: UsbAdbConnection? = null
@@ -65,6 +65,9 @@ class CarConnectionService : Service() {
                     .getBoolean("dev_mode", false)
         set(value) = getSharedPreferences("dilinkauto", MODE_PRIVATE)
             .edit().putBoolean("dev_mode", value).apply()
+
+    // ─── Handshake ───
+    private var handshakeVdDpi = VideoConfig.VIRTUAL_DISPLAY_DPI // DPI from phone (may be adjusted for DeX)
 
     private var vdServerJarPath = "/sdcard/DiLinkAuto/vd-server.jar"
 
@@ -131,11 +134,20 @@ class CarConnectionService : Service() {
     private val _vdStackEmpty = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val vdStackEmpty: SharedFlow<Unit> = _vdStackEmpty.asSharedFlow()
 
+    private val _focusedApp = MutableStateFlow<String?>(null)
+    val focusedApp: StateFlow<String?> = _focusedApp.asStateFlow()
+
     private val _videoReady = MutableStateFlow(false)
     val videoReady: StateFlow<Boolean> = _videoReady.asStateFlow()
 
     private val _statusMessage = MutableStateFlow("")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
+
+    private val _shortcutsCache = MutableStateFlow<Map<String, List<AppShortcut>>>(emptyMap())
+    val shortcutsCache: StateFlow<Map<String, List<AppShortcut>>> = _shortcutsCache.asStateFlow()
+
+    private val _appInfoData = MutableStateFlow<AppInfoDataMessage?>(null)
+    val appInfoData: StateFlow<AppInfoDataMessage?> = _appInfoData.asStateFlow()
 
     enum class State { IDLE, CONNECTING, CONNECTED, STREAMING }
 
@@ -356,7 +368,7 @@ class CarConnectionService : Service() {
                     appVersionCode = packageManager.getPackageInfo(packageName, 0).let {
                         @Suppress("DEPRECATION") it.versionCode
                     },
-                    targetFps = 60,
+                    targetFps = targetFps,
                     appVersionName = packageManager.getPackageInfo(packageName, 0).let {
                         it.versionName ?: ""
                     }
@@ -598,10 +610,11 @@ class CarConnectionService : Service() {
         when (frame.messageType) {
             ControlMsg.HANDSHAKE_RESPONSE -> {
                 val response = HandshakeResponse.decode(frame.payload)
-                carLogSend("Handshake OK: ${response.deviceName} jarPath=${response.vdServerJarPath} connMethod=${response.connectionMethod}")
+                carLogSend("Handshake OK: ${response.deviceName} jarPath=${response.vdServerJarPath} connMethod=${response.connectionMethod} vdDpi=${response.vdDpi}")
                 _phoneName.value = response.deviceName
                 vdWidth = response.displayWidth
                 vdHeight = response.displayHeight
+                handshakeVdDpi = response.vdDpi
                 if (response.vdServerJarPath.isNotEmpty()) {
                     vdServerJarPath = response.vdServerJarPath
                 }
@@ -629,7 +642,18 @@ class CarConnectionService : Service() {
             }
             ControlMsg.VD_STACK_EMPTY -> {
                 carLogSend("VD stack empty — switching to home")
+                _focusedApp.value = null
                 _vdStackEmpty.tryEmit(Unit)
+            }
+            ControlMsg.APP_SHORTCUTS_LIST -> {
+                val msg = AppShortcutsListMessage.decode(frame.payload)
+                carLogSend("Shortcuts received: ${msg.shortcuts.size} for ${msg.packageName}")
+                _shortcutsCache.value = _shortcutsCache.value + (msg.packageName to msg.shortcuts)
+            }
+            ControlMsg.FOCUSED_APP -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                carLogSend("Focused app: $pkg")
+                _focusedApp.value = pkg
             }
         }
     }
@@ -655,7 +679,7 @@ class CarConnectionService : Service() {
             val surf = android.view.Surface(tex)
             offscreenTexture = tex
             offscreenSurface = surf
-            videoDecoder.start(surf, vdWidth, vdHeight)
+            videoDecoder.start(surf, vdWidth, vdHeight, targetFps)
         }
 
         if (!_videoReady.value && !isConfig) {
@@ -668,7 +692,31 @@ class CarConnectionService : Service() {
 
     private fun handleDataFrame(frame: FrameCodec.Frame) {
         when (frame.messageType) {
-            DataMsg.APP_LIST -> { _appList.value = AppListMessage.decode(frame.payload).apps }
+            DataMsg.APP_LIST -> {
+                val apps = AppListMessage.decode(frame.payload).apps
+                _appList.value = apps
+                // Store source PNGs and prepare all icons for instant rendering.
+                var newIcons = 0
+                apps.forEach { app ->
+                    if (app.iconPng.isNotEmpty()) {
+                        ServerApp.iconCache.putSource(app.packageName, app.iconPng)
+                        newIcons++
+                    }
+                }
+                // Decode + resize all icons on a background thread BEFORE the grid
+                // renders. After prepareAll() finishes, getPrepared() is an O(1)
+                // ConcurrentHashMap lookup — zero work during scroll.
+                scope.launch(Dispatchers.IO) {
+                    val density = applicationContext.resources.displayMetrics.density
+                    val gridIconPx = (64 * density).toInt()
+                    val prepared = ServerApp.iconCache.prepareAll(apps, gridIconPx)
+                    carLogSend("App list: ${apps.size} apps, ${prepared} icons prepared @ ${gridIconPx}px")
+                    // Trigger grid recomposition so tiles pick up the prepared icons
+                    if (prepared > 0) {
+                        _appList.value = ArrayList(_appList.value)
+                    }
+                }
+            }
             DataMsg.NOTIFICATION_POST -> {
                 val n = NotificationData.decode(frame.payload)
                 // Replace existing notification with same ID (handles progress updates)
@@ -680,6 +728,16 @@ class CarConnectionService : Service() {
             }
             DataMsg.MEDIA_METADATA -> { _mediaMetadata.value = MediaMetadata.decode(frame.payload) }
             DataMsg.MEDIA_PLAYBACK_STATE -> { _playbackState.value = PlaybackState.decode(frame.payload) }
+            DataMsg.APP_UNINSTALLED -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                _appList.value = _appList.value.filter { it.packageName != pkg }
+                carLogSend("App uninstalled: $pkg — removed from grid")
+            }
+            DataMsg.APP_INFO_DATA -> {
+                val info = AppInfoDataMessage.decode(frame.payload)
+                _appInfoData.value = info
+                carLogSend("App info received: ${info.packageName} v${info.versionName}")
+            }
         }
     }
 
@@ -696,7 +754,7 @@ class CarConnectionService : Service() {
             val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
             val viewportWidth = displayMetrics.widthPixels - navBarPx
             val viewportHeight = displayMetrics.heightPixels
-            val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
+            val phoneDpi = handshakeVdDpi
             val dpiScale = phoneDpi.toFloat() / 160f
             val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
             val scaledW = ((scaledH * viewportWidth.toFloat() / viewportHeight).toInt()) and 0x7FFFFFFE.toInt()
@@ -705,7 +763,6 @@ class CarConnectionService : Service() {
             val serverPort = 19637
 
             val logFile = "/data/local/tmp/vd-server.log"
-            val targetFps = 60  // matches handshake request
             val args = "$scaledW $scaledH $phoneDpi $serverPort $viewportWidth $viewportHeight $targetFps"
 
             // Kill any existing VD server
@@ -738,6 +795,8 @@ class CarConnectionService : Service() {
     var vdWidth = 1408
         private set
     var vdHeight = 792
+        private set
+    var targetFps: Int = VideoConfig.TARGET_FPS
         private set
 
     /** Public log method for UI components (MirrorScreen, etc.) to route logs to phone */
@@ -829,6 +888,67 @@ class CarConnectionService : Service() {
         scope.launch(Dispatchers.IO) {
             try { controlConnection?.sendControl(ControlMsg.GO_BACK) }
             catch (e: Exception) { carLogSend("goBack failed: ${e.message}", "E") }
+        }
+    }
+
+    fun requestUninstall(packageName: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                controlConnection?.sendControl(ControlMsg.APP_UNINSTALL, packageName.toByteArray(Charsets.UTF_8))
+                carLogSend("Requested uninstall: $packageName")
+            } catch (e: Exception) { carLogSend("requestUninstall failed: ${e.message}", "E") }
+        }
+    }
+
+    fun clearAppInfoData() {
+        _appInfoData.value = null
+    }
+
+    fun requestAppInfo(packageName: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                controlConnection?.sendControl(ControlMsg.APP_INFO, packageName.toByteArray(Charsets.UTF_8))
+                carLogSend("Requested app info: $packageName")
+            } catch (e: Exception) { carLogSend("requestAppInfo failed: ${e.message}", "E") }
+        }
+    }
+
+    fun requestShortcuts(packageName: String) {
+        // Clear stale cache entry first so the UI knows we're loading
+        _shortcutsCache.value = _shortcutsCache.value - packageName
+        scope.launch(Dispatchers.IO) {
+            try {
+                controlConnection?.sendControl(ControlMsg.APP_SHORTCUTS, packageName.toByteArray(Charsets.UTF_8))
+                carLogSend("Requested shortcuts: $packageName")
+            } catch (e: Exception) { carLogSend("requestShortcuts failed: ${e.message}", "E") }
+        }
+    }
+
+    fun executeShortcut(packageName: String, shortcutId: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val msg = AppShortcutActionMessage(packageName, shortcutId)
+                controlConnection?.sendControl(ControlMsg.APP_SHORTCUT_ACTION, msg.encode())
+                carLogSend("Execute shortcut: $shortcutId for $packageName")
+            } catch (e: Exception) { carLogSend("executeShortcut failed: ${e.message}", "E") }
+        }
+    }
+
+    fun clearNotification(id: Int, packageName: String) {
+        _notifications.value = _notifications.value.filter { it.id != id || it.packageName != packageName }
+        scope.launch(Dispatchers.IO) {
+            try {
+                val msg = ClearNotificationMessage(id, packageName)
+                controlConnection?.sendData(DataMsg.NOTIFICATION_CLEAR, msg.encode())
+            } catch (e: Exception) { carLogSend("clearNotification failed: ${e.message}", "E") }
+        }
+    }
+
+    fun clearAllNotifications() {
+        _notifications.value = emptyList()
+        scope.launch(Dispatchers.IO) {
+            try { controlConnection?.sendData(DataMsg.NOTIFICATION_CLEAR_ALL, ByteArray(0)) }
+            catch (e: Exception) { carLogSend("clearAllNotifications failed: ${e.message}", "E") }
         }
     }
 

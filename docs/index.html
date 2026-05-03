@@ -33,7 +33,12 @@
             <option value="uz">O'zbekcha</option>
           </select>
         </div>
-        <a href="https://github.com/andersonlucasg3/dilink-auto-android" class="btn-ghost" target="_blank" rel="noopener" data-i18n="nav_github">GitHub</a>
+        <a href="https://github.com/andersonlucasg3/dilink-auto-android" class="btn btn-ghost" target="_blank" rel="noopener" title="GitHub">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+          <span data-i18n="nav_github">GitHub</span>
+        </a>
       </div>
     </div>
   </nav>
@@ -43,13 +48,30 @@
     <section class="hero">
       <div class="container">
         <div class="hero-badge">
-          <span class="badge-version">v0.16.0</span>
           <span class="badge-oss">Open Source</span>
         </div>
         <h1 class="hero-title">DiLink-Auto</h1>
         <p class="hero-subtitle" data-i18n="hero_subtitle">Open-source alternative to Android Auto — for any Android phone</p>
         <p class="hero-desc" data-i18n="hero_desc">Mirror your phone apps onto your car display with full touch interaction. No Google Services, no pairing codes, no accounts needed.</p>
-        <div class="hero-cta">
+        <div class="version-picker" id="versionPicker" style="display:none">
+          <div class="version-card version-card-release">
+            <div class="version-card-header">
+              <span class="version-badge version-badge-stable" data-i18n="version_stable">Stable</span>
+              <span class="version-tag" id="releaseVersion">—</span>
+            </div>
+            <p class="version-card-date" id="releaseDate"></p>
+            <a class="btn btn-primary btn-lg version-dl-btn" id="releaseDownload" target="_blank" rel="noopener" data-i18n="version_download_release">Download Release</a>
+          </div>
+          <div class="version-card version-card-prerelease">
+            <div class="version-card-header">
+              <span class="version-badge version-badge-dev" data-i18n="version_dev">Dev</span>
+              <span class="version-tag" id="prereleaseVersion">—</span>
+            </div>
+            <p class="version-card-date" id="prereleaseDate"></p>
+            <a class="btn btn-outline btn-lg version-dl-btn" id="prereleaseDownload" target="_blank" rel="noopener" data-i18n="version_download_prerelease">Download Pre-release</a>
+          </div>
+        </div>
+        <div class="hero-cta" id="heroCtaFallback">
           <a href="https://github.com/andersonlucasg3/dilink-auto-android/releases/latest" class="btn btn-primary btn-lg" target="_blank" rel="noopener" data-i18n="hero_download">Download Latest Release</a>
           <a href="https://github.com/andersonlucasg3/dilink-auto-android" class="btn btn-outline btn-lg" target="_blank" rel="noopener" data-i18n="hero_source">View on GitHub</a>
         </div>
@@ -196,7 +218,19 @@
         <h2 class="section-title" data-i18n="install_title">Installation</h2>
         <div class="install-card">
           <p data-i18n="install_desc">Download the APK and install it on your phone only. The car app is bundled inside — you never install anything on the car manually.</p>
-          <div class="install-cta">
+          <div class="install-cta" id="installCtaDynamic" style="display:none">
+            <div class="install-dl-grid">
+              <div class="install-dl-item">
+                <p class="install-dl-label" data-i18n="version_stable">Stable</p>
+                <a class="btn btn-primary btn-lg" id="installReleaseDownload" target="_blank" rel="noopener" data-i18n="install_download">Download APK</a>
+              </div>
+              <div class="install-dl-item">
+                <p class="install-dl-label" data-i18n="version_dev">Dev</p>
+                <a class="btn btn-outline btn-lg" id="installPrereleaseDownload" target="_blank" rel="noopener" data-i18n="install_download_prerelease">Download Pre-release APK</a>
+              </div>
+            </div>
+          </div>
+          <div class="install-cta" id="installCtaFallback">
             <a href="https://github.com/andersonlucasg3/dilink-auto-android/releases/latest" class="btn btn-primary btn-lg" target="_blank" rel="noopener" data-i18n="install_download">Download APK</a>
           </div>
           <div class="install-build">
@@ -304,6 +338,102 @@
     </div>
   </footer>
 
+  <!-- Floating support card -->
+  <div class="floating-support" id="floatingSupport">
+    <span class="floating-support-label" data-i18n="support_title">Support the Project</span>
+    <div class="floating-support-actions">
+      <a href="https://github.com/sponsors/andersonlucasg3" class="btn btn-pink" target="_blank" rel="noopener" data-i18n="support_github">Sponsor on GitHub</a>
+      <a href="https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d" class="btn btn-pix" target="_blank" rel="noopener" data-i18n="support_pix">Pay with Pix (Brazil)</a>
+    </div>
+  </div>
+
   <script src="js/i18n.js"></script>
+  <script>
+    (function() {
+      var RELEASES_URL = 'https://api.github.com/repos/andersonlucasg3/dilink-auto-android/releases?per_page=20';
+      var savedRelease = null;
+      var savedPrerelease = null;
+
+      function formatDate(dateStr) {
+        var d = new Date(dateStr);
+        var locale = typeof getLangLocale === 'function' ? getLangLocale() : 'en-US';
+        return d.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
+      }
+
+      function getAssetUrl(release) {
+        var apk = null;
+        (release.assets || []).forEach(function(a) {
+          if (a.name && a.name.endsWith('.apk') && a.browser_download_url) {
+            apk = a.browser_download_url;
+          }
+        });
+        return apk || release.html_url;
+      }
+
+      function renderDates() {
+        if (savedRelease) {
+          document.getElementById('releaseDate').textContent = formatDate(savedRelease.published_at);
+        }
+        if (savedPrerelease) {
+          document.getElementById('prereleaseDate').textContent = formatDate(savedPrerelease.published_at);
+        }
+      }
+
+      function showVersionPicker(release, prerelease) {
+        var picker = document.getElementById('versionPicker');
+        var fallback = document.getElementById('heroCtaFallback');
+        var installDynamic = document.getElementById('installCtaDynamic');
+        var installFallback = document.getElementById('installCtaFallback');
+        if (!picker || !fallback) return;
+
+        savedRelease = release;
+        savedPrerelease = prerelease;
+
+        if (release) {
+          document.getElementById('releaseVersion').textContent = release.tag_name;
+          document.getElementById('releaseDownload').href = getAssetUrl(release);
+          document.getElementById('installReleaseDownload').href = getAssetUrl(release);
+        }
+        if (prerelease) {
+          document.getElementById('prereleaseVersion').textContent = prerelease.tag_name;
+          document.getElementById('prereleaseDownload').href = getAssetUrl(prerelease);
+          document.getElementById('installPrereleaseDownload').href = getAssetUrl(prerelease);
+        }
+        renderDates();
+
+        picker.style.display = '';
+        fallback.style.display = 'none';
+        if (installDynamic) installDynamic.style.display = '';
+        if (installFallback) installFallback.style.display = 'none';
+      }
+
+      // Re-render dates when language changes
+      onLanguageChange = renderDates;
+
+      fetch(RELEASES_URL)
+        .then(function(r) { return r.json(); })
+        .then(function(releases) {
+          if (!Array.isArray(releases) || releases.length === 0) return;
+          var latestRelease = null;
+          var latestPrerelease = null;
+          for (var i = 0; i < releases.length; i++) {
+            var rel = releases[i];
+            if (rel.draft) continue;
+            if (rel.prerelease) {
+              if (!latestPrerelease) latestPrerelease = rel;
+            } else {
+              if (!latestRelease) latestRelease = rel;
+            }
+            if (latestRelease && latestPrerelease) break;
+          }
+          if (latestRelease || latestPrerelease) {
+            showVersionPicker(latestRelease, latestPrerelease);
+          }
+        })
+        .catch(function() {
+          // API unavailable — fallback to static links
+        });
+    })();
+  </script>
 </body>
 </html>

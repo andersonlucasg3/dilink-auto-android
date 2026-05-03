@@ -138,6 +138,7 @@ As branches são criadas automaticamente pelo agente de issues com base no **tem
 
 | Template | Label | Padrão de Branch | Finalidade |
 |----------|-------|-----------------|------------|
+| Hotfix | `hotfix` | `hotfix/vX.Y.Z` | Critical fixes from main |
 | Bug Fix | `bug` | `fix/N-agent` | Correções de bugs |
 | New Feature | `feature` | `feature/N-agent` | Novas funcionalidades |
 | Investigation | `investigation` | `investigate/N-agent` | Investigação do código |
@@ -145,7 +146,7 @@ As branches são criadas automaticamente pelo agente de issues com base no **tem
 | Release | `release` | `release/vX.Y.Z` | Preparação de release |
 | Agent Task (genérico) | — | `issue/N-agent` | Uso geral |
 
-Todas as branches são mescladas na `develop` via PR, exceto `release/*` que tem como destino a `main`.
+Todas as branches são mescladas na `develop` via PR, exceto `release/*` e `hotfix/*` e `hotfix/*` que tem como destino a `main`.
 
 ### Workflows de CI
 

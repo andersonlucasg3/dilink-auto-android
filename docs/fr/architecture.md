@@ -118,6 +118,7 @@ Modèle de connexion parallèle avec pistes WiFi (3 connexions) et USB.
 
 | Composant | Fichier | Rôle |
 |-----------|------|---------|
+| AppIconCache | `AppIconCache.kt` | Cache d'icônes côté voiture — décode les PNG sources 192x192 une fois, `prepareAll()` redimensionne toutes les icônes sur thread d'arrière-plan, `getPrepared()` est une recherche O(1) ConcurrentHashMap sans I/O pendant le défilement |
 | CarConnectionService | `service/CarConnectionService.kt` | Machine d'état parallèle, connexions WiFi 3 voies + piste USB, gestion UPDATING_CAR |
 | VideoDecoder | `decoder/VideoDecoder.kt` | Décodage H.264, file de 30 trames, démarrage anticipé sur surface hors écran, callback logSink |
 | CarLaunchScreen | `ui/screen/CarLaunchScreen.kt` | Écran de lancement/connexion plein écran (sans nav), marque, instructions, IP manuelle |
@@ -192,6 +193,8 @@ Module librairie Android (`com.android.library`), compilé via `bundleLibRuntime
 | **Largeur viewport paire** | Largeur de la barre de navigation ajustée pour garantir des dimensions paires compatibles H.264. |
 | **Heartbeat sur contrôle uniquement** | Les connexions vidéo et entrée n'ont pas de surcoût heartbeat. Le watchdog de la connexion de contrôle détecte les pairs morts. |
 | **FileLog** | Contourne le filtrage logcat HyperOS. Journalisation fichier avec rotation sur `/sdcard/DiLinkAuto/`. |
+| **Cache d'icônes d'app** | Le cache côté voiture persiste les PNG sources (192x192) sur disque. `prepareAll()` décode et redimensionne toutes les icônes à la taille de la grille sur un thread d'arrière-plan après l'arrivée de APP_LIST. `getPrepared()` est une recherche ConcurrentHashMap sans coût — sans coroutines, sans I/O, sans décodage pendant le défilement. |
+| **Rejet/effacement des notifications** | Bouton de rejet par élément et en-tête "Tout effacer" sur l'écran de notifications de la voiture. La voiture envoie les messages de données NOTIFICATION_CLEAR / NOTIFICATION_CLEAR_ALL au téléphone, qui efface les notifications Android correspondantes. |
 | **Callbacks logSink** | VideoDecoder et UsbAdbConnection acheminent les logs via le protocole vers le FileLog du téléphone. |
 | **Auth ADB pré-hachée** | AUTH_SIGNATURE utilise `NONEwithRSA` + préfixe SHA-1 DigestInfo (pré-haché). Correspond à `RSA_sign(NID_sha1)` d'AOSP. "Toujours autoriser" persiste correctement. |
 | **Alimentation écran via SurfaceControl** | `DisplayControl` chargé depuis `services.jar` via `ClassLoaderFactory` (Android 14+). Repli sur `cmd display power-off/on`. Le téléphone restaure l'écran à la déconnexion VD. |

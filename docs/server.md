@@ -47,7 +47,7 @@ Foreground service managing the full connection lifecycle with a parallel prereq
 **Track A — WiFi:**
 - Discovery: gateway IP (hotspot/LAN, retries every 3s) → mDNS → manual IP
 - Control connection: NIO non-blocking SocketChannel connect to phone TCP:9637
-- Handshake: sends viewport dimensions + DPI + appVersionCode + appVersionName + targetFps (60) → receives phone info + vdServerJarPath + connectionMethod
+- Handshake: sends viewport dimensions + DPI + appVersionCode + appVersionName + targetFps (60) → receives phone info + vdServerJarPath + connectionMethod + adjusted VD DPI (handshakeVdDpi)
 - On handshake response: opens video (9638) + input (9639) connections in parallel, sets `wifiReady = true` after all 3 established
 - Video: receives H.264 frames via video connection, dispatches to VideoDecoder
 - Touch: dedicated single-thread executor, `sendTouchEvent()` / `sendTouchBatch()` via input connection
@@ -101,6 +101,16 @@ H.264 decoder using MediaCodec with Surface output (GPU-direct rendering).
 - Catchup mode: four graduated speedup zones based on queue depth — normal (0-6 frames), gentle 1.5x (7-12 frames, skips 1 of 3 non-keyframes), medium 2x (13-20 frames, skips 1 of 2), aggressive 3x (21+ frames, skips 2 of 3). Keyframes never skipped.
 - Flushes codec and re-feeds CONFIG on 10+ consecutive dequeueInputBuffer drops
 
+### AppIconCache
+
+Car-side icon cache that decodes and resizes icons once, then serves them instantly during scroll.
+
+- `putSource(packageName, pngBytes)`: Stores high-resolution (192x192) source PNG received from phone via app list. Persists to disk as `{packageName}_src.png`.
+- `prepareAll(apps, sizePx)`: Decodes and resizes all icons on a background thread before the grid becomes visible. Increments `preparedVersion` to trigger UI recomposition.
+- `getPrepared(packageName)`: Synchronous O(1) ConcurrentHashMap lookup — zero coroutines, zero I/O, zero decoding during scroll. Returns ready-to-render `ImageBitmap`.
+- `get(packageName, sizePx)`: Full decode+resize path (used by NotificationScreen and NavBar for few icons). Returns `Bitmap` at requested pixel size.
+- `evict(packageName)`: Removes cached data for uninstalled apps.
+
 ### ServerApp
 
 Application class. Creates notification channel `dilinkauto_car_service` with `IMPORTANCE_LOW`.
@@ -135,10 +145,13 @@ Width computed to guarantee even viewport for H.264 encoder.
 
 ### NotificationScreen
 
-- Notification list sorted by timestamp (newest first)
+- Notification list sorted by timestamp (newest first) with relative time display ("now", "Xm", "Xh", date)
+- App icons shown inline (from phone's `iconPng` payload)
 - Dedup by ID: updates replace existing (handles progress notifications)
 - Progress bars: determinate (filled) and indeterminate (spinning)
 - Tap-to-launch: tapping a notification launches the owner app on the VD and switches to mirror view
+- Per-item dismiss button (×): dismisses with slide-out animation, sends `NOTIFICATION_CLEAR` to phone
+- "Clear All" header button: sends `NOTIFICATION_CLEAR_ALL` to phone, clears all active notifications
 
 ### App Grid (HomeContent)
 
@@ -148,6 +161,7 @@ Shown as the main content area when streaming mode is active and current screen 
 - 64dp app icons in dynamically calculated fixed grid columns (3-12 based on display width)
 - App name text: bodyLarge
 - Alphabetical sort
+- Long-press context menu: Uninstall and App Info. App uninstall sends `APP_UNINSTALL` via control channel, phone processes system dialog and sends `APP_UNINSTALLED` data message to refresh car's app list. `AppInfoDataMessage` displays app info in car-side dialog.
 - Manual IP entry
 - Connection status
 

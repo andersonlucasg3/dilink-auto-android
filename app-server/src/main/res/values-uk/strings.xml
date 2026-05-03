@@ -73,6 +73,9 @@
 
     <!-- Notifications -->
     <string name="no_notifications">Немає сповіщень</string>
+    <string name="notifications_count">Сповіщення (%d)</string>
+    <string name="clear_all">Очистити Все</string>
+    <string name="clear_notification">Очистити сповіщення</string>
 
     <!-- Connection Status Messages -->
     <string name="status_deploying_vd">Розгортання віртуального дисплея…</string>
@@ -89,4 +92,6 @@
     <string name="status_vd_failed">Помилка VD сервера</string>
     <string name="status_waiting_video">Очікування відеопотоку…</string>
     <string name="status_updating_please_wait">Оновлення застосунку авто… Будь ласка, зачекайте</string>
+    <string name="action_uninstall">Видалити</string>
+    <string name="action_app_info">Відомості</string>
 </resources>

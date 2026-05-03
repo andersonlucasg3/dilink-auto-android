@@ -1,9 +1,31 @@
 # Suivi de progression
 
-Version actuelle : **v0.16.0** (stable)
-Dernière mise à jour : 2026-04-29
+Version actuelle : **v0.17.0** (stable)
+Dernière mise à jour : 2026-05-02
 
 ## Jalons
+
+### v0.17.0 (2026-05-02)
+
+- **Redémarrage du décodeur éliminé** : `MediaCodec.setOutputSurface()` remplace `stop()`+`start()`. MirrorContent persiste dans l'arbre Compose avec `View.INVISIBLE` — zéro perte d'images lors de la navigation HOME↔APP↔NOTIFICATIONS.
+- **30fps fixe** : Réduit de 60fps à 30fps. Le téléphone ne surchauffe plus. Charge CPU/GPU réduite de moitié. Trafic WiFi réduit de ~40%.
+- **Framerate adaptatif supprimé** : Le mode 15fps causait des chutes d'images lors du changement d'application. Retour au 30fps fixe.
+- **Documentation** : Tous les changements v0.17.0 documentés avec traduction complète en 8 langues.
+
+### v0.17.0-dev-02 (2026-05-01)
+
+- **Correction surchauffe du téléphone** : Élimination des patterns d'attente active CPU dans le pipeline de streaming qui causaient la surchauffe du téléphone. Remplacement des busy-waits `delay(1)` par des mécanismes blocking/selector appropriés.
+- **AppIconCache déplacé côté voiture** : Le cache d'icônes côté voiture persiste les PNG sources (192x192) sur le disque. `prepareAll()` décode+redimensionne toutes les icônes sur un thread d'arrière-plan avant l'apparition de la grille ; `getPrepared()` est une recherche O(1) ConcurrentHashMap sans I/O lors du défilement. Élimination du décodage par tuile et du crash lors du défilement rapide.
+- **AppTile simplifié** : Suppression de la collecte StateFlow par tuile, du DropdownMenu lazy et des effets click ripple. Tuiles légères avec clickable au lieu de combinedClickable pour le tap principal.
+- **Déduplication de la grille d'apps** : Correction du crash LazyGrid par déduplication des éléments par packageName.
+
+### v0.17.0-dev-01 (2026-04-30)
+
+- **Fermeture individuelle des notifications et Tout effacer** : L'écran de notifications voiture a maintenant des boutons de fermeture par élément avec animations slide-out et un bouton "Tout effacer" dans l'en-tête. Nouveaux messages protocolaires : `NOTIFICATION_CLEAR` (0x04) et `NOTIFICATION_CLEAR_ALL` (0x05) sur le canal data. Icônes par élément depuis le payload `iconPng` du téléphone.
+- **Actions contextuelles des applications** : Appui long sur les tuiles d'apps (lanceur) et apps récentes de la barre de nav affiche un menu déroulant avec Désinstaller et Infos application. Propagation de désinstallation via `APP_UNINSTALL` (0x1B) / `APP_UNINSTALLED` (0x06). Infos application affiche une boîte de dialogue côté voiture avec les métadonnées `APP_INFO_DATA` (0x07) du téléphone. Les actions du menu contextuel passent par le serveur VD pour un accès niveau shell.
+- **Infrastructure de raccourcis d'applications** (désactivée dans l'UI) : Messages protocolaires `APP_SHORTCUTS` (0x18) / `APP_SHORTCUTS_LIST` (0x19) / `APP_SHORTCUT_ACTION` (0x1A) avec requête serveur VD + fallback APK XML. Désactivée en attendant le raffinement de la résolution des libellés (issue #57).
+- **Correction du bouton retour** : GO_BACK ferme maintenant les activités une par une avant de revenir au menu d'accueil, utilisant un suivi de pile approprié et les messages `FOCUSED_APP` (0x16).
+- **DPI Samsung DeX / Mode Bureau** (annulé) : L'implémentation initiale utilisant la détection `UiModeManager.currentModeType` et 213dpi a été annulée dans dev-02. Remplacée par une approche de suppression de flag au niveau VD.
 
 ### v0.16.0 (2026-04-29)
 
