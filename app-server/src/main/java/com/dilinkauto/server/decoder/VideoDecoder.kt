@@ -118,19 +118,21 @@ class VideoDecoder {
             }
 
             // Catchup: graduated speedup based on queue depth.
-            // When the queue is slightly behind, gentle 1.5x catchup.
-            // When severely backed up, aggressive 3x catchup to recover quickly.
-            // Always feeds keyframes — skipping them would prolong artifacts.
+            // Skips non-keyframes to drain the queue faster when the decoder
+            // falls behind. Thresholds in real-time latency budget (ms), not
+            // absolute frame counts — scales with actual fps.
             //
-            // Thresholds tuned for BYD DiLink 3.0 hardware (Android 10, ~25-28fps
-            // effective decode). Tighter than ideal to prevent progressive degradation:
-            //   normal  (0-67ms)  — feed all frames
-            //   gentle  (67-133ms)  — skip 1 of 3 non-keyframes (1.5x catchup)
-            //   medium  (133-200ms) — skip 1 of 2 non-keyframes (2x catchup)
-            //   aggressive (200ms+)  — skip 2 of 3 non-keyframes (3x catchup)
-            val catchupGentle = (67L * fps / 1000).toInt().coerceAtLeast(2)
-            val catchupMedium = (133L * fps / 1000).toInt().coerceAtLeast(4)
-            val catchupAggressive = (200L * fps / 1000).toInt().coerceAtLeast(6)
+            //   normal  (0-200ms) — feed all frames, smooth streaming
+            //   gentle  (200-300ms) — skip 1 of 3 non-keyframes (1.5x drain)
+            //   medium  (300-400ms) — skip 1 of 2 non-keyframes (2x drain)
+            //   aggressive (400ms+)  — skip 2 of 3 non-keyframes (3x drain)
+            //
+            // At 30fps: gentle=6, medium=9, agg=12 (queue=15 = 500ms total buffer).
+            // Normal streaming stays at 1-3 frames — catchup only protects against
+            // real congestion, not normal queue fluctuation.
+            val catchupGentle = (200L * fps / 1000).toInt().coerceAtLeast(4)
+            val catchupMedium = (300L * fps / 1000).toInt().coerceAtLeast(6)
+            val catchupAggressive = (400L * fps / 1000).toInt().coerceAtLeast(9)
             var skipCount = 0L
 
             while (running.get()) {
