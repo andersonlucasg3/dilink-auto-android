@@ -39,7 +39,7 @@ class VideoDecoder {
     private var feedThread: Thread? = null
     private val running = AtomicBoolean(false)
     val isRunning: Boolean get() = running.get()
-    private val frameQueue = ArrayBlockingQueue<FrameData>(6) // 240ms @ 25fps — real-time: absorb jitter, prevent delay
+    private val frameQueue = ArrayBlockingQueue<FrameData>(15) // 250ms @ 60fps — proven working buffer for WiFi jitter
 
     // CONFIG data is cached separately so it's never lost, even if it arrives
     // before start() is called or while the queue is full.
