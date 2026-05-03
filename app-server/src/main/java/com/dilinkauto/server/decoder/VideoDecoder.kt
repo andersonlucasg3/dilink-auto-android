@@ -39,7 +39,7 @@ class VideoDecoder {
     private var feedThread: Thread? = null
     private val running = AtomicBoolean(false)
     val isRunning: Boolean get() = running.get()
-    private val frameQueue = ArrayBlockingQueue<FrameData>(15) // 500ms @ 30fps — reduced for low-end devices
+    private val frameQueue = ArrayBlockingQueue<FrameData>(6) // 240ms @ 25fps — real-time: absorb jitter, prevent delay
 
     // CONFIG data is cached separately so it's never lost, even if it arrives
     // before start() is called or while the queue is full.

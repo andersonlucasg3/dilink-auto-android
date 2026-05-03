@@ -307,7 +307,10 @@ class VirtualDisplayServer(
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
         format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
+        // Baseline profile: simpler entropy coding (CAVLC), no B-frames.
+        // Decodes ~20% faster on low-end hardware like BYD DiLink 3.0.
+        // Slightly larger file size (~5-10%) is negligible on local WiFi.
+        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
         format.setInteger(MediaFormat.KEY_LATENCY, 1)
         format.setInteger(MediaFormat.KEY_PRIORITY, 0) // real-time — ensures P-frames between keyframes
         format.setLong("repeat-previous-frame-after", 500_000L)
@@ -316,7 +319,7 @@ class VirtualDisplayServer(
             encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).also {
                 it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
-            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps Main low-latency")
+            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps Baseline low-latency")
         } catch (e: Exception) {
             throw IOException("Failed to create encoder: ${e.message}", e)
         }
