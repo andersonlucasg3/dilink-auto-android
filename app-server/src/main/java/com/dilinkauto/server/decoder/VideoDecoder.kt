@@ -122,15 +122,15 @@ class VideoDecoder {
             // When severely backed up, aggressive 3x catchup to recover quickly.
             // Always feeds keyframes — skipping them would prolong artifacts.
             //
-            // Thresholds computed from actual fps (not VideoConfig.TARGET_FPS).
-            // Each threshold targets a specific real-time latency budget:
-            //   normal  (0-100ms)  — feed all frames
-            //   gentle  (100-200ms) — skip 1 of 3 non-keyframes (1.5x catchup)
-            //   medium  (200-333ms) — skip 1 of 2 non-keyframes (2x catchup)
-            //   aggressive (333ms+) — skip 2 of 3 non-keyframes (3x catchup)
-            val catchupGentle = (100L * fps / 1000).toInt().coerceAtLeast(3)
-            val catchupMedium = (200L * fps / 1000).toInt().coerceAtLeast(6)
-            val catchupAggressive = (333L * fps / 1000).toInt().coerceAtLeast(10)
+            // Thresholds tuned for BYD DiLink 3.0 hardware (Android 10, ~25-28fps
+            // effective decode). Tighter than ideal to prevent progressive degradation:
+            //   normal  (0-67ms)  — feed all frames
+            //   gentle  (67-133ms)  — skip 1 of 3 non-keyframes (1.5x catchup)
+            //   medium  (133-200ms) — skip 1 of 2 non-keyframes (2x catchup)
+            //   aggressive (200ms+)  — skip 2 of 3 non-keyframes (3x catchup)
+            val catchupGentle = (67L * fps / 1000).toInt().coerceAtLeast(2)
+            val catchupMedium = (133L * fps / 1000).toInt().coerceAtLeast(4)
+            val catchupAggressive = (200L * fps / 1000).toInt().coerceAtLeast(6)
             var skipCount = 0L
 
             while (running.get()) {

@@ -664,6 +664,7 @@ class ConnectionService : Service() {
                     FileLog.i(TAG, "Auto-update result: ${result.trim()}")
                     if (result.contains("Success")) {
                         _installStatusStatic.value = getString(R.string.status_auto_update_complete)
+                        lastSentIconHash.clear() // car's icon cache was wiped by reinstall
                         FileLog.i(TAG, "Car app auto-updated — restarting")
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
                     } else {
@@ -852,6 +853,7 @@ class ConnectionService : Service() {
 
                     if (result.contains("Success")) {
                         _installStatus.value = getString(R.string.car_install_status_launching_car_app)
+                        lastSentIconHash.clear() // car's icon cache was wiped by reinstall
                         dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
                         _installStatus.value = getString(R.string.car_install_status_car_installed, myVersionName)
                     } else {
