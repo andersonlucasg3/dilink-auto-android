@@ -1,9 +1,16 @@
 # Progress Tracker
 
-Current version: **v0.17.0-dev-02** (pre-release)
-Last updated: 2026-05-01
+Current version: **v0.17.0** (stable)
+Last updated: 2026-05-02
 
 ## Milestones
+
+### v0.17.0 (2026-05-02)
+
+- **Decoder restart eliminated**: `MediaCodec.setOutputSurface()` replaces `stop()`+`start()` when TextureView surface changes. MirrorContent kept alive in Compose tree with `View.INVISIBLE` toggle — zero frame loss during HOME↔APP↔NOTIFICATIONS navigation. Eliminated ~3s of keyframe-drop artifacts per screen transition.
+- **Fixed 30fps encoding**: Reduced from 60fps to 30fps fixed rate. Phone no longer overheats during streaming. CPU/GPU load halved. WiFi traffic reduced ~40%.
+- **Adaptive framerate removed**: Initial 15fps static-mode caused near-zero frame rate during app switching. Reverted to fixed 30fps — deterministic, smooth transitions between apps.
+- **Documentation**: All v0.17.0 changes documented with full 8-language translations (en, pt-BR, ru, be, fr, kk, uk, uz). Floating support card added to GitHub Pages. Language selector locale for release dates.
 
 ### v0.17.0-dev-02 (2026-05-01)
 

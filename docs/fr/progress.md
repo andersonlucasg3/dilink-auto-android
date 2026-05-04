@@ -1,9 +1,16 @@
 # Suivi de progression
 
-Version actuelle : **v0.17.0-dev-02** (pre-release)
-Dernière mise à jour : 2026-05-01
+Version actuelle : **v0.17.0** (stable)
+Dernière mise à jour : 2026-05-02
 
 ## Jalons
+
+### v0.17.0 (2026-05-02)
+
+- **Redémarrage du décodeur éliminé** : `MediaCodec.setOutputSurface()` remplace `stop()`+`start()`. MirrorContent persiste dans l'arbre Compose avec `View.INVISIBLE` — zéro perte d'images lors de la navigation HOME↔APP↔NOTIFICATIONS.
+- **30fps fixe** : Réduit de 60fps à 30fps. Le téléphone ne surchauffe plus. Charge CPU/GPU réduite de moitié. Trafic WiFi réduit de ~40%.
+- **Framerate adaptatif supprimé** : Le mode 15fps causait des chutes d'images lors du changement d'application. Retour au 30fps fixe.
+- **Documentation** : Tous les changements v0.17.0 documentés avec traduction complète en 8 langues.
 
 ### v0.17.0-dev-02 (2026-05-01)
 

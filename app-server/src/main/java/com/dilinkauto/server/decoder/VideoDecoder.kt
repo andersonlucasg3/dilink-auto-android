@@ -39,7 +39,7 @@ class VideoDecoder {
     private var feedThread: Thread? = null
     private val running = AtomicBoolean(false)
     val isRunning: Boolean get() = running.get()
-    private val frameQueue = ArrayBlockingQueue<FrameData>(15) // 500ms @ 30fps — reduced for low-end devices
+    private val frameQueue = ArrayBlockingQueue<FrameData>(15) // 250ms @ 60fps — proven working buffer for WiFi jitter
 
     // CONFIG data is cached separately so it's never lost, even if it arrives
     // before start() is called or while the queue is full.
@@ -77,13 +77,13 @@ class VideoDecoder {
     /**
      * Starts the decoder, rendering to the provided Surface.
      */
-    fun start(surface: Surface, width: Int, height: Int) {
+    fun start(surface: Surface, width: Int, height: Int, fps: Int = VideoConfig.TARGET_FPS) {
         if (running.getAndSet(true)) {
             logW("start() called but already running")
             return
         }
 
-        log("Starting decoder: ${width}x${height}, cached config=${configData != null}, queued=${frameQueue.size}")
+        log("Starting decoder: ${width}x${height} @${fps}fps, cached config=${configData != null}, queued=${frameQueue.size}")
 
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
@@ -118,23 +118,26 @@ class VideoDecoder {
             }
 
             // Catchup: graduated speedup based on queue depth.
-            // When the queue is slightly behind, gentle 1.5x catchup.
-            // When severely backed up, aggressive 3x catchup to recover quickly.
-            // Always feeds keyframes — skipping them would prolong artifacts.
+            // Skips non-keyframes to drain the queue faster when the decoder
+            // falls behind. Thresholds in real-time latency budget (ms), not
+            // absolute frame counts — scales with actual fps.
             //
-            // Thresholds in frames (at 60fps each frame ≈ 16.7ms):
-            //   0-6   normal  (0-100ms latency)
-            //   7-12  gentle  (100-200ms) — skip 1 of 3 non-keyframes
-            //  13-20  medium  (200-333ms) — skip 1 of 2 non-keyframes
-            //  21+    aggressive (333ms+) — skip 2 of 3 non-keyframes
-            val catchupGentle = (100L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(3)  // 6 at 60fps
-            val catchupMedium = (200L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(6)  // 12 at 60fps
-            val catchupAggressive = (333L * VideoConfig.TARGET_FPS / 1000).toInt().coerceAtLeast(10) // 20 at 60fps
+            //   normal  (0-200ms) — feed all frames, smooth streaming
+            //   gentle  (200-300ms) — skip 1 of 3 non-keyframes (1.5x drain)
+            //   medium  (300-400ms) — skip 1 of 2 non-keyframes (2x drain)
+            //   aggressive (400ms+)  — skip 2 of 3 non-keyframes (3x drain)
+            //
+            // At 30fps: gentle=6, medium=9, agg=12 (queue=15 = 500ms total buffer).
+            // Normal streaming stays at 1-3 frames — catchup only protects against
+            // real congestion, not normal queue fluctuation.
+            val catchupGentle = (200L * fps / 1000).toInt().coerceAtLeast(4)
+            val catchupMedium = (300L * fps / 1000).toInt().coerceAtLeast(6)
+            val catchupAggressive = (400L * fps / 1000).toInt().coerceAtLeast(9)
             var skipCount = 0L
 
             while (running.get()) {
                 val frame = try {
-                    frameQueue.poll(VideoConfig.FRAME_INTERVAL_MS, TimeUnit.MILLISECONDS)
+                    frameQueue.poll(1000L / fps, TimeUnit.MILLISECONDS)
                 } catch (_: InterruptedException) {
                     continue
                 } ?: continue
@@ -330,6 +333,25 @@ class VideoDecoder {
             if (dropCount <= 5 || dropCount % 30 == 0L) {
                 logW("Queue full — dropped oldest as last resort #$dropCount")
             }
+        }
+    }
+
+    /**
+     * Switches the decoder output to a new Surface without stopping/restarting.
+     * Uses MediaCodec.setOutputSurface() — available since API 23 (Android 10+ BYD).
+     * Eliminates the keyframe-drop storm that happens with stop()+start().
+     */
+    fun switchSurface(newSurface: Surface) {
+        val c = codec
+        if (c == null) {
+            logW("switchSurface: codec is null, ignoring")
+            return
+        }
+        try {
+            c.setOutputSurface(newSurface)
+            log("Switched decoder output to new Surface")
+        } catch (e: Exception) {
+            logE("switchSurface failed: ${e.message}")
         }
     }
 

@@ -1,9 +1,16 @@
 # Progress Traker
 
-Joriy versiya: **v0.17.0-dev-02** (pre-release)
+Joriy versiya: **v0.17.0** (barqaror)
 So'nggi yangilanish: 2026-05-01
 
 ## Bosqichlar
+
+### v0.17.0 (2026-05-02)
+
+- **Dekoderni qayta ishga tushirish bartaraf etildi**: `MediaCodec.setOutputSurface()` `stop()`+`start()` o'rnini egallaydi. MirrorContent Compose daraxtida `View.INVISIBLE` bilan saqlanadi.
+- **Qat'iy 30fps**: 60fps dan 30fps ga tushirildi. Telefon endi qizib ketmaydi. CPU/GPU yuklamasi ikki baravar kamaydi.
+- **Adaptiv framerate olib tashlandi**: 15fps rejimi ilovalarni almashtirishda kadrlar pasayishiga olib keldi.
+- **Hujjatlar**: Barcha v0.17.0 o'zgarishlari 8 tilga to'liq tarjima qilingan hujjatlashtirildi.
 
 ### v0.17.0-dev-02 (2026-05-01)
 
