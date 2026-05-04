@@ -13,6 +13,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dilinkauto.protocol.AppInfo
 import com.dilinkauto.server.R
+import com.dilinkauto.server.service.CarConnectionService
 
 /**
  * Persistent left-side navigation bar — always visible on all screens.
@@ -33,6 +34,7 @@ fun PersistentNavBar(
     activeAppPackage: String?,
     isPhoneConnected: Boolean,
     appList: List<AppInfo>,
+    service: CarConnectionService,
     notificationCount: Int = 0,
     onAppClick: (String) -> Unit,
     onBack: () -> Unit,
@@ -106,6 +108,7 @@ fun PersistentNavBar(
             RecentAppIcon(
                 app = appMap[pkg],
                 isActive = pkg == activeAppPackage,
+                service = service,
                 onClick = { onAppClick(pkg) }
             )
             Spacer(Modifier.height(4.dp))

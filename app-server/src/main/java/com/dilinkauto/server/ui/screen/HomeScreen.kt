@@ -27,6 +27,7 @@ fun HomeContent(
             AppGrid(
                 apps = appList,
                 onAppClick = onAppClick,
+                service = service,
                 modifier = Modifier.weight(1f)
             )
         } else {

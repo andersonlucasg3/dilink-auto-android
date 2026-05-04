@@ -115,6 +115,7 @@ DiLink-Auto/
 
 | Component | File | Purpose |
 |-----------|------|---------|
+| AppIconCache | `AppIconCache.kt` | Кеш іконок на стороні автомобіля — декодує вихідні PNG 192x192 один раз, `prepareAll()` змінює розмір усіх іконок у фоновому потоці, `getPrepared()` це O(1) пошук у ConcurrentHashMap без I/O під час прокручування |
 | CarConnectionService | `service/CarConnectionService.kt` | Паралельний скінченний автомат, 3 з'єднання WiFi + USB трек, обробка UPDATING_CAR |
 | VideoDecoder | `decoder/VideoDecoder.kt` | Декодування H.264, черга з 30 кадрів, ранній старт на позаекранній поверхні, зворотний виклик logSink |
 | CarLaunchScreen | `ui/screen/CarLaunchScreen.kt` | Повноекранний екран запуску/з'єднання (без навігації), брендинг, інструкції, ручний IP |
@@ -189,6 +190,8 @@ DiLink-Auto/
 | **Парна ширина вікна** | Ширина панелі навігації підганяється для гарантії H.264-сумісних парних розмірів. |
 | **Heartbeat лише на control** | Відео та вхідні з'єднання не мають накладних витрат heartbeat. Watchdog control-з'єднання виявляє мертві вузли. |
 | **FileLog** | Обходить фільтрацію logcat у HyperOS. Файлове логування з ротацією на `/sdcard/DiLinkAuto/`. |
+| **Кеш іконок застосунків** | Кеш на стороні автомобіля зберігає вихідні PNG (192x192) на диск. `prepareAll()` декодує та змінює розмір усіх іконок до розміру сітки у фоновому потоці після отримання APP_LIST. `getPrepared()` це пошук ConcurrentHashMap з нульовою вартістю — без корутин, без I/O, без декодування під час прокручування. |
+| **Відхилення/очищення сповіщень** | Кнопка відхилення для кожного елемента та заголовок "Очистити все" на екрані сповіщень автомобіля. Автомобіль надсилає NOTIFICATION_CLEAR / NOTIFICATION_CLEAR_ALL через канал даних на телефон, який очищає відповідні сповіщення Android. |
 | **Зворотні виклики logSink** | VideoDecoder та UsbAdbConnection маршрутизують логи через протокол до FileLog телефону. |
 | **ADB попередньо хешована автентифікація** | AUTH_SIGNATURE використовує `NONEwithRSA` + префікс SHA-1 DigestInfo (попередньо хешований). Відповідає `RSA_sign(NID_sha1)` в AOSP. "Always allow" зберігається коректно. |
 | **Керування живленням дисплея через SurfaceControl** | `DisplayControl` завантажений з `services.jar` через `ClassLoaderFactory` (Android 14+). Резервний варіант: `cmd display power-off/on`. Телефон відновлює дисплей при відключенні VD. |

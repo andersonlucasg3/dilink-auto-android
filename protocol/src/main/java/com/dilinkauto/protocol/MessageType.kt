@@ -14,10 +14,22 @@ object ControlMsg {
     const val APP_STOPPED: Byte = 0x14
     /** Phone → Car: VD display has no activities (stack empty after back) */
     const val VD_STACK_EMPTY: Byte = 0x15
+    /** Phone → Car: currently focused app package on VD (payload: UTF-8 package name) */
+    const val FOCUSED_APP: Byte = 0x16
     /** Car → Phone: VD server is running, connect to it on localhost:port */
     const val VD_SERVER_READY: Byte = 0x20
     /** Phone → Car: car app is being updated, don't reconnect — wait for restart */
     const val UPDATING_CAR: Byte = 0x30
+    /** Car → Phone: request to uninstall an app (payload: package name UTF-8) */
+    const val APP_UNINSTALL: Byte = 0x1B
+    /** Car → Phone: request to open app info/settings (payload: package name UTF-8) */
+    const val APP_INFO: Byte = 0x17
+    /** Car → Phone: request app shortcuts (payload: package name UTF-8) */
+    const val APP_SHORTCUTS: Byte = 0x18
+    /** Phone → Car: app shortcuts list (payload: AppShortcutsListMessage) */
+    const val APP_SHORTCUTS_LIST: Byte = 0x19
+    /** Car → Phone: execute a specific shortcut (payload: AppShortcutActionMessage) */
+    const val APP_SHORTCUT_ACTION: Byte = 0x1A
 }
 
 /** Video channel message types */
@@ -37,6 +49,14 @@ object DataMsg {
     const val NOTIFICATION_POST: Byte = 0x01
     const val NOTIFICATION_REMOVE: Byte = 0x02
     const val APP_LIST: Byte = 0x03
+    /** Car → Phone: clear a single notification by id+packageName */
+    const val NOTIFICATION_CLEAR: Byte = 0x04
+    /** Car → Phone: clear all notifications */
+    const val NOTIFICATION_CLEAR_ALL: Byte = 0x05
+    /** Phone → Car: an app was uninstalled (payload: package name UTF-8) */
+    const val APP_UNINSTALLED: Byte = 0x06
+    /** Phone → Car: app info data (payload: AppInfoDataMessage) */
+    const val APP_INFO_DATA: Byte = 0x07
     const val MEDIA_METADATA: Byte = 0x10
     const val MEDIA_PLAYBACK_STATE: Byte = 0x11
     const val MEDIA_ACTION: Byte = 0x12

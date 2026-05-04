@@ -1,0 +1,33 @@
+name: Hotfix
+description: Critical fix branched from main, versioned like release
+labels: [hotfix]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 0.16.1
+      description: The hotfix version number (e.g. 0.16.1 — follows release version)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: Describe the critical issue and what needs to be fixed urgently.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: '- [ ] The issue is resolved'
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      placeholder: Logs, screenshots, steps to reproduce, or anything that helps.
+    validations:
+      required: false

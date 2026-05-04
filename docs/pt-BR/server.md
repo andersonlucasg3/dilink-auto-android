@@ -101,6 +101,16 @@ Decodificador H.264 usando MediaCodec com saida Surface (renderizacao direta via
 - Modo catchup: quatro zonas graduadas de aceleracao baseadas na profundidade da fila — normal (0-6 quadros), suave 1,5x (7-12 quadros, pula 1 de 3 nao-keyframes), medio 2x (13-20 quadros, pula 1 de 2), agressivo 3x (21+ quadros, pula 2 de 3). Keyframes nunca sao pulados.
 - Libera codec e realimenta CONFIG apos 10+ quedas consecutivas de dequeueInputBuffer
 
+### AppIconCache
+
+Cache de icones do lado do carro que decodifica e redimensiona icones uma vez, depois os serve instantaneamente durante a rolagem.
+
+- `putSource(packageName, pngBytes)`: Armazena PNG fonte de alta resolucao (192x192) recebido do celular via lista de apps. Persiste no disco como `{packageName}_src.png`.
+- `prepareAll(apps, sizePx)`: Decodifica e redimensiona todos os icones em uma thread de fundo antes da grade se tornar visivel. Incrementa `preparedVersion` para acionar a recomposicao da UI.
+- `getPrepared(packageName)`: Busca sincrona O(1) ConcurrentHashMap — zero corrotinas, zero I/O, zero decodificacao durante a rolagem. Retorna `ImageBitmap` pronto para renderizacao.
+- `get(packageName, sizePx)`: Caminho completo de decodificacao+redimensionamento (usado por NotificationScreen e NavBar para poucos icones). Retorna `Bitmap` no tamanho de pixel solicitado.
+- `evict(packageName)`: Remove dados em cache para apps desinstalados.
+
 ### ServerApp
 
 Classe Application. Cria canal de notificacao `dilinkauto_car_service` com `IMPORTANCE_LOW`.
@@ -135,10 +145,13 @@ Largura calculada para garantir viewport par para o codificador H.264.
 
 ### NotificationScreen
 
-- Lista de notificacoes ordenada por timestamp (mais recentes primeiro)
+- Lista de notificacoes ordenada por timestamp (mais recentes primeiro) com exibicao de tempo relativo ("now", "Xm", "Xh", data)
+- Icones de apps exibidos inline (do payload `iconPng` do celular)
 - Dedup por ID: atualizacoes substituem existentes (gerencia notificacoes de progresso)
 - Barras de progresso: determinada (preenchida) e indeterminada (giratoria)
 - Toque-para-iniciar: tocar uma notificacao inicia o app proprietario no VD e muda para visualizacao de espelho
+- Botao de dispensar por item (x): dispensa com animacao slide-out, envia `NOTIFICATION_CLEAR` para o celular
+- Botao "Limpar Tudo" no cabecalho: envia `NOTIFICATION_CLEAR_ALL` para o celular, limpa todas as notificacoes ativas
 
 ### Grade de Apps (HomeContent)
 
@@ -148,6 +161,7 @@ Exibida como area de conteudo principal quando o modo streaming esta ativo e a t
 - Icones de apps 64dp em colunas de grade fixa calculadas dinamicamente (3-12 conforme a largura do display), decodificacao lazy por tile com downscale
 - Texto do nome do app: bodyLarge
 - Ordenacao alfabetica
+- Menu de contexto de toque longo: Desinstalar e Info do App. A desinstalacao de app envia `APP_UNINSTALL` via canal de controle, o celular processa o dialogo do sistema e envia a mensagem de dados `APP_UNINSTALLED` para atualizar a lista de apps do carro. `AppInfoDataMessage` exibe informacoes do app em um dialogo do lado do carro.
 - Entrada manual de IP
 - Status da conexao
 

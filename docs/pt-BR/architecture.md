@@ -121,6 +121,7 @@ Modelo de conexao paralela com trilhas WiFi (3 conexoes) e USB.
 |-----------|---------|-----------|
 | CarConnectionService | `service/CarConnectionService.kt` | Maquina de estados paralela, 3 conexoes WiFi + trilha USB, tratamento de UPDATING_CAR |
 | VideoDecoder | `decoder/VideoDecoder.kt` | Decodificacao H.264, fila de 30 quadros, inicio antecipado em superficie offscreen, callback logSink |
+| AppIconCache | `AppIconCache.kt` | Cache de icones no lado do carro — decodifica PNGs fonte 192x192 uma vez, `prepareAll()` redimensiona todos os icones em thread de fundo, `getPrepared()` e busca O(1) ConcurrentHashMap sem I/O durante a rolagem |
 | CarLaunchScreen | `ui/screen/CarLaunchScreen.kt` | Tela de lancamento/conexao em tela cheia (sem nav), branding, instrucoes, IP manual |
 | MirrorScreen | `ui/screen/MirrorScreen.kt` | TextureView + encaminhamento de toque, reinicio do decoder na superficie disponivel |
 | HomeContent | `ui/screen/HomeScreen.kt` | Grade de apps (icones 64dp, celulas 160dp) ou status de conexao, exibido no modo streaming |
@@ -193,6 +194,8 @@ Estados: IDLE -> CONNECTING -> CONNECTED -> STREAMING
 | **Largura par do viewport** | Largura da barra de nav ajustada para garantir dimensoes pares compativeis com H.264. |
 | **Heartbeat apenas no controle** | As conexoes de video e entrada nao tem custo de heartbeat. Watchdog da conexao de controle detecta peers inativos. |
 | **FileLog** | Ignora a filtragem do logcat do HyperOS. Log baseado em arquivo com rotacao em `/sdcard/DiLinkAuto/`. |
+| **Cache de icones de aplicativos** | Cache no lado do carro persiste PNGs fonte (192x192) no disco. `prepareAll()` decodifica e redimensiona todos os icones para o tamanho da grade em uma thread de fundo apos a chegada do APP_LIST. `getPrepared()` e uma busca ConcurrentHashMap de custo zero — sem corrotinas, sem I/O, sem decodificacao durante a rolagem. |
+| **Rejeicao/limpeza de notificacoes** | Botao de rejeicao por item e cabecalho "Limpar Tudo" na tela de notificacoes do carro. O carro envia mensagens de dados NOTIFICATION_CLEAR / NOTIFICATION_CLEAR_ALL para o celular, que limpa as notificacoes Android correspondentes. |
 | **Callbacks logSink** | VideoDecoder e UsbAdbConnection encaminham logs pelo protocolo para o FileLog do celular. |
 | **Autenticacao ADB pre-hash** | AUTH_SIGNATURE usa `NONEwithRSA` + prefixo SHA-1 DigestInfo (pre-hash). Corresponde a `RSA_sign(NID_sha1)` do AOSP. "Sempre permitir" persiste corretamente. |
 | **Desligamento de tela via SurfaceControl** | `DisplayControl` carregado de `services.jar` via `ClassLoaderFactory` (Android 14+). Fallback para `cmd display power-off/on`. Celular restaura tela ao desconectar VD. |

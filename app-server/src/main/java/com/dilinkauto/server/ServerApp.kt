@@ -3,12 +3,14 @@ package com.dilinkauto.server
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import java.io.File
 
 class ServerApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
+        iconCache = AppIconCache(File(filesDir, "icons"))
     }
 
     private fun createNotificationChannels() {
@@ -26,5 +28,8 @@ class ServerApp : Application() {
 
     companion object {
         const val CHANNEL_SERVICE = "dilinkauto_car_service"
+
+        lateinit var iconCache: AppIconCache
+            private set
     }
 }

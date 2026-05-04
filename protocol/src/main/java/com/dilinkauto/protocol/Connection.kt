@@ -124,7 +124,7 @@ class Connection(
                     writerThread = Thread.currentThread()
                     val frame = writeQueue.poll()
                     if (frame == null) {
-                        java.util.concurrent.locks.LockSupport.parkNanos(VideoConfig.FRAME_INTERVAL_MS * 1_000_000L)
+                        java.util.concurrent.locks.LockSupport.park() // unparked by enqueueFrame
                         continue
                     }
 

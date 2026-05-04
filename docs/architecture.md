@@ -115,13 +115,15 @@ Parallel connection model with WiFi (3 connections) and USB tracks.
 
 | Component | File | Purpose |
 |-----------|------|---------|
+| AppIconCache | `AppIconCache.kt` | Car-side icon cache — decodes 192x192 source PNGs once, `prepareAll()` resizes all icons on background thread, `getPrepared()` is O(1) ConcurrentHashMap lookup with zero I/O during scroll |
 | CarConnectionService | `service/CarConnectionService.kt` | Parallel state machine, 3-connection WiFi + USB tracks, UPDATING_CAR handling |
 | VideoDecoder | `decoder/VideoDecoder.kt` | H.264 decode, 30-frame queue, early start on offscreen surface, logSink callback |
 | CarLaunchScreen | `ui/screen/CarLaunchScreen.kt` | Full-screen launch/connection screen (no nav), branding, instructions, manual IP |
 | MirrorScreen | `ui/screen/MirrorScreen.kt` | TextureView + touch forwarding, decoder restart on surface available |
 | HomeContent | `ui/screen/HomeScreen.kt` | App grid (64dp icons, 160dp cells) or connection status, shown in streaming mode |
-| LauncherScreen | `ui/screen/LauncherScreen.kt` | Legacy integrated screen with SideNavBar, CarStatusBar, AppGrid |
-| NotificationScreen | `ui/screen/NotificationScreen.kt` | Notification list with progress bars, tap-to-launch |
+| LauncherScreen | `ui/screen/LauncherScreen.kt` | Legacy integrated screen with SideNavBar, CarStatusBar, AppGrid — not used in current routing |
+| HomeScreen | `ui/screen/HomeScreen.kt` | App grid (64dp icons, 160dp cells) with long-press context menu (uninstall, app info, shortcuts) or connection status |
+| NotificationScreen | `ui/screen/NotificationScreen.kt` | Notification list with progress bars, per-item dismiss, clear-all, tap-to-launch |
 | PersistentNavBar | `ui/nav/PersistentNavBar.kt` | 76dp nav bar (40dp icons, 14sp text), recent apps (pruned), streaming mode only |
 | RecentAppsState | `ui/nav/RecentAppsState.kt` | Tracks recent apps, prunes unavailable |
 | MainActivity | `MainActivity.kt` | Fullscreen immersive, USB intent forwarding, two-mode screen routing (launch vs streaming) |
@@ -189,6 +191,8 @@ States: IDLE -> CONNECTING -> CONNECTED -> STREAMING
 | **Even viewport width** | Nav bar width adjusted to guarantee H.264-compatible even dimensions. |
 | **Heartbeat on control only** | Video and input connections have no heartbeat overhead. Control connection watchdog detects dead peers. |
 | **FileLog** | Bypasses HyperOS logcat filtering. File-based logging with rotation on `/sdcard/DiLinkAuto/`. |
+| **App icon cache** | Car-side cache persists source PNGs (192x192) to disk. `prepareAll()` decodes and resizes all icons to grid size on a background thread after APP_LIST arrives. `getPrepared()` is a zero-cost ConcurrentHashMap lookup — no coroutines, no I/O, no decoding during scroll. |
+| **Notification dismiss/clear** | Per-item dismiss button and header "Clear All" on car notification screen. Car sends NOTIFICATION_CLEAR / NOTIFICATION_CLEAR_ALL data messages to phone, which clears the corresponding Android notifications. |
 | **logSink callbacks** | VideoDecoder and UsbAdbConnection route logs through protocol to phone's FileLog. |
 | **ADB prehashed auth** | AUTH_SIGNATURE uses `NONEwithRSA` + SHA-1 DigestInfo prefix (prehashed). Matches AOSP's `RSA_sign(NID_sha1)`. "Always allow" persists correctly. |
 | **Display power via SurfaceControl** | `DisplayControl` loaded from `services.jar` via `ClassLoaderFactory` (Android 14+). Falls back to `cmd display power-off/on`. Phone restores display on VD disconnect. |

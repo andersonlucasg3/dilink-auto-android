@@ -115,6 +115,7 @@ WiFi (3 ulanish) va USB treklari bilan parallel ulanish modeli.
 
 | Component | File | Purpose |
 |-----------|------|---------|
+| AppIconCache | `AppIconCache.kt` | Avtomobil tomonidagi ikonkalar keshi — 192x192 manba PNG-larni bir marta dekodlaydi, `prepareAll()` barcha ikonkalarni fon oqimida o'lchamini o'zgartiradi, `getPrepared()` ConcurrentHashMap-da O(1) qidiruv, aylantirish paytida I/O yo'q |
 | CarConnectionService | `service/CarConnectionService.kt` | Parallel holat mashinasi, 3-ulanish WiFi + USB treki, UPDATING_CAR ishlovi |
 | VideoDecoder | `decoder/VideoDecoder.kt` | H.264 dekodlash, 30 kadr navbati, ekrandan tashqari yuzada erta ishga tushirish, logSink qayta chaqiruvi |
 | CarLaunchScreen | `ui/screen/CarLaunchScreen.kt` | To'liq ekranli ishga tushirish/ulanish ekrani (navigatsiyasiz), brendlash, yo'riqnomalar, qo'lda IP |
@@ -189,6 +190,8 @@ Holatlar: IDLE -> CONNECTING -> CONNECTED -> STREAMING
 | **Juft ko'rish oynasi eni** | Navigatsiya paneli eni H.264 mos keluvchi juft o'lchamlarni kafolatlash uchun sozlanadi. |
 | **Heartbeat faqat controlda** | Video va kiritish ulanishlarida heartbeat qo'shimcha xarajati yo'q. Control ulanish watchdog'i o'lik tugunlarni aniqlaydi. |
 | **FileLog** | HyperOS logcat filtrlashini aylanib o'tadi. Faylli jurnallash, `/sdcard/DiLinkAuto/` da rotatsiya bilan. |
+| **Ilova ikonkalari keshi** | Avtomobil tomonidagi kesh manba PNG (192x192) diskda saqlaydi. `prepareAll()` APP_LIST kelgandan keyin barcha ikonkalarni fon oqimida panjara o'lchamiga dekodlaydi va o'lchamini o'zgartiradi. `getPrepared()` ConcurrentHashMap-da nol xarajat bilan qidiruv — korutinlarsiz, I/O-siz, aylantirish paytida dekodlashsiz. |
+| **Bildirishnomalarni rad etish/tozalash** | Har bir element uchun rad etish tugmasi va avtomobil bildirishnomalar ekranidagi "Barchasini tozalash" sarlavhasi. Avtomobil telefonga NOTIFICATION_CLEAR / NOTIFICATION_CLEAR_ALL ma'lumot xabarlarini yuboradi, telefon mos Android bildirishnomalarini tozalaydi. |
 | **logSink qayta chaqiruvlari** | VideoDecoder va UsbAdbConnection jurnallarni protokol orqali telefon FileLog'iga yo'naltiradi. |
 | **ADB oldindan heshlangan autentifikatsiya** | AUTH_SIGNATURE `NONEwithRSA` + SHA-1 DigestInfo prefiksini ishlatadi (oldindan heshlangan). AOSP `RSA_sign(NID_sha1)` mos keladi. "Always allow" to'g'ri saqlanadi. |
 | **SurfaceControl orqali displey quvvatini boshqarish** | `DisplayControl` `services.jar` dan `ClassLoaderFactory` orqali yuklanadi (Android 14+). `cmd display power-off/on` zaxirasi. Telefon VD uzilganda displeyni tiklaydi. |

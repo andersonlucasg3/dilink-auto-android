@@ -73,6 +73,9 @@
 
     <!-- Notifications -->
     <string name="no_notifications">No notifications</string>
+    <string name="notifications_count">Notifications (%d)</string>
+    <string name="clear_all">Clear All</string>
+    <string name="clear_notification">Clear notification</string>
 
     <!-- Connection Status Messages -->
     <string name="status_deploying_vd">Deploying virtual display…</string>
@@ -90,4 +93,8 @@
     <string name="status_vd_failed">VD server failed</string>
     <string name="status_waiting_video">Waiting for video stream…</string>
     <string name="status_updating_please_wait">Updating car app… Please wait</string>
+
+    <!-- App Context Actions -->
+    <string name="action_uninstall">Uninstall</string>
+    <string name="action_app_info">App info</string>
 </resources>

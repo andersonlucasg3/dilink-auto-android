@@ -115,6 +115,30 @@ LAUNCH_APP bilan bir xil format. Ilova ishga tushirilganini tasdiqlaydi.
 
 Bo'sh yuklama. GO_BACK dan keyin VD serveri virtual displeyda qolgan ilova vazifalari yo'qligini aniqlaganda yuboriladi (`dumpsys activity activities` orqali). Avtomobil buni ko'zgu ko'rinishidan bosh ekranga o'tish uchun ishlatadi.
 
+### FOCUSED_APP (0x16) -- Phone -> Car
+
+Yuklama: UTF-8 package name. Virtual displeyda ilova fokus olganda yuboriladi. Avtomobil buni ilova kuzatish holatini yangilash uchun ishlatadi.
+
+### APP_INFO (0x17) -- Car -> Phone
+
+Yuklama: UTF-8 package name. Avtomobil telefondan berilgan paket uchun tizim ilova ma'lumot/sozlamalar ekranini ochishni so'raydi.
+
+### APP_SHORTCUTS (0x18) -- Car -> Phone
+
+Yuklama: UTF-8 package name. Avtomobil berilgan paket uchun mavjud Android 7.1+ ilova yorliqlarini so'raydi. **UI da o'chirilgan** — infratuzilma (VD server so'rovi + APK XML zaxirasi) mavjud, ammo yorliqlar aniqlashtirilguncha yashirilgan (issue #57).
+
+### APP_SHORTCUTS_LIST (0x19) -- Phone -> Car
+
+Yuklama: `AppShortcutsListMessage` — package name + yorliq deskriptorlari ro'yxati (id, shortLabel, longLabel). APP_SHORTCUTS so'roviga javob sifatida yuboriladi.
+
+### APP_SHORTCUT_ACTION (0x1A) -- Car -> Phone
+
+Yuklama: `AppShortcutActionMessage` — package name + shortcut id. Virtual displeyda aniq yorliqni ishga tushiradi.
+
+### APP_UNINSTALL (0x1B) -- Car -> Phone
+
+Yuklama: UTF-8 package name. Avtomobil telefondan berilgan paketni o'chirishni so'raydi. Telefon tizim o'chirish dialogini boshqaradi va tugagandan keyin ma'lumot kanali orqali `APP_UNINSTALLED` qaytarib yuboradi.
+
 ### UPDATING_CAR (0x30) -- Phone -> Car
 
 Bo'sh yuklama. Telefon avtomobil ilovasini avto-yangilashni boshlashdan oldin yuboriladi. Avtomobil "Updating car app..." holatini ko'rsatadi va qayta ulanishni to'xtatadi. Yangilashdan keyin avtomobil ilovasi yangidan ishga tushadi.
@@ -143,6 +167,22 @@ Video kadrni ifodalovchi H.264 NAL birliklari.
 ### NOTIFICATION_POST (0x01) / NOTIFICATION_REMOVE (0x02) -- Phone -> Car
 
 id, packageName, appName, title, text, timestamp, progressIndeterminate (byte), progress (int32), progressMax (int32) bilan xabarnoma ma'lumotlari. Avtomobil ID bo'yicha deduplikatsiya qiladi (yangilanishlar mavjudlarini almashtiradi). Xabarnomani tegish VD da egasi ilovani ishga tushiradi.
+
+### NOTIFICATION_CLEAR (0x04) — Car → Phone
+
+Yuklama: `ClearNotificationMessage` — notification id + package name. Avtomobil bitta xabarnomani yopadi; telefon tegishli Android xabarnomasini tozalaydi.
+
+### NOTIFICATION_CLEAR_ALL (0x05) — Car → Phone
+
+Bo'sh yuklama. Avtomobil barcha xabarnomalarni yopadi; telefon barcha faol xabarnomalarni tozalaydi.
+
+### APP_UNINSTALLED (0x06) — Phone → Car
+
+Yuklama: UTF-8 package name. Telefon ilovaning o'chirilganini tasdiqlaydi (`APP_UNINSTALL` javobi sifatida). Avtomobil ilovani ishga tushirish to'ridan olib tashlaydi.
+
+### APP_INFO_DATA (0x07) — Phone → Car
+
+Yuklama: `AppInfoDataMessage` — package name, version name, version code, o'rnatish vaqti, yangilash vaqti, ilova hajmi (bytes). Foydalanuvchi kontekst menyusidan "Ilova haqida ma'lumot" ni tanlaganda, telefon avtomobil tomonidagi dialogda ko'rsatish uchun ilova metama'lumotlarini yuboradi.
 
 ### APP_LIST (0x03) -- Phone -> Car
 

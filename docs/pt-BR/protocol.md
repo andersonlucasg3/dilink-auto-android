@@ -115,6 +115,30 @@ Mesmo formato de LAUNCH_APP. Confirma que o app foi iniciado.
 
 Carga vazia. Enviado apos GO_BACK quando o servidor VD detecta que nao ha tarefas de app restantes no virtual display (via `dumpsys activity activities`). O carro usa isso para mudar da visualizacao de espelho para a tela home.
 
+### FOCUSED_APP (0x16) -- Celular -> Carro
+
+Carga: UTF-8 nome do pacote. Enviado quando um app ganha foco no virtual display. O carro usa isso para atualizar seu estado de rastreamento de apps.
+
+### APP_INFO (0x17) -- Carro -> Celular
+
+Carga: UTF-8 nome do pacote. O carro solicita que o celular abra a tela de informacoes/configuracoes do sistema para o pacote fornecido.
+
+### APP_SHORTCUTS (0x18) -- Carro -> Celular
+
+Carga: UTF-8 nome do pacote. O carro solicita os atalhos de app Android 7.1+ disponiveis para o pacote fornecido. **Desativado na UI** — a infraestrutura (consulta do servidor VD + fallback APK XML) esta pronta, mas os atalhos estao ocultos pendentes de refinamento (issue #57).
+
+### APP_SHORTCUTS_LIST (0x19) -- Celular -> Carro
+
+Carga: `AppShortcutsListMessage` — nome do pacote + lista de descritores de atalho (id, shortLabel, longLabel). Enviado em resposta a solicitacao APP_SHORTCUTS.
+
+### APP_SHORTCUT_ACTION (0x1A) -- Carro -> Celular
+
+Carga: `AppShortcutActionMessage` — nome do pacote + id do atalho. Inicia o atalho especifico no virtual display.
+
+### APP_UNINSTALL (0x1B) -- Carro -> Celular
+
+Carga: UTF-8 nome do pacote. O carro solicita que o celular desinstale o pacote fornecido. O celular gerencia o dialogo de desinstalacao do sistema e envia de volta `APP_UNINSTALLED` via canal de dados quando concluido.
+
 ### UPDATING_CAR (0x30) -- Celular -> Carro
 
 Carga vazia. Enviado antes que o celular comece a auto-atualizar o app do carro. O carro mostra o status "Atualizando app do carro..." e para de reconectar. Apos a atualizacao, o app do carro reinicia renovado.
@@ -143,6 +167,22 @@ Unidades NAL H.264 representando um quadro de video.
 ### NOTIFICATION_POST (0x01) / NOTIFICATION_REMOVE (0x02) -- Celular -> Carro
 
 Dados de notificacao com id, packageName, appName, title, text, timestamp, progressIndeterminate (byte), progress (int32), progressMax (int32). O carro deduplica por ID (atualizacoes substituem existentes). Tocar uma notificacao inicia o app proprietario no VD.
+
+### NOTIFICATION_CLEAR (0x04) — Carro → Celular
+
+Carga: `ClearNotificationMessage` — id da notificacao + nome do pacote. O carro dispensa uma unica notificacao; o celular limpa a notificacao Android correspondente.
+
+### NOTIFICATION_CLEAR_ALL (0x05) — Carro → Celular
+
+Carga vazia. O carro dispensa todas as notificacoes; o celular limpa todas as notificacoes ativas.
+
+### APP_UNINSTALLED (0x06) — Celular → Carro
+
+Carga: UTF-8 nome do pacote. O celular confirma que um app foi desinstalado (em resposta a `APP_UNINSTALL`). O carro remove o app de sua grade do launcher.
+
+### APP_INFO_DATA (0x07) — Celular → Carro
+
+Carga: `AppInfoDataMessage` — nome do pacote, nome da versao, codigo da versao, hora de instalacao, hora de atualizacao, tamanho do app (bytes). O celular envia metadados do app para exibicao em um dialogo do lado do carro quando o usuario seleciona "Info do App" no menu de contexto.
 
 ### APP_LIST (0x03) -- Celular -> Carro
 

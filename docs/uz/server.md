@@ -101,6 +101,16 @@ Surface chiqishi bilan MediaCodec ishlatadigan H.264 dekoderi (GPU-to'g'ridan-to
 - Catchup rejimi: navbat chuqurligiga asoslangan to'rt bosqichli tezlashtirish zonasi — normal (0-6 kadr), gentle 1.5x (7-12 kadr, kalit bo'lmagan 3 tadan 1 ini o'tkazadi), medium 2x (13-20 kadr, 2 tadan 1 ini o'tkazadi), aggressive 3x (21+ kadr, 3 tadan 2 ini o'tkazadi). Kalit kadrlar hech qachon o'tkazilmaydi.
 - 10+ ketma-ket dequeueInputBuffer tashlashlarida kodekni tozalaydi va CONFIG'ni qayta beradi
 
+### AppIconCache
+
+Ikonkalarni bir marta dekodlab, o'lchamini o'zgartirib, so'ngra aylantirish paytida ularni bir zumda taqdim etadigan avtomobil tomonidagi ikonka keshi.
+
+- `putSource(packageName, pngBytes)`: Ilovalar ro'yxati orqali telefondan olingan yuqori aniqlikdagi (192x192) manba PNG ni saqlaydi. Diskka `{packageName}_src.png` sifatida saqlanadi.
+- `prepareAll(apps, sizePx)`: To'r ko'rinadigan bo'lishidan oldin fon oqimida barcha ikonkalarni dekodlab, o'lchamini o'zgartiradi. UI rekompozitsiyasini ishga tushirish uchun `preparedVersion` ni oshiradi.
+- `getPrepared(packageName)`: Sinxron O(1) ConcurrentHashMap qidiruvi — nol korutin, nol I/O, aylantirish paytida nol dekodlash. Ko'rsatishga tayyor `ImageBitmap` qaytaradi.
+- `get(packageName, sizePx)`: To'liq dekodlash+o'lcham o'zgartirish yo'li (NotificationScreen va NavBar tomonidan bir nechta ikonkalar uchun ishlatiladi). So'ralgan piksel o'lchamida `Bitmap` qaytaradi.
+- `evict(packageName)`: O'chirilgan ilovalar uchun keshlangan ma'lumotlarni o'chiradi.
+
 ### ServerApp
 
 Application klassi. `IMPORTANCE_LOW` bilan `dilinkauto_car_service` xabarnoma kanalini yaratadi.
@@ -135,10 +145,13 @@ Eni H.264 kodlovchi uchun juft ko'rish oynasini kafolatlash uchun hisoblanadi.
 
 ### NotificationScreen
 
-- Vaqt tamg'asi bo'yicha saralangan xabarnomalar ro'yxati (eng yangisi birinchi)
+- Vaqt tamg'asi bo'yicha saralangan xabarnomalar ro'yxati (eng yangisi birinchi) nisbiy vaqt ko'rsatish bilan ("now", "Xm", "Xh", sana)
+- Ilova ikonkalari ichki ko'rinishda ko'rsatiladi (telefonning `iconPng` yuklamasidan)
 - ID bo'yicha deduplikatsiya: yangilanishlar mavjudlarini almashtiradi (progress xabarnomalarini boshqaradi)
 - Progress barlar: determinate (to'ldirilgan) va indeterminate (aylanuvchi)
 - Tegib ishga tushirish: xabarnomani tegish VD da egasi ilovani ishga tushiradi va ko'zgu ko'rinishiga o'tadi
+- Elementni yopish tugmasi (×): slide-out animatsiyasi bilan yopadi, telefonga `NOTIFICATION_CLEAR` yuboradi
+- Sarlavhadagi "Clear All" tugmasi: telefonga `NOTIFICATION_CLEAR_ALL` yuboradi, barcha faol xabarnomalarni tozalaydi
 
 ### Ilovalar To'ri (HomeContent)
 
@@ -148,6 +161,7 @@ Oqim rejimi faol va joriy ekran HOME bo'lganda asosiy tarkib maydoni sifatida ko
 - Displey kengligiga qarab dinamik hisoblanadigan qat'iy to'r ustunlarida 64dp ilova ikonkalari (3-12)
 - Ilova nomi matni: bodyLarge
 - Alifbo tartibida saralash
+- Uzoq bosish kontekst menyusi: O'chirish va Ilova haqida ma'lumot. Ilovani o'chirish control kanali orqali `APP_UNINSTALL` yuboradi, telefon tizim dialogini boshqaradi va avtomobilning ilovalar ro'yxatini yangilash uchun `APP_UNINSTALLED` ma'lumot xabarini yuboradi. `AppInfoDataMessage` avtomobil tomonidagi dialogda ilova ma'lumotlarini ko'rsatadi.
 - Qo'lda IP kiritish
 - Ulanish holati
 

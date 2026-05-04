@@ -21,13 +21,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git checkout develop --force
 
-          git checkout develop
+          git reset --hard origin/develop
+
           git merge main --no-edit
 
-          if git diff --cached --quiet && git diff --quiet; then
-            echo "Nothing to merge — develop already up to date with main"
-            exit 0
-          fi
-
-          git push origin develop
+          git push origin develop --force

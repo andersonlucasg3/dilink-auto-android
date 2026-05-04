@@ -1,9 +1,31 @@
 # Progress Traker
 
-Joriy versiya: **v0.16.0** (barqaror)
-So'nggi yangilanish: 2026-04-29
+Joriy versiya: **v0.17.0** (barqaror)
+So'nggi yangilanish: 2026-05-01
 
 ## Bosqichlar
+
+### v0.17.0 (2026-05-02)
+
+- **Dekoderni qayta ishga tushirish bartaraf etildi**: `MediaCodec.setOutputSurface()` `stop()`+`start()` o'rnini egallaydi. MirrorContent Compose daraxtida `View.INVISIBLE` bilan saqlanadi.
+- **Qat'iy 30fps**: 60fps dan 30fps ga tushirildi. Telefon endi qizib ketmaydi. CPU/GPU yuklamasi ikki baravar kamaydi.
+- **Adaptiv framerate olib tashlandi**: 15fps rejimi ilovalarni almashtirishda kadrlar pasayishiga olib keldi.
+- **Hujjatlar**: Barcha v0.17.0 o'zgarishlari 8 tilga to'liq tarjima qilingan hujjatlashtirildi.
+
+### v0.17.0-dev-02 (2026-05-01)
+
+- **Telefon qizib ketishini tuzatish**: Telefonning oqim paytida qizib ketishiga olib keladigan oqimli uzatish konveyeridagi CPU faol kutish shablonlari yo'q qilindi. `delay(1)` busy-waits bloklovchi/selector asosidagi mexanizmlar bilan almashtirildi.
+- **AppIconCache avtomobil tomoniga ko'chirildi**: Avtomobil tomonidagi ikonka keshi manba PNG (192x192) larni diskda saqlaydi. `prepareAll()` to'r paydo bo'lishidan oldin fon oqimida barcha ikonkalarni dekodlab+o'lchamini o'zgartiradi; `getPrepared()` aylantirish paytida I/O siz O(1) ConcurrentHashMap qidiruvi. Plitka bo'yicha dekodlash va tezkor aylantirishda qulash bartaraf etildi.
+- **AppTile soddalashtirildi**: Plitka bo'yicha StateFlow collect, lazy DropdownMenu va click ripple effektlari olib tashlandi. Asosiy tegish uchun combinedClickable o'rniga clickable bilan yengil plitkalar.
+- **App grid deduplikatsiyasi**: LazyGrid qulashi packageName bo'yicha elementlarni deduplikatsiya qilish orqali tuzatildi.
+
+### v0.17.0-dev-01 (2026-04-30)
+
+- **Bildirishnomalarni birma-bir yopish va Barchasini tozalash**: Avtomobil bildirishnoma ekranida endi slide-out animatsiyasi bilan element bo'yicha yopish tugmalari va sarlavhada "Clear All" tugmasi mavjud. Yangi protokol xabarlari: ma'lumot kanalida `NOTIFICATION_CLEAR` (0x04) va `NOTIFICATION_CLEAR_ALL` (0x05). Telefonning `iconPng` yuklamasidan element ikonkalari.
+- **Ilova kontekst amallari**: Ilova plitkalari (ishga tushirgich) va navigatsiya panelidagi so'nggi ilovalarni uzoq bosish O'chirish va Ilova haqida ma'lumot bilan ochiladigan menyuni ko'rsatadi. O'chirish `APP_UNINSTALL` (0x1B) / `APP_UNINSTALLED` (0x06) orqali tarqaladi. Ilova haqida ma'lumot telefondan `APP_INFO_DATA` (0x07) metama'lumotlari bilan avtomobil tomonidagi dialogni ko'rsatadi. Kontekst menyusi amallari shell darajasida kirish uchun VD serveri orqali yo'naltiriladi.
+- **Ilova yorliqlari infratuzilmasi** (UI da o'chirilgan): VD server so'rovi + APK XML zaxirasi bilan `APP_SHORTCUTS` (0x18) / `APP_SHORTCUTS_LIST` (0x19) / `APP_SHORTCUT_ACTION` (0x1A) protokol xabarlari. Belgilarni ajratish aniqlashtirilguncha o'chirilgan (issue #57).
+- **Orqaga tugmasi tuzatish**: GO_BACK endi asosiy menyuga qaytishdan oldin faoliyatlarni birma-bir yopadi, to'g'ri stek kuzatish va `FOCUSED_APP` (0x16) xabarlaridan foydalanadi.
+- **Samsung DeX / Ish stoli rejimi DPI** (bekor qilingan): `UiModeManager.currentModeType` aniqlash va 213dpi dan foydalangan dastlabki amalga oshirish dev-02 da bekor qilindi. VD darajasidagi bayroqni olib tashlash yondashuvi bilan almashtirildi.
 
 ### v0.16.0 (2026-04-29)
 

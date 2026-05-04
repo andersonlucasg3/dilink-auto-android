@@ -115,6 +115,30 @@ Control-з'єднання встановлюється першим (тут ві
 
 Порожній payload. Надсилається після GO_BACK, коли VD-сервер виявляє відсутність залишкових задач додатків на віртуальному дисплеї (через `dumpsys activity activities`). Автомобіль використовує це для перемикання з дзеркального вигляду на домашній екран.
 
+### FOCUSED_APP (0x16) -- Phone -> Car
+
+Payload: UTF-8 package name. Надсилається, коли додаток отримує фокус на віртуальному дисплеї. Автомобіль використовує це для оновлення стану відстеження додатків.
+
+### APP_INFO (0x17) -- Car -> Phone
+
+Payload: UTF-8 package name. Автомобіль запитує телефон відкрити системний екран інформації/налаштувань для зазначеного пакету.
+
+### APP_SHORTCUTS (0x18) -- Car -> Phone
+
+Payload: UTF-8 package name. Автомобіль запитує доступні ярлики додатків Android 7.1+ для зазначеного пакету. **Відключено в UI** — інфраструктура (запит VD-сервера + APK XML fallback) готова, але ярлики приховані до доопрацювання (issue #57).
+
+### APP_SHORTCUTS_LIST (0x19) -- Phone -> Car
+
+Payload: `AppShortcutsListMessage` — package name + список дескрипторів ярликів (id, shortLabel, longLabel). Надсилається у відповідь на запит APP_SHORTCUTS.
+
+### APP_SHORTCUT_ACTION (0x1A) -- Car -> Phone
+
+Payload: `AppShortcutActionMessage` — package name + shortcut id. Запускає конкретний ярлик на віртуальному дисплеї.
+
+### APP_UNINSTALL (0x1B) -- Car -> Phone
+
+Payload: UTF-8 package name. Автомобіль запитує телефон видалити зазначений пакет. Телефон обробляє системний діалог видалення та надсилає назад `APP_UNINSTALLED` через канал даних після завершення.
+
 ### UPDATING_CAR (0x30) -- Phone -> Car
 
 Порожній payload. Надсилається перед тим, як телефон починає автоматичне оновлення додатку автомобіля. Автомобіль показує "Updating car app..." статус і зупиняє перепідключення. Після оновлення додаток автомобіля перезапускається наново.
@@ -143,6 +167,22 @@ H.264 NAL units, що представляють відеокадр.
 ### NOTIFICATION_POST (0x01) / NOTIFICATION_REMOVE (0x02) -- Phone -> Car
 
 Дані сповіщення з id, packageName, appName, title, text, timestamp, progressIndeterminate (byte), progress (int32), progressMax (int32). Автомобіль дедублікує за ID (оновлення замінюють існуючі). Дотик до сповіщення запускає додаток-власник на VD.
+
+### NOTIFICATION_CLEAR (0x04) — Car → Phone
+
+Payload: `ClearNotificationMessage` — notification id + package name. Автомобіль закриває одне сповіщення; телефон очищає відповідне Android-сповіщення.
+
+### NOTIFICATION_CLEAR_ALL (0x05) — Car → Phone
+
+Порожній payload. Автомобіль закриває всі сповіщення; телефон очищає всі активні сповіщення.
+
+### APP_UNINSTALLED (0x06) — Phone → Car
+
+Payload: UTF-8 package name. Телефон підтверджує видалення додатку (у відповідь на `APP_UNINSTALL`). Автомобіль видаляє додаток зі своєї сітки запуску.
+
+### APP_INFO_DATA (0x07) — Phone → Car
+
+Payload: `AppInfoDataMessage` — package name, version name, version code, час встановлення, час оновлення, розмір додатку (bytes). Телефон надсилає метадані додатку для відображення у діалозі на стороні автомобіля, коли користувач вибирає "Інформація про додаток" з контекстного меню.
 
 ### APP_LIST (0x03) -- Phone -> Car
 

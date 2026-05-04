@@ -101,6 +101,16 @@ Décodeur H.264 utilisant MediaCodec avec sortie Surface (rendu direct GPU).
 - Mode catchup : quatre zones de vitesse graduées basées sur la profondeur de file — normale (0-6 trames), douce 1.5x (7-12 trames, saute 1 sur 3 non-keyframes), moyenne 2x (13-20 trames, saute 1 sur 2), agressive 3x (21+ trames, saute 2 sur 3). Les keyframes ne sont jamais sautées.
 - Vide le codec et réalimente le CONFIG après 10+ échecs consécutifs de dequeueInputBuffer
 
+### AppIconCache
+
+Cache d'icônes côté voiture qui décode et redimensionne les icônes une fois, puis les sert instantanément pendant le défilement.
+
+- `putSource(packageName, pngBytes)` : Stocke le PNG source haute résolution (192x192) reçu du téléphone via la liste d'applications. Persiste sur le disque sous `{packageName}_src.png`.
+- `prepareAll(apps, sizePx)` : Décode et redimensionne toutes les icônes sur un thread d'arrière-plan avant que la grille ne devienne visible. Incrémente `preparedVersion` pour déclencher la recomposition UI.
+- `getPrepared(packageName)` : Recherche synchrone O(1) ConcurrentHashMap — zéro coroutine, zéro I/O, zéro décodage pendant le défilement. Retourne un `ImageBitmap` prêt à être affiché.
+- `get(packageName, sizePx)` : Chemin complet décodage+redimensionnement (utilisé par NotificationScreen et NavBar pour quelques icônes). Retourne un `Bitmap` à la taille de pixel demandée.
+- `evict(packageName)` : Supprime les données en cache pour les applications désinstallées.
+
 ### ServerApp
 
 Classe Application. Crée le canal de notification `dilinkauto_car_service` avec `IMPORTANCE_LOW`.
@@ -135,10 +145,13 @@ Largeur calculée pour garantir un viewport pair pour l'encodeur H.264.
 
 ### NotificationScreen
 
-- Liste de notifications triée par horodatage (plus récentes en premier)
+- Liste de notifications triée par horodatage (plus récentes en premier) avec affichage du temps relatif ("now", "Xm", "Xh", date)
+- Icônes d'applications affichées en ligne (depuis le payload `iconPng` du téléphone)
 - Dédoublonnage par ID : les mises à jour remplacent l'existant (gère les notifications de progression)
 - Barres de progression : déterminées (remplies) et indéterminées (tournantes)
 - Appui pour lancer : toucher une notification lance l'application propriétaire sur le VD et bascule en vue miroir
+- Bouton de fermeture par élément (×) : ferme avec animation slide-out, envoie `NOTIFICATION_CLEAR` au téléphone
+- Bouton "Tout effacer" dans l'en-tête : envoie `NOTIFICATION_CLEAR_ALL` au téléphone, efface toutes les notifications actives
 
 ### Grille d'applications (HomeContent)
 
@@ -148,6 +161,7 @@ Affichée comme zone de contenu principale quand le mode streaming est actif et 
 - Icônes d'app 64dp en colonnes de grille fixes calculées dynamiquement (3-12 selon la largeur d'affichage)
 - Texte du nom d'app : bodyLarge
 - Tri alphabétique
+- Menu contextuel par appui long : Désinstaller et Infos application. La désinstallation d'application envoie `APP_UNINSTALL` via le canal contrôle, le téléphone traite la boîte de dialogue système et envoie le message de données `APP_UNINSTALLED` pour actualiser la liste d'applications de la voiture. `AppInfoDataMessage` affiche les informations d'application dans une boîte de dialogue côté voiture.
 - Saisie manuelle d'IP
 - Statut de connexion
 

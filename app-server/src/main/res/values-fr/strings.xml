@@ -73,6 +73,9 @@
 
     <!-- Notifications -->
     <string name="no_notifications">Aucune notification</string>
+    <string name="notifications_count">Notifications (%d)</string>
+    <string name="clear_all">Tout Effacer</string>
+    <string name="clear_notification">Effacer la notification</string>
 
     <!-- Connection Status Messages -->
     <string name="status_deploying_vd">Déploiement de l\'affichage virtuel…</string>
@@ -89,4 +92,6 @@
     <string name="status_vd_failed">Échec du serveur VD</string>
     <string name="status_waiting_video">En attente du flux vidéo…</string>
     <string name="status_updating_please_wait">Mise à jour de l\'appli voiture… Veuillez patienter</string>
+    <string name="action_uninstall">Désinstaller</string>
+    <string name="action_app_info">Infos de l\'appli</string>
 </resources>
