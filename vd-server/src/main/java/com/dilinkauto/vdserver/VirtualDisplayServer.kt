@@ -109,7 +109,7 @@ class VirtualDisplayServer(
         private const val VIDEO_PORT = 9638
         private const val INPUT_PORT = 9639
         // Lifecycle channel port (to phone)
-        private const val LIFECYCLE_PORT = 19637
+        private const val LIFECYCLE_PORT = 19647
 
         private var displayControlClass: Class<*>? = null
         private var displayControlLoaded = false
@@ -353,9 +353,8 @@ class VirtualDisplayServer(
                 }
             } catch (e: Exception) {
                 err("VideoWriter thread error: ${e.javaClass.simpleName}: ${e.message}")
-            } finally {
-                running = false
             }
+            // Don't set running=false — only lifecycle errors or encoder errors trigger shutdown
             log("VideoWriter thread exited")
         }, "VideoWriter").apply { isDaemon = true }
         wt.start()
@@ -485,9 +484,8 @@ class VirtualDisplayServer(
                 readTouchAndCommands(carChannel)
             } catch (e: Exception) {
                 err("TouchReader thread error: ${e.javaClass.simpleName}: ${e.message}")
-            } finally {
-                running = false
             }
+            // Don't set running=false — only lifecycle reader or writer errors should trigger shutdown
             log("TouchReader thread exited")
         }, "TouchReader").apply { isDaemon = true }.start()
     }
@@ -498,7 +496,16 @@ class VirtualDisplayServer(
         log("Touch/Command reader started (NioReader)")
 
         while (running) {
-            val frame = FrameCodec.readFrameBlocking(reader) ?: break
+            val frame = try {
+                FrameCodec.readFrameBlocking(reader)
+            } catch (e: Exception) {
+                err("TouchReader read error: ${e.message}")
+                null
+            }
+            if (frame == null) {
+                log("Touch/Command reader: connection closed")
+                break
+            }
 
             when (frame.channel) {
                 Channel.INPUT -> handleTouchFrame(frame)
@@ -510,6 +517,8 @@ class VirtualDisplayServer(
             }
         }
         reader.close()
+        // Don't set running=false — a single connection drop shouldn't kill the whole server.
+        // The video writer or lifecycle reader will detect real failures.
     }
 
     private fun handleTouchFrame(frame: FrameCodec.Frame) {

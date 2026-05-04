@@ -83,6 +83,7 @@ class CarConnectionService : Service() {
     @Volatile private var vdServerStarted = false // VD server process launched
     @Volatile private var updatingFromPhone = false // Phone is pushing an update — don't reconnect
     @Volatile private var shizukuMode = false  // Phone handles VD server via Shizuku
+    @Volatile private var handshakeDone = false // Stop gateway retry after handshake completes
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val usbPermissionAction = "com.dilinkauto.server.USB_PERMISSION"
@@ -257,6 +258,7 @@ class CarConnectionService : Service() {
         wifiReady = false
         vdServerStarted = false
         shizukuMode = false
+        handshakeDone = false
         _videoReady.value = false
         if (usbAdb?.isConnected != true) {
             usbReady = false
@@ -289,17 +291,13 @@ class CarConnectionService : Service() {
             State.IDLE -> { /* waiting for user action */ }
 
             State.CONNECTING -> {
-                if (wifiReady && (usbReady || shizukuMode) && !vdServerStarted) {
-                    carLogSend("WiFi ready${if (shizukuMode) " (Shizuku mode)" else " and USB ready"} — deploying VD server")
+                // VD server is deployed immediately after handshake (by car via ADB or
+                // by phone via Shizuku). wifiReady is set after video/input connections
+                // are established following VD_PORTS_BOUND.
+                if (wifiReady && (usbReady || shizukuMode)) {
+                    carLogSend("All connections ready — connected")
                     _state.value = State.CONNECTED
-                    _statusMessage.value = getString(R.string.status_deploying_vd)
-                    if (!shizukuMode) {
-                        deployVdServer()
-                    } else {
-                        // Phone handles VD server via Shizuku — skip car-side deployment
-                        vdServerStarted = true
-                        carLogSend("Shizuku mode: phone deploys VD server, car skipping")
-                    }
+                    _statusMessage.value = getString(R.string.status_waiting_video)
                 } else if (wifiReady && !usbReady && !shizukuMode) {
                     _statusMessage.value = getString(R.string.status_waiting_usb)
                 } else if (!wifiReady && usbReady) {
@@ -325,24 +323,24 @@ class CarConnectionService : Service() {
 
     private fun startWifiTrack() {
         // Strategy 1: Gateway IP retry loop (phone is hotspot)
-        // Retries every 3s until wifiReady — handles hotspot enabled after USB plug
+        // Retries every 3s until wifiReady or handshakeDone — handles hotspot enabled after USB plug
         // and Shizuku mode where phone's service may not be listening on first attempt
         scope.launch(Dispatchers.IO) {
             delay(500)
-            while (isActive && !wifiReady && _state.value == State.CONNECTING) {
+            while (isActive && !wifiReady && !handshakeDone && _state.value == State.CONNECTING) {
                 val gatewayIp = getWifiGatewayIp()
                 if (gatewayIp != null) {
                     carLogSend("WiFi track: trying gateway $gatewayIp")
                     connectToPhone(gatewayIp, Discovery.DEFAULT_PORT)
                 }
-                delay(3000) // retry every 3 seconds
+                delay(3000)
             }
         }
 
-        // Strategy 2: mDNS (runs continuously until wifiReady)
+        // Strategy 2: mDNS (runs continuously until wifiReady or handshakeDone)
         scope.launch {
             Discovery.discoverServices(this@CarConnectionService).collect { service ->
-                if (!wifiReady && _state.value == State.CONNECTING) {
+                if (!wifiReady && !handshakeDone && _state.value == State.CONNECTING) {
                     carLogSend("WiFi track: mDNS found ${service.host}")
                     connectToPhone(service.host, service.port)
                 }
@@ -393,12 +391,9 @@ class CarConnectionService : Service() {
 
                 withContext(Dispatchers.Main) { updateNotification(R.string.notification_connected) }
 
-                // Handshake timeout
-                delay(10_000)
-                if (controlConnection === ctrl && !wifiReady) {
-                    carLogSend("Handshake timeout — retrying")
-                    ctrl.disconnect()
-                }
+                // Wait for VD_PORTS_BOUND → connectVideoAndInput → wifiReady.
+                // The watchdog on control connection handles dead connections.
+                // No timeout — VD deployment and port binding can take several seconds.
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -493,11 +488,8 @@ class CarConnectionService : Service() {
         scope.launch(Dispatchers.IO) {
             var attempts = 0
             while (isActive && !usbReady && _state.value == State.CONNECTING && attempts < 60) {
-                // Only use phoneHost set by Track A (handshake) — never fall back
-                // to gateway IP because the emulator's gateway (10.0.2.2) is the host
-                // machine, not the phone.
                 val host = phoneHost
-                if (host != null && host != "10.0.2.2") {
+                if (host != null) {
                     carLogSend("Dev mode: TCP ADB connecting to $host:5555 (attempt ${attempts + 1})")
                     connectTcpAdb(host)
                     return@launch
@@ -537,6 +529,11 @@ class CarConnectionService : Service() {
         carLogSend("Dev mode: phone app launched via TCP ADB")
 
         usbReady = true
+        // If handshake already completed, deploy VD server now that ADB is available
+        if (handshakeDone && !vdServerStarted) {
+            carLogSend("TCP ADB ready after handshake — deploying VD server")
+            deployVdServer()
+        }
         checkAndAdvance()
     }
 
@@ -635,14 +632,16 @@ class CarConnectionService : Service() {
                     vdServerJarPath = response.vdServerJarPath
                 }
 
+                handshakeDone = true  // Stop WiFi gateway retry loop
                 if (response.connectionMethod == CONNECTION_METHOD_SHIZUKU) {
                     shizukuMode = true
-                    carLogSend("Shizuku mode detected — phone will deploy VD server")
+                    carLogSend("Shizuku mode — phone will deploy VD server, waiting for VD_PORTS_BOUND")
+                } else {
+                    // Car deploys VD server via ADB (USB or TCP).
+                    // Deploy NOW before video/input connections — VD binds 9638/9639 directly.
+                    carLogSend("Car deploying VD server via ADB")
+                    deployVdServer()
                 }
-
-                // Don't connect video/input yet — wait for VD_PORTS_BOUND from phone.
-                // The VD server binds ports 9638/9639 directly; phone signals when ready.
-                carLogSend("Waiting for VD_PORTS_BOUND before connecting video/input")
             }
             ControlMsg.VD_PORTS_BOUND -> {
                 carLogSend("VD ports bound — connecting video and input directly to VD server")
@@ -768,6 +767,7 @@ class CarConnectionService : Service() {
             carLogSend("deployVdServer: no ADB connection")
             return
         }
+        vdServerStarted = true  // Set early to prevent duplicate deploys
         scope.launch(Dispatchers.IO) {
             val displayMetrics = resources.displayMetrics
             val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
@@ -794,9 +794,9 @@ class CarConnectionService : Service() {
             _statusMessage.value = getString(R.string.status_starting_vd)
             carLogSend("VD server: ${scaledW}x${scaledH}@${phoneDpi}dpi → ${viewportWidth}x${viewportHeight}")
 
-            val cmd = "CLASSPATH=$jarPath exec app_process / " +
+            val cmd = "CLASSPATH=$jarPath app_process / " +
                     "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
-                    " >$logFile 2>&1"
+                    " >$logFile 2>&1 &"
             if (!executeAdb(cmd, noWait = true)) {
                 carLogSend("VD server failed to start", "E")
                 _statusMessage.value = getString(R.string.status_vd_failed)
@@ -981,20 +981,21 @@ class CarConnectionService : Service() {
 
     private fun handleDisconnect() {
         carLogSend("handleDisconnect — state=${_state.value} usb=${usbReady} wifi=${wifiReady}")
-        // Cancel ALL ongoing connection work first
         connectionScope?.cancel()
         connectionScope = null
         connectJob?.cancel()
         connectJob = null
 
-        // Stop decoder and close connections
         videoDecoder.stop()
         releaseOffscreenSurface()
-        adbController?.disconnect()
-        adbController = null
+        // Don't disconnect ADB controller on every disconnect — TCP ADB connections
+        // survive WiFi flaps. Only null it if the connection is actually broken.
+        if (adbController?.isConnected != true) {
+            adbController?.disconnect()
+            adbController = null
+        }
         disconnectAllConnections()
 
-        // Reset ALL prerequisite flags
         _phoneName.value = ""
         _appList.value = emptyList()
         _videoReady.value = false
@@ -1003,11 +1004,14 @@ class CarConnectionService : Service() {
         touchDropCount = 0
         wifiReady = false
         vdServerStarted = false
-        // USB: keep usbReady/usbConnecting if device is physically connected.
-        // Resetting usbConnecting while auth is pending causes duplicate auth dialogs.
+        handshakeDone = false
         if (usbAdb?.isConnected != true) {
             usbReady = false
-            if (usbAdb == null) usbConnecting = false // only reset if no ADB instance exists
+            if (usbAdb == null) usbConnecting = false
+        }
+        // Preserve TCP ADB readiness if controller is still connected
+        if (adbController?.isConnected == true) {
+            usbReady = true
         }
 
         if (updatingFromPhone) {

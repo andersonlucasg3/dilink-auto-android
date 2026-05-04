@@ -233,7 +233,7 @@ class VirtualDisplayClient(
 
     companion object {
         private const val TAG = "VirtualDisplayClient"
-        const val SERVER_PORT = 19637
+        const val SERVER_PORT = 19647
 
         // Must match VirtualDisplayServer constants
         private const val MSG_DISPLAY_READY: Byte = 0x10

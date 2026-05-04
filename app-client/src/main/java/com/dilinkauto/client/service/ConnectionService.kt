@@ -358,8 +358,36 @@ class ConnectionService : Service() {
         val vdHeight = scaledH
         FileLog.i(TAG, "VD dimensions: ${vdWidth}x${vdHeight}")
 
-        vdClient?.disconnect()
-        vdClient = null
+        // Open lifecycle channel if not already open (survives re-handshakes)
+        if (vdClient == null) {
+            val lifecycleClient = VirtualDisplayClient(serviceScope, this@ConnectionService)
+            lifecycleClient.onStackEmpty = {
+            val c = controlConnection
+            if (c?.isConnected == true) {
+                try { c.sendControl(ControlMsg.VD_STACK_EMPTY) } catch (_: Exception) {}
+            }
+        }
+        lifecycleClient.onFocusedApp = { pkg ->
+            val c = controlConnection
+            if (c?.isConnected == true) {
+                try { c.sendControl(ControlMsg.FOCUSED_APP, pkg.toByteArray(Charsets.UTF_8)) } catch (_: Exception) {}
+            }
+        }
+        lifecycleClient.onDisplayReady = {
+            val c = controlConnection
+            if (c?.isConnected == true) {
+                try {
+                    c.sendControl(ControlMsg.VD_PORTS_BOUND)
+                    FileLog.i(TAG, "Sent VD_PORTS_BOUND to car — direct video/input streaming")
+                } catch (e: Exception) {
+                    FileLog.e(TAG, "Failed to send VD_PORTS_BOUND", e)
+                }
+            }
+        }
+            lifecycleClient.startListening(VirtualDisplayClient.SERVER_PORT)
+            vdClient = lifecycleClient
+            FileLog.i(TAG, "VD lifecycle channel open on localhost:${VirtualDisplayClient.SERVER_PORT}")
+        }
 
         val vdJarPath = java.io.File(
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
@@ -425,55 +453,27 @@ class ConnectionService : Service() {
                     FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
                 }
 
-                // Open VD lifecycle channel and wait for VD server
-                val client = VirtualDisplayClient(serviceScope, this@ConnectionService)
-
-                // Set up relay callbacks: VD signals → car control connection
-                client.onStackEmpty = {
-                    if (controlConnection?.isConnected == true) {
-                        try { controlConnection?.sendControl(ControlMsg.VD_STACK_EMPTY) } catch (_: Exception) {}
-                    }
-                }
-                client.onFocusedApp = { pkg ->
-                    if (controlConnection?.isConnected == true) {
-                        try { controlConnection?.sendControl(ControlMsg.FOCUSED_APP, pkg.toByteArray(Charsets.UTF_8)) } catch (_: Exception) {}
-                    }
-                }
-                client.onDisplayReady = {
-                    // VD is bound on 9638/9639 — tell car to connect directly
-                    if (controlConnection?.isConnected == true) {
-                        try {
-                            controlConnection?.sendControl(ControlMsg.VD_PORTS_BOUND)
-                            FileLog.i(TAG, "Sent VD_PORTS_BOUND to car — direct video/input streaming")
-                        } catch (e: Exception) {
-                            FileLog.e(TAG, "Failed to send VD_PORTS_BOUND", e)
+                // Wait for VD to connect on the lifecycle channel already opened
+                val client = vdClient ?: return@launch
+                if (!client.isConnected) {
+                    serviceScope.launch(Dispatchers.IO) {
+                        if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
+                            FileLog.i(TAG, "VD server lifecycle connected (displayId=${client.displayId})")
+                            InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
+                            withContext(Dispatchers.Main) {
+                                _serviceState.value = State.STREAMING
+                                updateNotification(R.string.notification_streaming)
+                            }
+                            sendAppList()
+                        } else {
+                            FileLog.w(TAG, "VD server did not connect within timeout")
                         }
                     }
                 }
-
-                client.startListening(VirtualDisplayClient.SERVER_PORT)
-                vdClient = client
 
                 // If Shizuku is available, deploy VD server directly
                 if (ShizukuManager.isAvailable) {
                     startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
-                }
-                // else: car deploys VD via USB ADB (unchanged flow)
-
-                // Wait for VD server to connect on lifecycle channel
-                serviceScope.launch(Dispatchers.IO) {
-                    if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
-                        FileLog.i(TAG, "VD server lifecycle connected (displayId=${client.displayId})")
-                        InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
-                        withContext(Dispatchers.Main) {
-                            _serviceState.value = State.STREAMING
-                            updateNotification(R.string.notification_streaming)
-                        }
-                        // Send app list to car via control
-                        sendAppList()
-                    } else {
-                        FileLog.w(TAG, "VD server did not connect within timeout")
-                    }
                 }
             }
         }
@@ -508,9 +508,9 @@ class ConnectionService : Service() {
                 ShizukuManager.execAndWait("pkill -f VirtualDisplayServer 2>/dev/null")
                 delay(200)
 
-                val cmd = "CLASSPATH=$jarPath exec app_process / " +
+                val cmd = "CLASSPATH=$jarPath app_process / " +
                         "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
-                        " >$logFile 2>&1"
+                        " >$logFile 2>&1 &"
                 ShizukuManager.execBackground(cmd)
                 FileLog.i(TAG, "VD server started via Shizuku: ${vdWidth}x${vdHeight}")
             } catch (e: Exception) {
@@ -1245,8 +1245,7 @@ class ConnectionService : Service() {
         vdWaitJob?.cancel()
         vdWaitJob = null
         vdClient?.stopVdServer()
-        vdClient?.disconnect()
-        vdClient = null
+        // Don't disconnect lifecycle channel — keep it open for VD reconnection
         InputInjectionService.instance?.clearVirtualDisplay()
         controlConnection?.disconnect()
         controlConnection = null
