@@ -635,19 +635,22 @@ class CarConnectionService : Service() {
                     vdServerJarPath = response.vdServerJarPath
                 }
 
-                // Detect Shizuku mode — phone handles VD server startup
                 if (response.connectionMethod == CONNECTION_METHOD_SHIZUKU) {
                     shizukuMode = true
                     carLogSend("Shizuku mode detected — phone will deploy VD server")
                 }
 
-                // Don't set wifiReady yet — first connect video + input connections.
-                // wifiReady is set after all 3 connections are established.
+                // Don't connect video/input yet — wait for VD_PORTS_BOUND from phone.
+                // The VD server binds ports 9638/9639 directly; phone signals when ready.
+                carLogSend("Waiting for VD_PORTS_BOUND before connecting video/input")
+            }
+            ControlMsg.VD_PORTS_BOUND -> {
+                carLogSend("VD ports bound — connecting video and input directly to VD server")
                 val host = phoneHost
                 if (host != null) {
                     connectVideoAndInput(host)
                 } else {
-                    carLogSend("ERROR: phoneHost is null after handshake")
+                    carLogSend("ERROR: phoneHost is null when VD_PORTS_BOUND received")
                 }
             }
             ControlMsg.APP_STARTED -> {}
@@ -776,10 +779,10 @@ class CarConnectionService : Service() {
             val scaledW = ((scaledH * viewportWidth.toFloat() / viewportHeight).toInt()) and 0x7FFFFFFE.toInt()
 
             val jarPath = vdServerJarPath
-            val serverPort = 19637
 
             val logFile = "/data/local/tmp/vd-server.log"
-            val args = "$scaledW $scaledH $phoneDpi $serverPort $viewportWidth $viewportHeight $targetFps"
+            // Args: W H DPI PHONE_HOST EW EH FPS — VD binds 9638/9639 for car, connects to phoneHost:19637
+            val args = "$scaledW $scaledH $phoneDpi 127.0.0.1 $viewportWidth $viewportHeight $targetFps"
 
             // Kill any existing VD server
             _statusMessage.value = getString(R.string.status_preparing_vd)
@@ -886,34 +889,32 @@ class CarConnectionService : Service() {
         }
     }
 
-    fun launchApp(packageName: String) {
+    /** Send a control command to the VD server directly via the input connection (port 9639) */
+    private fun sendCommandToVd(msgType: Byte, payload: ByteArray = ByteArray(0)) {
         scope.launch(Dispatchers.IO) {
-            try { controlConnection?.sendControl(ControlMsg.LAUNCH_APP, LaunchAppMessage(packageName).encode()) }
-            catch (e: Exception) { carLogSend("launchApp failed: ${e.message}", "E") }
+            try {
+                inputConnection?.sendControl(msgType, payload)
+            } catch (e: Exception) {
+                carLogSend("sendCommandToVd 0x${msgType.toString(16)} failed: ${e.message}", "E")
+            }
         }
+    }
+
+    fun launchApp(packageName: String) {
+        sendCommandToVd(ControlMsg.LAUNCH_APP, LaunchAppMessage(packageName).encode())
     }
 
     fun goHome() {
-        scope.launch(Dispatchers.IO) {
-            try { controlConnection?.sendControl(ControlMsg.GO_HOME) }
-            catch (e: Exception) { carLogSend("goHome failed: ${e.message}", "E") }
-        }
+        sendCommandToVd(ControlMsg.GO_HOME)
     }
 
     fun goBack() {
-        scope.launch(Dispatchers.IO) {
-            try { controlConnection?.sendControl(ControlMsg.GO_BACK) }
-            catch (e: Exception) { carLogSend("goBack failed: ${e.message}", "E") }
-        }
+        sendCommandToVd(ControlMsg.GO_BACK)
     }
 
     fun requestUninstall(packageName: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                controlConnection?.sendControl(ControlMsg.APP_UNINSTALL, packageName.toByteArray(Charsets.UTF_8))
-                carLogSend("Requested uninstall: $packageName")
-            } catch (e: Exception) { carLogSend("requestUninstall failed: ${e.message}", "E") }
-        }
+        sendCommandToVd(ControlMsg.APP_UNINSTALL, packageName.toByteArray(Charsets.UTF_8))
+        carLogSend("Requested uninstall: $packageName")
     }
 
     fun clearAppInfoData() {
@@ -921,16 +922,12 @@ class CarConnectionService : Service() {
     }
 
     fun requestAppInfo(packageName: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                controlConnection?.sendControl(ControlMsg.APP_INFO, packageName.toByteArray(Charsets.UTF_8))
-                carLogSend("Requested app info: $packageName")
-            } catch (e: Exception) { carLogSend("requestAppInfo failed: ${e.message}", "E") }
-        }
+        sendCommandToVd(ControlMsg.APP_INFO, packageName.toByteArray(Charsets.UTF_8))
+        carLogSend("Requested app info: $packageName")
     }
 
     fun requestShortcuts(packageName: String) {
-        // Clear stale cache entry first so the UI knows we're loading
+        // Shortcuts still go through phone (request-reply via lifecycle channel 19637)
         _shortcutsCache.value = _shortcutsCache.value - packageName
         scope.launch(Dispatchers.IO) {
             try {
@@ -941,13 +938,9 @@ class CarConnectionService : Service() {
     }
 
     fun executeShortcut(packageName: String, shortcutId: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                val msg = AppShortcutActionMessage(packageName, shortcutId)
-                controlConnection?.sendControl(ControlMsg.APP_SHORTCUT_ACTION, msg.encode())
-                carLogSend("Execute shortcut: $shortcutId for $packageName")
-            } catch (e: Exception) { carLogSend("executeShortcut failed: ${e.message}", "E") }
-        }
+        val msg = AppShortcutActionMessage(packageName, shortcutId)
+        sendCommandToVd(ControlMsg.APP_SHORTCUT_ACTION, msg.encode())
+        carLogSend("Execute shortcut: $shortcutId for $packageName")
     }
 
     fun clearNotification(id: Int, packageName: String) {

@@ -35,14 +35,10 @@ class ConnectionService : Service() {
 
     private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     @Volatile private var controlConnection: Connection? = null
-    @Volatile private var videoConnection: Connection? = null
-    @Volatile private var inputConnection: Connection? = null
     @Volatile private var vdClient: VirtualDisplayClient? = null
     private var pendingAppLaunch: String? = null
     private var vdWaitJob: Job? = null
     private var handshakeJob: Job? = null
-    private var vdWidth = 1304
-    private var vdHeight = 792
     private var targetFps = 30
     private var serviceRegistration: Discovery.ServiceRegistration? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -325,49 +321,6 @@ class ConnectionService : Service() {
         }
     }
 
-    /**
-     * Accept video and input connections after handshake succeeds.
-     * Called from handleHandshake() after the control connection is established.
-     * Opens ServerSockets on ports 9638/9639, then accepts both in parallel.
-     */
-    private suspend fun acceptVideoAndInputConnections() {
-        FileLog.i(TAG, "Accepting video (${Discovery.VIDEO_PORT}) and input (${Discovery.INPUT_PORT}) connections...")
-        try {
-            val videoDef = serviceScope.async(Dispatchers.IO) {
-                Connection.accept(Discovery.VIDEO_PORT, serviceScope)
-            }
-            val inputDef = serviceScope.async(Dispatchers.IO) {
-                Connection.accept(Discovery.INPUT_PORT, serviceScope)
-            }
-
-            val video = withTimeout(10_000) { videoDef.await() }
-            videoConnection = video
-            video.onLog { msg -> FileLog.w(TAG, "VideoConn: $msg") }
-            video.onDisconnect {
-                FileLog.i(TAG, "Car disconnected (video)")
-                controlConnection?.disconnect()
-            }
-            video.start(enableHeartbeat = false)
-            FileLog.i(TAG, "Video connection accepted")
-
-            val input = withTimeout(10_000) { inputDef.await() }
-            inputConnection = input
-            input.onFrames(Channel.INPUT) { frame ->
-                // Must run on IO — touch writes to localhost socket, blocked by StrictMode on Main
-                serviceScope.launch(Dispatchers.IO) { handleInputFrame(frame) }
-            }
-            input.onLog { msg -> FileLog.w(TAG, "InputConn: $msg") }
-            input.onDisconnect {
-                FileLog.i(TAG, "Car disconnected (input)")
-                controlConnection?.disconnect()
-            }
-            input.start(enableHeartbeat = false)
-            FileLog.i(TAG, "Input connection accepted — all 3 connections established")
-        } catch (e: Exception) {
-            FileLog.e(TAG, "Failed to accept video/input connections: ${e.message}")
-            controlConnection?.disconnect()
-        }
-    }
 
     // ─── Frame Handlers ───
 
@@ -379,50 +332,14 @@ class ConnectionService : Service() {
                 FileLog.i(TAG, "Handshake from car: ${req.deviceName} ${req.screenWidth}x${req.screenHeight}")
                 handleHandshake(req)
             }
-            ControlMsg.LAUNCH_APP -> {
-                val msg = LaunchAppMessage.decode(frame.payload)
-                val client = vdClient
-                if (client != null) {
-                    client.launchApp(msg.packageName)
-                } else {
-                    pendingAppLaunch = msg.packageName
-                    FileLog.i(TAG, "Queued app launch: ${msg.packageName} (VD not ready)")
-                }
-            }
-            ControlMsg.GO_HOME -> { vdClient?.goHome() }
-            ControlMsg.GO_BACK -> { vdClient?.goBack() }
-            ControlMsg.VD_SERVER_READY -> {
-                val port = java.nio.ByteBuffer.wrap(frame.payload).getInt()
-                FileLog.i(TAG, "Car says VD server ready on port $port")
-                waitForVDServer(port)
-            }
-            ControlMsg.APP_UNINSTALL -> {
-                val pkg = String(frame.payload, Charsets.UTF_8)
-                FileLog.i(TAG, "Car requested uninstall: $pkg")
-                val client = vdClient
-                if (client != null) {
-                    client.uninstallApp(pkg)
-                } else {
-                    FileLog.w(TAG, "VD client not connected, cannot uninstall $pkg")
-                }
-            }
-            ControlMsg.APP_INFO -> {
-                val pkg = String(frame.payload, Charsets.UTF_8)
-                FileLog.i(TAG, "Car requested app info: $pkg")
-                sendAppInfoData(pkg)
-            }
+            // APP_SHORTCUTS still goes through phone — VD has no direct control channel to car
             ControlMsg.APP_SHORTCUTS -> {
                 val pkg = String(frame.payload, Charsets.UTF_8)
                 FileLog.i(TAG, "Car requested shortcuts for: $pkg")
                 sendAppShortcuts(pkg)
             }
-            ControlMsg.APP_SHORTCUT_ACTION -> {
-                val action = AppShortcutActionMessage.decode(frame.payload)
-                FileLog.i(TAG, "Car requested shortcut action: ${action.shortcutId} for ${action.packageName}")
-                serviceScope.launch(Dispatchers.IO) {
-                    launchShortcut(action.packageName, action.shortcutId)
-                }
-            }
+            // LAUNCH_APP, GO_BACK, GO_HOME, APP_UNINSTALL, APP_INFO, APP_SHORTCUT_ACTION
+            // now go directly Car → VD via port 9639 Channel.CONTROL
         }
     }
 
@@ -437,9 +354,9 @@ class ConnectionService : Service() {
         val carAspect = request.screenWidth.toFloat() / request.screenHeight
         val scaledH = minHeightPx and 0x7FFFFFFE.toInt()
         val scaledW = ((scaledH * carAspect).toInt()) and 0x7FFFFFFE.toInt()
-        vdWidth = scaledW
-        vdHeight = scaledH
-        FileLog.i(TAG, "Touch mapping: ${scaledW}x${scaledH}")
+        val vdWidth = scaledW
+        val vdHeight = scaledH
+        FileLog.i(TAG, "VD dimensions: ${vdWidth}x${vdHeight}")
 
         vdClient?.disconnect()
         vdClient = null
@@ -467,15 +384,12 @@ class ConnectionService : Service() {
             val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
                 it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
             }
-            // Skip auto-update if a previous attempt failed recently (5min cooldown)
             val updateCooldown = autoUpdateFailedAt > 0L &&
                 System.currentTimeMillis() - autoUpdateFailedAt < 5 * 60 * 1000L
             val needsUpdate = UpdateManager.compareVersions(myVersionName, carVersionName) > 0
                 && !autoUpdateAttempted && !updateCooldown
 
             if (needsUpdate) {
-                // ─── UPDATE FLOW ───
-                // Send handshake response first so the car knows we accepted
                 try {
                     conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
                     FileLog.i(TAG, "Handshake response sent (update needed)")
@@ -484,26 +398,19 @@ class ConnectionService : Service() {
                     return@launch
                 }
 
-                // Tell the car we're about to update it — don't reconnect, just wait.
                 try {
                     conn.sendControl(ControlMsg.UPDATING_CAR)
                     FileLog.i(TAG, "Sent UPDATING_CAR to car")
                 } catch (_: Exception) {}
 
-                // Do NOT start VD wait or send app list — the car will restart after update.
                 autoUpdateAttempted = true
-                FileLog.i(TAG, "Car app outdated ($carVersionName < $myVersionName) — updating, then waiting for reconnect")
+                FileLog.i(TAG, "Car app outdated — updating, waiting for reconnect")
                 _installStatusStatic.value = getString(R.string.status_auto_update, carVersionName, myVersionName)
                 autoUpdateCarApp(conn)
-                // autoUpdateCarApp restarts the car app — it will reconnect with the new version.
-                // We disconnect and go back to WAITING.
-                delay(2000) // give the update a moment to start
+                delay(2000)
                 FileLog.i(TAG, "Update initiated — disconnecting to wait for car reconnect")
                 withContext(Dispatchers.Main) { cleanupSession() }
             } else {
-                // ─── NORMAL FLOW ───
-                // Send handshake response first — the car will then connect
-                // on video (9638) and input (9639) ports.
                 try {
                     conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
                     FileLog.i(TAG, "Handshake response sent")
@@ -513,75 +420,66 @@ class ConnectionService : Service() {
                 }
 
                 if (UpdateManager.compareVersions(myVersionName, carVersionName) > 0) {
-                    FileLog.i(TAG, "Car app outdated ($carVersionName) — update already attempted this session, proceeding")
+                    FileLog.i(TAG, "Car app outdated — update already attempted, proceeding")
                 } else {
                     FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
                 }
 
-                // Accept video and input connections from car
-                acceptVideoAndInputConnections()
+                // Open VD lifecycle channel and wait for VD server
+                val client = VirtualDisplayClient(serviceScope, this@ConnectionService)
 
-                // Now that video connection is established, open VD ServerSocket
-                // and wait for VD server to connect
-                val vidConn = videoConnection
-                if (vidConn == null) {
-                    FileLog.e(TAG, "Video connection not established — cannot start VD")
-                    return@launch
+                // Set up relay callbacks: VD signals → car control connection
+                client.onStackEmpty = {
+                    if (controlConnection?.isConnected == true) {
+                        try { controlConnection?.sendControl(ControlMsg.VD_STACK_EMPTY) } catch (_: Exception) {}
+                    }
                 }
-                waitForVDServer(VD_SERVER_PORT)
+                client.onFocusedApp = { pkg ->
+                    if (controlConnection?.isConnected == true) {
+                        try { controlConnection?.sendControl(ControlMsg.FOCUSED_APP, pkg.toByteArray(Charsets.UTF_8)) } catch (_: Exception) {}
+                    }
+                }
+                client.onDisplayReady = {
+                    // VD is bound on 9638/9639 — tell car to connect directly
+                    if (controlConnection?.isConnected == true) {
+                        try {
+                            controlConnection?.sendControl(ControlMsg.VD_PORTS_BOUND)
+                            FileLog.i(TAG, "Sent VD_PORTS_BOUND to car — direct video/input streaming")
+                        } catch (e: Exception) {
+                            FileLog.e(TAG, "Failed to send VD_PORTS_BOUND", e)
+                        }
+                    }
+                }
 
-                // If Shizuku is available, start the VD server directly
-                // (no need for the car's USB ADB to deploy it)
+                client.startListening(VirtualDisplayClient.SERVER_PORT)
+                vdClient = client
+
+                // If Shizuku is available, deploy VD server directly
                 if (ShizukuManager.isAvailable) {
-                    startVdServerViaShizuku(request.screenWidth, request.screenHeight)
+                    startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
                 }
+                // else: car deploys VD via USB ADB (unchanged flow)
 
-                sendAppList()
+                // Wait for VD server to connect on lifecycle channel
+                serviceScope.launch(Dispatchers.IO) {
+                    if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
+                        FileLog.i(TAG, "VD server lifecycle connected (displayId=${client.displayId})")
+                        InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
+                        withContext(Dispatchers.Main) {
+                            _serviceState.value = State.STREAMING
+                            updateNotification(R.string.notification_streaming)
+                        }
+                        // Send app list to car via control
+                        sendAppList()
+                    } else {
+                        FileLog.w(TAG, "VD server did not connect within timeout")
+                    }
+                }
             }
         }
     }
 
     // ─── VD Server Connection ───
-
-    private fun waitForVDServer(port: Int) {
-        // If already connected, don't restart
-        if (vdClient?.isConnected == true) {
-            FileLog.d(TAG, "VD server already connected — skipping")
-            return
-        }
-        // Cancel any previous wait and clean up
-        vdWaitJob?.cancel()
-        vdClient?.disconnect()
-        vdClient = null
-
-        // Open ServerSocket SYNCHRONOUSLY so it's ready before the car deploys the VD server.
-        val vidConn = videoConnection ?: return
-        val ctrlConn = controlConnection ?: return
-        val client = VirtualDisplayClient(vidConn, ctrlConn, serviceScope, this)
-        client.startListening(port)
-
-        vdWaitJob = serviceScope.launch(Dispatchers.IO) {
-            if (client.acceptConnection(port)) {
-                vdClient = client
-                FileLog.i(TAG, "VD server connected (displayId=${client.displayId})")
-                // Configure accessibility service for direct touch injection on the VD.
-                // The VD server's IInputManager.injectInputEvent requires INJECT_EVENTS
-                // permission, which shell UID (2000) lacks on many production devices.
-                InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
-                withContext(Dispatchers.Main) {
-                    _serviceState.value = State.STREAMING
-                    updateNotification(R.string.notification_streaming)
-                }
-                pendingAppLaunch?.let { pkg ->
-                    FileLog.i(TAG, "Launching queued app: $pkg")
-                    client.launchApp(pkg)
-                    pendingAppLaunch = null
-                }
-            } else {
-                FileLog.w(TAG, "VD server did not connect within timeout")
-            }
-        }
-    }
 
     /**
      * Start the VD server process directly on the phone using Shizuku.
@@ -590,7 +488,7 @@ class ConnectionService : Service() {
      * without waiting for the car's USB ADB connection. The VD server will
      * reverse-connect to localhost:19637 as usual.
      */
-    private fun startVdServerViaShizuku(carWidth: Int, carHeight: Int) {
+    private fun startVdServerViaShizuku(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int) {
         if (!ShizukuManager.isAvailable) {
             FileLog.w(TAG, "Shizuku not available — cannot start VD server")
             return
@@ -598,27 +496,23 @@ class ConnectionService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
-                val dpiScale = phoneDpi.toFloat() / 160f
-                val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
-                val scaledW = ((scaledH * carWidth.toFloat() / carHeight).toInt()) and 0x7FFFFFFE.toInt()
                 val jarPath = java.io.File(
                     java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
                     "vd-server.jar"
                 ).absolutePath
                 val logFile = "/data/local/tmp/vd-server.log"
-                val args = "$scaledW $scaledH $phoneDpi $VD_SERVER_PORT $carWidth $carHeight $targetFps"
+                // Args: W H DPI PHONE_HOST EW EH FPS
+                // VD binds 9638/9639 on 0.0.0.0, connects lifecycle to phoneHost:19637
+                val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps"
 
-                // Kill any existing VD server process
                 ShizukuManager.execAndWait("pkill -f VirtualDisplayServer 2>/dev/null")
                 delay(200)
 
-                // Launch VD server via app_process (shell UID 2000) using Shizuku.
-                // The command runs detached (&) so it doesn't block the Shizuku service call.
                 val cmd = "CLASSPATH=$jarPath exec app_process / " +
                         "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
                         " >$logFile 2>&1"
                 ShizukuManager.execBackground(cmd)
-                FileLog.i(TAG, "VD server started via Shizuku: ${scaledW}x${scaledH}")
+                FileLog.i(TAG, "VD server started via Shizuku: ${vdWidth}x${vdHeight}")
             } catch (e: Exception) {
                 FileLog.e(TAG, "Shizuku VD server start failed", e)
             }
@@ -724,65 +618,6 @@ class ConnectionService : Service() {
         }
     }
 
-    // ─── Input ───
-
-    private var inputFrameCount = 0L
-
-    private fun handleInputFrame(frame: FrameCodec.Frame) {
-        val client = vdClient
-        inputFrameCount++
-        if (inputFrameCount <= 3 || inputFrameCount % 100 == 0L) {
-            FileLog.i(TAG, "handleInputFrame #$inputFrameCount type=0x${frame.messageType.toString(16)} vdClient=${client != null} connected=${client?.isConnected}")
-        }
-
-        // Use VD server direct injection if IInputManager is available (low latency),
-        // otherwise fall back to accessibility gestures (guaranteed to work).
-        val useDirect = client != null && client.isConnected && client.hasDirectInjection
-        val cl = if (useDirect) client!! else null
-
-        try {
-            if (frame.messageType == InputMsg.TOUCH_MOVE_BATCH) {
-                val batch = TouchMoveBatch.decode(frame.payload)
-                if (cl != null) {
-                    val w = vdWidth
-                    val h = vdHeight
-                    for (p in batch.pointers) {
-                        cl.touch(1, p.pointerId, (p.x * w).toInt(), (p.y * h).toInt(), p.pressure)
-                    }
-                } else {
-                    for (p in batch.pointers) {
-                        InputInjectionService.instance?.injectTouch(TouchEvent(
-                            action = InputMsg.TOUCH_MOVE,
-                            pointerId = p.pointerId,
-                            x = p.x, y = p.y,
-                            pressure = p.pressure,
-                            timestamp = p.timestamp
-                        ))
-                    }
-                }
-                return
-            }
-
-            val event = TouchEvent.decode(frame.payload)
-            if (cl != null) {
-                val w = vdWidth
-                val h = vdHeight
-                val pixelX = (event.x * w).toInt()
-                val pixelY = (event.y * h).toInt()
-                val action = when (event.action) {
-                    InputMsg.TOUCH_DOWN -> 0
-                    InputMsg.TOUCH_MOVE -> 1
-                    InputMsg.TOUCH_UP -> 2
-                    else -> return
-                }
-                cl.touch(action, event.pointerId, pixelX, pixelY, event.pressure)
-            } else {
-                InputInjectionService.instance?.injectTouch(event)
-            }
-        } catch (e: Exception) {
-            FileLog.e(TAG, "handleInputFrame error type=0x${frame.messageType.toString(16)}: ${e.message}", e)
-        }
-    }
 
     // ─── Car App Install via ADB ───
 
@@ -1383,36 +1218,7 @@ class ConnectionService : Service() {
         return 0
     }
 
-    private fun launchShortcut(packageName: String, shortcutId: String) {
-        // Route through VD server which runs as shell UID (2000) — bypasses
-        // LauncherApps permission restrictions that prevent normal apps from
-        // starting shortcuts for other packages.
-        val vd = vdClient
-        if (vd != null && vd.isConnected) {
-            vd.executeShortcut(packageName, shortcutId)
-            FileLog.i(TAG, "VD server executing shortcut $shortcutId for $packageName")
-            return
-        }
-
-        // Fallback: try LauncherApps API (may fail on restricted devices)
-        try {
-            val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
-                ?: return
-            val user = android.os.Process.myUserHandle()
-            val displayId = vdClient?.displayId
-            val options = if (displayId != null && displayId >= 0) {
-                android.app.ActivityOptions.makeBasic().apply {
-                    launchDisplayId = displayId
-                }.toBundle()
-            } else {
-                null
-            }
-            launcherApps.startShortcut(packageName, shortcutId, null, options, user)
-            FileLog.i(TAG, "Launched shortcut $shortcutId for $packageName on display $displayId")
-        } catch (e: Exception) {
-            FileLog.w(TAG, "Failed to launch shortcut $shortcutId: ${e.message}")
-        }
-    }
+    // launchShortcut removed — shortcut execution now goes Car→VD directly via port 9639
 
     private fun categorizeApp(pkg: String): AppCategory = when {
         pkg.contains("map", true) || pkg.contains("navi", true) ||
@@ -1438,22 +1244,14 @@ class ConnectionService : Service() {
         handshakeJob = null
         vdWaitJob?.cancel()
         vdWaitJob = null
+        vdClient?.stopVdServer()
         vdClient?.disconnect()
         vdClient = null
-        // Clear stuck pointers from any interrupted touch session
         InputInjectionService.instance?.clearVirtualDisplay()
-        videoConnection?.disconnect()
-        videoConnection = null
-        inputConnection?.disconnect()
-        inputConnection = null
         controlConnection?.disconnect()
         controlConnection = null
         activeConnection = null
         _serviceState.value = State.WAITING
-
-        // Force screen on after disconnection. VD server uses SurfaceControl-level
-        // display power-off which regular WakeLocks can't reverse. Launch our own
-        // activity with FLAG_TURN_SCREEN_ON — WindowManager wakes the display.
         forceWakeScreen()
     }
 

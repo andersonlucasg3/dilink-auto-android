@@ -9,8 +9,17 @@ import android.media.MediaFormat
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.Surface
+import com.dilinkauto.protocol.Channel
+import com.dilinkauto.protocol.ControlMsg
+import com.dilinkauto.protocol.DataMsg
+import com.dilinkauto.protocol.InputMsg
 import com.dilinkauto.protocol.FrameCodec
 import com.dilinkauto.protocol.NioReader
+import com.dilinkauto.protocol.TouchEvent
+import com.dilinkauto.protocol.TouchMoveBatch
+import com.dilinkauto.protocol.LaunchAppMessage
+import com.dilinkauto.protocol.ProtocolException
+import com.dilinkauto.protocol.VideoMsg
 import java.io.IOException
 import java.io.OutputStream
 import java.lang.reflect.Constructor
@@ -19,26 +28,28 @@ import java.lang.reflect.Method
 import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.LockSupport
 
 /**
  * Lightweight server that runs via app_process as shell UID (2000).
  * Creates a real VirtualDisplay, encodes its content as H.264,
- * and streams it over a local TCP socket.
+ * and streams it directly to the car over TCP (ports 9638/9639).
  *
  * Shell UID can create virtual displays that host any activity.
  * Uses FakeContext (com.android.shell identity) for DisplayManager access,
  * following the same approach as scrcpy.
  *
- * Usage: CLASSPATH=<dex> app_process / com.dilinkauto.vdserver.VirtualDisplayServer <width> <height> <dpi> <port>
+ * Usage: CLASSPATH=<dex> app_process / com.dilinkauto.vdserver.VirtualDisplayServer <width> <height> <dpi> <phoneHost> <encodeWidth> <encodeHeight> <fps>
  */
 class VirtualDisplayServer(
     private val width: Int,
     private val height: Int,
     private val dpi: Int,
-    private val port: Int,
+    private val phoneHost: String,
     private val encodeWidth: Int,
     private val encodeHeight: Int,
     private val fps: Int
@@ -49,13 +60,15 @@ class VirtualDisplayServer(
     private var virtualDisplay: VirtualDisplay? = null
     private var encoder: MediaCodec? = null
 
-    // NIO write queue — lock-free enqueue from encoder thread, drained by writer thread
-    private val writeQueue = ConcurrentLinkedQueue<ByteBuffer>()
-    @Volatile private var writerThread: Thread? = null
+    // Video write queue — lock-free enqueue from encoder thread, drained by video writer thread
+    private val videoWriteQueue = ConcurrentLinkedQueue<FrameCodec.Frame>()
+    @Volatile private var videoWriterThread: Thread? = null
+    @Volatile private var videoWriteQueueDepth = 0
+    private val BACKPRESSURE_THRESHOLD = 6
 
-    // Approximate queue depth for encoder backpressure — avoids O(n) ConcurrentLinkedQueue.size()
-    @Volatile private var writeQueueDepth = 0
-    private val BACKPRESSURE_THRESHOLD = 6 // skip non-keyframes when queue exceeds 6 frames (~100ms at 60fps)
+    // Response write queue — MSG_STACK_EMPTY, MSG_FOCUSED_APP to phone lifecycle channel
+    private val responseWriteQueue = ConcurrentLinkedQueue<ByteBuffer>()
+    @Volatile private var responseWriterThread: Thread? = null
 
     private var scaler: SurfaceScaler? = null
     private var scalerThread: Thread? = null
@@ -66,48 +79,37 @@ class VirtualDisplayServer(
     private var savedProximityWakeup: String? = null
     private var lastPowerOffTime = 0L
 
-    // Persistent shell for fast input injection (avoids fork+exec per tap/swipe)
     private var persistentShell: Process? = null
     private var shellInput: OutputStream? = null
 
-    // Direct MotionEvent injection via IInputManager (bypasses shell entirely)
     private var inputManager: Any? = null
     private var injectInputEventMethod: Method? = null
     private var setDisplayIdMethod: Method? = null
 
-    // Multi-touch pointer state
     private val activePointers = LinkedHashMap<Int, FloatArray>()
     private var touchDownTime = 0L
 
-    // Pre-allocated pools for MotionEvent construction — avoids per-touch GC pressure
     private val propsPool = Array(MAX_POINTERS) { MotionEvent.PointerProperties() }
     private val coordsPool = Array(MAX_POINTERS) { MotionEvent.PointerCoords() }
 
     // ── Main entry point ──
 
     companion object {
-        private const val MSG_VIDEO_CONFIG: Byte = 0x01
-        private const val MSG_VIDEO_FRAME: Byte = 0x02
         private const val MSG_DISPLAY_READY: Byte = 0x10
         private const val MSG_STACK_EMPTY: Byte = 0x11
         private const val MSG_FOCUSED_APP: Byte = 0x12
-        private const val MSG_SHORTCUTS_RESULT: Byte = 0x13
 
-        private const val CMD_LAUNCH_APP = 0x20
-        private const val CMD_GO_BACK = 0x21
-        private const val CMD_GO_HOME = 0x22
-        private const val CMD_INPUT_TAP = 0x30
-        private const val CMD_INPUT_SWIPE = 0x31
-        private const val CMD_INPUT_TOUCH = 0x32
-        private const val CMD_UNINSTALL = 0x23
-        private const val CMD_OPEN_APP_INFO = 0x24
-        private const val CMD_QUERY_SHORTCUTS = 0x25
-        private const val CMD_EXECUTE_SHORTCUT = 0x26
         private const val CMD_STOP = 0xFF
 
         private const val BITRATE = 8_000_000
         private const val I_FRAME_INTERVAL = 1
         private const val MAX_POINTERS = 10
+
+        // Ports for direct car communication
+        private const val VIDEO_PORT = 9638
+        private const val INPUT_PORT = 9639
+        // Lifecycle channel port (to phone)
+        private const val LIFECYCLE_PORT = 19637
 
         private var displayControlClass: Class<*>? = null
         private var displayControlLoaded = false
@@ -117,13 +119,13 @@ class VirtualDisplayServer(
             val w = args.getOrNull(0)?.toInt() ?: 1408
             val h = args.getOrNull(1)?.toInt() ?: 792
             val d = args.getOrNull(2)?.toInt() ?: 120
-            val p = args.getOrNull(3)?.toInt() ?: 19637
+            val ph = args.getOrNull(3) ?: "127.0.0.1"
             val ew = args.getOrNull(4)?.toInt() ?: w
             val eh = args.getOrNull(5)?.toInt() ?: h
             val fps = args.getOrNull(6)?.toInt() ?: 30
 
-            log("Starting: VD=${w}x${h} @${d}dpi, encode=${ew}x${eh}, port=$p, fps=$fps")
-            VirtualDisplayServer(w, h, d, p, ew, eh, fps).run()
+            log("Starting: VD=${w}x${h} @${d}dpi, encode=${ew}x${eh}, phoneHost=$ph, fps=$fps")
+            VirtualDisplayServer(w, h, d, ph, ew, eh, fps).run()
         }
 
         private fun log(msg: String) {
@@ -143,7 +145,6 @@ class VirtualDisplayServer(
     // ── Main logic ──
 
     private fun run() {
-        // Phase 1: Set up everything BEFORE connecting
         initInputManager()
         initPersistentShell()
 
@@ -161,24 +162,114 @@ class VirtualDisplayServer(
             return
         }
 
-        // Phase 2: Connect TO the phone (reverse connection)
-        val connected = connectToPhone()
-        if (!connected) {
-            err("Could not connect to phone after retries — exiting")
+        val success = bindAndServe()
+        if (!success) {
+            err("Could not establish connections — exiting")
         }
 
         cleanup()
     }
 
-    private fun connectToPhone(): Boolean {
+    // ── Bind and serve car directly ──
+
+    private fun bindAndServe(): Boolean {
+        // 1. Bind server sockets for car on 0.0.0.0:9638 (video) and 0.0.0.0:9639 (input)
+        val videoServer: ServerSocketChannel
+        val inputServer: ServerSocketChannel
+        try {
+            videoServer = ServerSocketChannel.open()
+            videoServer.configureBlocking(false)
+            videoServer.socket().reuseAddress = true
+            videoServer.socket().bind(InetSocketAddress("0.0.0.0", VIDEO_PORT))
+            log("Video server bound on 0.0.0.0:$VIDEO_PORT")
+
+            inputServer = ServerSocketChannel.open()
+            inputServer.configureBlocking(false)
+            inputServer.socket().reuseAddress = true
+            inputServer.socket().bind(InetSocketAddress("0.0.0.0", INPUT_PORT))
+            log("Input server bound on 0.0.0.0:$INPUT_PORT")
+        } catch (e: Exception) {
+            err("Failed to bind server sockets: ${e.message}")
+            return false
+        }
+
+        // 2. Connect to phone for lifecycle channel
+        val phoneChannel = connectToPhoneHost()
+        if (phoneChannel == null) {
+            try { videoServer.close() } catch (_: Exception) {}
+            try { inputServer.close() } catch (_: Exception) {}
+            return false
+        }
+
+        // 3. Send MSG_DISPLAY_READY — phone now sends VD_PORTS_BOUND to car
+        try {
+            sendDisplayReady(phoneChannel)
+            log("Display ready sent to phone")
+        } catch (e: Exception) {
+            err("Failed to send display ready: ${e.message}")
+            try { phoneChannel.close() } catch (_: Exception) {}
+            try { videoServer.close() } catch (_: Exception) {}
+            try { inputServer.close() } catch (_: Exception) {}
+            return false
+        }
+
+        // 4. Start lifecycle reader (CMD_STOP from phone)
+        val lifecycleThread = Thread({
+            try { readLifecycleCommands(phoneChannel) } catch (e: Exception) {
+                err("Lifecycle reader error: ${e.message}")
+            }
+        }, "LifecycleReader").apply { isDaemon = true }
+        lifecycleThread.start()
+
+        // 5. Start response writer (MSG_STACK_EMPTY, MSG_FOCUSED_APP to phone)
+        val respThread = Thread({
+            try { runResponseWriter(phoneChannel) } catch (e: Exception) {
+                err("Response writer error: ${e.message}")
+            }
+        }, "ResponseWriter").apply { isDaemon = true }
+        respThread.start()
+
+        // 6. Launch home activity and power off display
+        execShell("am start --display $displayId -a android.intent.action.MAIN -c android.intent.category.HOME")
+        log("Home launched on display $displayId")
+        setPhysicalDisplayPower(false)
+        lastPowerOffTime = System.currentTimeMillis()
+
+        // 7. Accept car connections (with timeout)
+        val carVideo: SocketChannel
+        val carInput: SocketChannel
+        try {
+            carVideo = acceptCarChannel(videoServer, "video", 30000)
+                ?: return false.also { err("Car did not connect on video port") }
+            carInput = acceptCarChannel(inputServer, "input", 30000)
+                ?: return false.also { err("Car did not connect on input port") }
+        } finally {
+            try { videoServer.close() } catch (_: Exception) {}
+            try { inputServer.close() } catch (_: Exception) {}
+        }
+
+        log("Car connected: video=${carVideo.remoteAddress} input=${carInput.remoteAddress}")
+
+        // 8. Start threads for the session
+        startVideoWriter(carVideo)
+        startTouchAndCommandReader(carInput)
+        startEncoderOutput()
+
+        log("All threads started — streaming directly to car")
+        return true
+    }
+
+    /** Connect to phone app on phoneHost:LIFECYCLE_PORT for lifecycle commands */
+    private fun connectToPhoneHost(): SocketChannel? {
+        val addr = InetSocketAddress(phoneHost, LIFECYCLE_PORT)
         for (attempt in 0 until 60) {
             if (!running) break
             var ch: SocketChannel? = null
             try {
-                log("Connecting to phone on localhost:$port (attempt ${attempt + 1})...")
+                log("Connecting to phone lifecycle channel on $phoneHost:$LIFECYCLE_PORT (attempt ${attempt + 1})...")
                 ch = SocketChannel.open()
                 ch.configureBlocking(false)
-                ch.connect(InetSocketAddress("127.0.0.1", port))
+                ch.connect(addr)
 
                 val deadline = System.currentTimeMillis() + 2000
                 while (!ch.finishConnect()) {
@@ -189,116 +280,88 @@ class VirtualDisplayServer(
                     Thread.sleep(50)
                 }
 
-                log("Connected to phone")
-                handleClient(ch)
-                log("Phone disconnected — exiting")
-                return true
+                ch.configureBlocking(false)
+                ch.socket().tcpNoDelay = true
+                log("Connected to phone lifecycle channel")
+                return ch
             } catch (e: ConnectException) {
                 ch?.close()
-                Thread.sleep(200)
+                if (attempt < 59) Thread.sleep(200)
             } catch (e: Exception) {
                 ch?.close()
-                err("Connection error: ${e.message}")
+                err("Lifecycle connection error: ${e.message}")
                 break
             }
         }
-        return false
+        return null
     }
 
-    private fun handleClient(ch: SocketChannel) {
-        try {
-            ch.configureBlocking(false)
-            ch.socket().tcpNoDelay = true
-            ch.socket().sendBufferSize = 262144
-            ch.socket().receiveBufferSize = 262144
-
-            // Tell client the display is ready (direct write before threads start).
-            // Format: MSG_DISPLAY_READY (1) + displayId (4) + flags (1)
-            // flags bit 0 = IInputManager.injectInputEvent actually works
-            val hasInjection = checkDirectInjectionWorks()
-            val flags: Byte = if (hasInjection) 1 else 0
-            val readyBuf = ByteBuffer.allocate(6)
-            readyBuf.put(MSG_DISPLAY_READY)
-            readyBuf.putInt(displayId)
-            readyBuf.put(flags)
-            readyBuf.flip()
-            writeAllBlocking(ch, readyBuf)
-            log("Display ready: id=$displayId ${width}x${height}@${dpi} injectInput=$hasInjection")
-
-            // Launch home activity on VD so the encoder has content
-            execShell("am start --display $displayId -a android.intent.action.MAIN -c android.intent.category.HOME")
-            log("Home launched on display $displayId")
-
-            // Power off physical display while streaming
-            setPhysicalDisplayPower(false)
-            lastPowerOffTime = System.currentTimeMillis()
-
-            // Start NIO writer thread
-            val wt = Thread({
-                log("Writer thread started")
-                try { runWriter(ch) } catch (e: Exception) {
-                    err("Writer thread CRASHED: ${e.javaClass.simpleName}: ${e.message}")
-                }
-                log("Writer thread exited (running=$running)")
-            }, "NioWriter").apply { isDaemon = true }
-            wt.start()
-            writerThread = wt
-
-            // Start video output thread
-            val videoThread = Thread({
-                log("VideoOutput thread started")
-                try { readEncoderOutput() } catch (e: Exception) {
-                    err("VideoOutput thread CRASHED: ${e.javaClass.simpleName}: ${e.message}")
-                    e.printStackTrace()
-                }
-                log("VideoOutput thread exited (running=$running)")
-            }, "VideoOutput").apply { isDaemon = true }
-            videoThread.start()
-
-            // Read commands from client (NIO Selector-based, uses shared NioReader)
-            readCommands(ch)
-        } catch (e: IOException) {
-            err("Client error: ${e.message}")
-        }
-    }
-
-    /** Blocking write for initial handshake before NIO threads start */
-    private fun writeAllBlocking(ch: SocketChannel, buf: ByteBuffer) {
+    /** Send MSG_DISPLAY_READY to phone (blocking write before NIO threads start) */
+    private fun sendDisplayReady(ch: SocketChannel) {
+        val hasInjection = checkDirectInjectionWorks()
+        val flags: Byte = if (hasInjection) 1 else 0
+        val readyBuf = ByteBuffer.allocate(6)
+        readyBuf.put(MSG_DISPLAY_READY)
+        readyBuf.putInt(displayId)
+        readyBuf.put(flags)
+        readyBuf.flip()
         ch.configureBlocking(true)
-        while (buf.hasRemaining()) ch.write(buf)
+        while (readyBuf.hasRemaining()) ch.write(readyBuf)
         ch.configureBlocking(false)
+        log("Display ready sent: id=$displayId ${width}x${height}@${dpi} injectInput=$hasInjection")
     }
 
-    /** Enqueue a single-byte message (e.g., MSG_STACK_EMPTY) */
-    private fun enqueueWriteByte(msgType: Byte) {
-        val buf = ByteBuffer.allocate(1)
-        buf.put(msgType)
-        buf.flip()
-        writeQueue.add(buf)
-        writeQueueDepth++
-        val wt = writerThread
-        if (wt != null) LockSupport.unpark(wt)
-    }
-
-    /** NIO writer thread — drains writeQueue using shared FrameCodec.writeAll */
-    private fun runWriter(ch: SocketChannel) {
-        var writeCount = 0L
-        while (running) {
-            val buf = writeQueue.poll()
-            if (buf == null) {
-                LockSupport.park() // unparked by enqueueWrite
-                continue
+    /** Accept a single connection on the server socket with timeout */
+    private fun acceptCarChannel(server: ServerSocketChannel, name: String, timeoutMs: Int): SocketChannel? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (running && System.currentTimeMillis() < deadline) {
+            val ch = server.accept()
+            if (ch != null) {
+                ch.configureBlocking(false)
+                ch.socket().tcpNoDelay = true
+                ch.socket().sendBufferSize = 262144
+                ch.socket().receiveBufferSize = 262144
+                log("Accepted $name connection from ${ch.remoteAddress}")
+                return ch
             }
-            writeQueueDepth--
-            FrameCodec.writeAll(ch, buf)
-            writeCount++
-            if (writeCount % 60 == 0L) {
-                log("Writer: wrote $writeCount messages, queueDepth=$writeQueueDepth")
-            }
+            Thread.sleep(50)
         }
+        return null
     }
 
-    // ── Encoder ──
+    // ── Video path (port 9638 → Car) ──
+
+    /** Start the video writer thread that drains videoWriteQueue and sends to car */
+    private fun startVideoWriter(carChannel: SocketChannel) {
+        val wt = Thread({
+            log("VideoWriter thread started")
+            try {
+                var writeCount = 0L
+                while (running) {
+                    videoWriterThread = Thread.currentThread()
+                    val frame = videoWriteQueue.poll()
+                    if (frame == null) {
+                        LockSupport.park()
+                        continue
+                    }
+                    videoWriteQueueDepth--
+                    FrameCodec.writeFrameToChannel(carChannel, frame)
+                    writeCount++
+                    if (writeCount % 60 == 0L) {
+                        log("VideoWriter: $writeCount frames, queueDepth=$videoWriteQueueDepth")
+                    }
+                }
+            } catch (e: Exception) {
+                err("VideoWriter thread error: ${e.javaClass.simpleName}: ${e.message}")
+            } finally {
+                running = false
+            }
+            log("VideoWriter thread exited")
+        }, "VideoWriter").apply { isDaemon = true }
+        wt.start()
+    }
+
+    // ── Encoder output ──
 
     private fun setupEncoder() {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, encodeWidth, encodeHeight)
@@ -307,12 +370,9 @@ class VirtualDisplayServer(
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
         format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-        // Baseline profile: simpler entropy coding (CAVLC), no B-frames.
-        // Decodes ~20% faster on low-end hardware like BYD DiLink 3.0.
-        // Slightly larger file size (~5-10%) is negligible on local WiFi.
         format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
         format.setInteger(MediaFormat.KEY_LATENCY, 1)
-        format.setInteger(MediaFormat.KEY_PRIORITY, 0) // real-time — ensures P-frames between keyframes
+        format.setInteger(MediaFormat.KEY_PRIORITY, 0)
         format.setLong("repeat-previous-frame-after", 500_000L)
 
         try {
@@ -323,6 +383,17 @@ class VirtualDisplayServer(
         } catch (e: Exception) {
             throw IOException("Failed to create encoder: ${e.message}", e)
         }
+    }
+
+    private fun startEncoderOutput() {
+        Thread({
+            log("VideoOutput thread started")
+            try { readEncoderOutput() } catch (e: Exception) {
+                err("VideoOutput thread CRASHED: ${e.javaClass.simpleName}: ${e.message}")
+                e.printStackTrace()
+            }
+            log("VideoOutput thread exited (running=$running)")
+        }, "VideoOutput").apply { isDaemon = true }.start()
     }
 
     private fun readEncoderOutput() {
@@ -346,9 +417,6 @@ class VirtualDisplayServer(
                     val buffer = enc.getOutputBuffer(outputIndex)
                     if (buffer == null || info.size <= 0) {
                         noOutputCount++
-                        if (noOutputCount == 1L || noOutputCount == 10L || noOutputCount % 100 == 0L) {
-                            log("Empty output buffer #$noOutputCount: index=$outputIndex size=${info.size} flags=0x${info.flags.toString(16)} gap=${now - lastFrameTime}ms sent=$frameCount")
-                        }
                         enc.releaseOutputBuffer(outputIndex, false)
                         continue
                     }
@@ -356,7 +424,6 @@ class VirtualDisplayServer(
                     lastFrameTime = now
                     val isConfig = (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
                     val isKeyFrame = (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
-                    val msgType = if (isConfig) MSG_VIDEO_CONFIG else MSG_VIDEO_FRAME
                     val size = info.size
 
                     if (isKeyFrame) {
@@ -366,29 +433,27 @@ class VirtualDisplayServer(
                         lastKeyFrameAt = now
                     }
 
-                    // Encoder backpressure: when the write queue is backed up (TCP send buffer
-                    // congested, WiFi dropped, etc.), skip non-keyframe, non-config frames at the
-                    // source. This prevents frame piling that causes catchup cascades downstream.
-                    // Keyframes and CONFIG always go through — they are essential for decoding.
-                    if (!isConfig && !isKeyFrame && writeQueueDepth > BACKPRESSURE_THRESHOLD) {
+                    // Encoder backpressure: drop P-frames when car isn't consuming fast enough
+                    if (!isConfig && !isKeyFrame && videoWriteQueueDepth > BACKPRESSURE_THRESHOLD) {
                         enc.releaseOutputBuffer(outputIndex, false)
                         skippedFrameCount++
                         if (skippedFrameCount <= 3 || skippedFrameCount % 60 == 0L) {
-                            log("Encoder backpressure: skip P-frame (queueDepth=$writeQueueDepth threshold=$BACKPRESSURE_THRESHOLD skipped=$skippedFrameCount)")
+                            log("Encoder backpressure: skip P-frame (queueDepth=$videoWriteQueueDepth)")
                         }
                         continue
                     }
 
-                    // Single allocation: encode header + payload directly into ByteBuffer
-                    val buf = ByteBuffer.allocate(1 + 4 + size)
-                    buf.put(msgType)
-                    buf.putInt(size)
-                    buffer.get(buf.array(), buf.arrayOffset() + buf.position(), size)
-                    buf.position(buf.limit())  // advance position past payload
-                    buf.flip()
-                    writeQueue.add(buf)
-                    writeQueueDepth++
-                    val wt = writerThread
+                    // Build FrameCodec frame with proper protocol framing
+                    val payload = ByteArray(size)
+                    buffer.get(payload, 0, size)
+                    val frame = FrameCodec.Frame(
+                        channel = Channel.VIDEO,
+                        messageType = if (isConfig) VideoMsg.CONFIG else VideoMsg.FRAME,
+                        payload = payload
+                    )
+                    videoWriteQueue.add(frame)
+                    videoWriteQueueDepth++
+                    val wt = videoWriterThread
                     if (wt != null) LockSupport.unpark(wt)
 
                     frameCount++
@@ -402,13 +467,6 @@ class VirtualDisplayServer(
                     log("Encoder output format changed: ${enc.outputFormat}")
                 } else {
                     noOutputCount++
-                    if (noOutputCount == 1L || noOutputCount == 30L) {
-                        log("dequeueOutputBuffer returned $outputIndex (poll #$noOutputCount sent=$frameCount)")
-                    }
-                    if (noOutputCount == 30L || noOutputCount % 100 == 0L) {
-                        val gap = System.currentTimeMillis() - lastFrameTime
-                        log("WARNING: encoder stalled ${gap}ms ($noOutputCount polls, sent $frameCount keys=$keyFrameCount)")
-                    }
                 }
             } catch (e: Exception) {
                 err("Video output error: ${e.message}")
@@ -418,139 +476,188 @@ class VirtualDisplayServer(
         }
     }
 
-    // ── Command reader (uses shared NioReader from protocol module) ──
+    // ── Touch and command reader (port 9639 ← Car) ──
 
-    private fun readCommands(ch: SocketChannel) {
+    private fun startTouchAndCommandReader(carChannel: SocketChannel) {
+        Thread({
+            log("TouchReader thread started")
+            try {
+                readTouchAndCommands(carChannel)
+            } catch (e: Exception) {
+                err("TouchReader thread error: ${e.javaClass.simpleName}: ${e.message}")
+            } finally {
+                running = false
+            }
+            log("TouchReader thread exited")
+        }, "TouchReader").apply { isDaemon = true }.start()
+    }
+
+    private fun readTouchAndCommands(ch: SocketChannel) {
+        val reader = NioReader(ch, 65536, frameIntervalMs)
+        var cmdCount = 0L
+        log("Touch/Command reader started (NioReader)")
+
+        while (running) {
+            val frame = FrameCodec.readFrameBlocking(reader) ?: break
+
+            when (frame.channel) {
+                Channel.INPUT -> handleTouchFrame(frame)
+                Channel.CONTROL -> {
+                    handleCarCommand(frame)
+                    cmdCount++
+                }
+                else -> err("Unknown channel on input port: ${frame.channel}")
+            }
+        }
+        reader.close()
+    }
+
+    private fun handleTouchFrame(frame: FrameCodec.Frame) {
+        when (frame.messageType) {
+            InputMsg.TOUCH_MOVE_BATCH -> {
+                val batch = TouchMoveBatch.decode(frame.payload)
+                for (p in batch.pointers) {
+                    val pixelX = (p.x * width).toInt()
+                    val pixelY = (p.y * height).toInt()
+                    injectTouch(1, p.pointerId, pixelX, pixelY, p.pressure)
+                }
+            }
+            InputMsg.TOUCH_DOWN, InputMsg.TOUCH_MOVE, InputMsg.TOUCH_UP -> {
+                val event = TouchEvent.decode(frame.payload)
+                val pixelX = (event.x * width).toInt()
+                val pixelY = (event.y * height).toInt()
+                val action = when (frame.messageType) {
+                    InputMsg.TOUCH_DOWN -> 0
+                    InputMsg.TOUCH_MOVE -> 1
+                    InputMsg.TOUCH_UP -> 2
+                    else -> return
+                }
+                injectTouch(action, event.pointerId, pixelX, pixelY, event.pressure)
+            }
+        }
+    }
+
+    /** Handle commands from car received on port 9639 Channel.CONTROL */
+    private fun handleCarCommand(frame: FrameCodec.Frame) {
+        when (frame.messageType) {
+            ControlMsg.LAUNCH_APP -> {
+                val msg = LaunchAppMessage.decode(frame.payload)
+                launchApp(msg.packageName)
+            }
+            ControlMsg.GO_BACK -> {
+                execFast("input -d $displayId keyevent 4")
+                checkStackEmpty()
+            }
+            ControlMsg.GO_HOME -> {
+                log("Home: no-op (car handles launcher navigation)")
+            }
+            ControlMsg.APP_UNINSTALL -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                log("Uninstalling: $pkg")
+                execShell("pm uninstall $pkg")
+            }
+            ControlMsg.APP_INFO -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                log("Opening app info on VD for: $pkg")
+                val settingsComponent = execShellOutput(
+                    "cmd package resolve-activity --brief -a android.settings.APPLICATION_DETAILS_SETTINGS com.android.settings"
+                )?.trim()
+                if (!settingsComponent.isNullOrEmpty()) {
+                    execShell("am start --display $displayId -n $settingsComponent -d \"package:$pkg\"")
+                } else {
+                    execShell("am start --display $displayId -a android.settings.APPLICATION_DETAILS_SETTINGS -d \"package:$pkg\"")
+                }
+            }
+            ControlMsg.APP_SHORTCUTS -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                log("Querying shortcuts for: $pkg")
+                val output = execShellFullOutput("cmd shortcut get-shortcuts --package $pkg 2>&1") ?: ""
+                handleShortcutsResult(pkg, output)
+            }
+            ControlMsg.APP_SHORTCUT_ACTION -> {
+                val action = com.dilinkauto.protocol.AppShortcutActionMessage.decode(frame.payload)
+                log("Executing shortcut: ${action.shortcutId} for ${action.packageName}")
+                var result = execShellFullOutput(
+                    "cmd shortcut execute -s ${action.packageName} ${action.shortcutId} $displayId 2>&1"
+                ) ?: ""
+                if (result.contains("Error") || result.contains("Unknown cmd")) {
+                    log("cmd shortcut failed, trying am start")
+                    result = execShellFullOutput(
+                        "am start --display $displayId " +
+                        "-a android.intent.action.MAIN " +
+                        "-c android.intent.category.LAUNCHER " +
+                        "-f 0x10200000 " +
+                        "--es shortcut_id \"${action.shortcutId}\" " +
+                        "${action.packageName} 2>&1"
+                    ) ?: ""
+                }
+            }
+            else -> err("Unknown car command: 0x${frame.messageType.toString(16)}")
+        }
+    }
+
+    // ── Lifecycle channel (19637 ← Phone) ──
+
+    private fun readLifecycleCommands(ch: SocketChannel) {
+        val reader = NioReader(ch, 4096, frameIntervalMs)
+        log("Lifecycle reader started")
         try {
-            val reader = NioReader(ch, 65536, frameIntervalMs)
-            log("Command reader started (NioReader)")
-
-            var cmdCount = 0L
             while (running) {
                 val cmd = reader.readByteBlocking().toInt() and 0xFF
                 when (cmd) {
-                    CMD_LAUNCH_APP -> {
-                        val len = reader.readIntBlocking()
-                        val buf = ByteArray(len)
-                        reader.readFullyBlocking(buf, 0, len)
-                        launchApp(String(buf))
+                    CMD_STOP -> {
+                        log("Received CMD_STOP from phone")
+                        running = false
                     }
-                    CMD_GO_BACK -> {
-                        execFast("input -d $displayId keyevent 4")
-                        checkStackEmpty()
-                    }
-                    CMD_GO_HOME -> log("Home: no-op (car handles launcher navigation)")
-                    CMD_INPUT_TAP -> {
-                        val x = reader.readIntBlocking()
-                        val y = reader.readIntBlocking()
-                        execFast("input -d $displayId tap $x $y")
-                    }
-                    CMD_INPUT_SWIPE -> {
-                        val x1 = reader.readIntBlocking()
-                        val y1 = reader.readIntBlocking()
-                        val x2 = reader.readIntBlocking()
-                        val y2 = reader.readIntBlocking()
-                        val dur = reader.readIntBlocking()
-                        execFast("input -d $displayId swipe $x1 $y1 $x2 $y2 $dur")
-                    }
-                    CMD_INPUT_TOUCH -> {
-                        val action = reader.readByteBlocking().toInt() and 0xFF
-                        val pointerId = reader.readIntBlocking()
-                        val tx = reader.readIntBlocking()
-                        val ty = reader.readIntBlocking()
-                        val pressure = reader.readFloatBlocking()
-                        injectTouch(action, pointerId, tx, ty, pressure)
-                        cmdCount++
-                        if (cmdCount <= 3 || cmdCount % 100 == 0L) {
-                            log("Touch cmd #$cmdCount action=$action ptr=$pointerId x=$tx y=$ty")
-                        }
-                    }
-                    CMD_UNINSTALL -> {
-                        val len = reader.readIntBlocking()
-                        val buf = ByteArray(len)
-                        reader.readFullyBlocking(buf, 0, len)
-                        val pkg = String(buf)
-                        log("Uninstalling: $pkg")
-                        execShell("pm uninstall $pkg")
-                    }
-                    CMD_OPEN_APP_INFO -> {
-                        val len = reader.readIntBlocking()
-                        val buf = ByteArray(len)
-                        reader.readFullyBlocking(buf, 0, len)
-                        val pkg = String(buf)
-                        log("Opening app info on VD for: $pkg")
-                        // Try component-based launch first (more reliable on virtual displays)
-                        val settingsComponent = execShellOutput(
-                            "cmd package resolve-activity --brief -a android.settings.APPLICATION_DETAILS_SETTINGS com.android.settings"
-                        )?.trim()
-                        if (!settingsComponent.isNullOrEmpty()) {
-                            execShell("am start --display $displayId -n $settingsComponent -d \"package:$pkg\"")
-                        } else {
-                            // Fallback: action-based launch
-                            execShell("am start --display $displayId -a android.settings.APPLICATION_DETAILS_SETTINGS -d \"package:$pkg\"")
-                        }
-                    }
-                    CMD_QUERY_SHORTCUTS -> {
-                        val len = reader.readIntBlocking()
-                        val buf = ByteArray(len)
-                        reader.readFullyBlocking(buf, 0, len)
-                        val pkg = String(buf)
-                        log("Querying shortcuts for: $pkg")
-                        val output = execShellFullOutput("cmd shortcut get-shortcuts --package $pkg 2>&1") ?: ""
-                        log("Shortcut result for $pkg: ${output.length} chars")
-                        val pkgBytes = pkg.toByteArray(Charsets.UTF_8)
-                        val dataBytes = output.toByteArray(Charsets.UTF_8)
-                        val respBuf = ByteBuffer.allocate(1 + 4 + pkgBytes.size + 4 + dataBytes.size)
-                        respBuf.put(MSG_SHORTCUTS_RESULT)
-                        respBuf.putInt(pkgBytes.size)
-                        respBuf.put(pkgBytes)
-                        respBuf.putInt(dataBytes.size)
-                        respBuf.put(dataBytes)
-                        respBuf.flip()
-                        writeQueue.add(respBuf)
-                        writeQueueDepth++
-                        val wt = writerThread
-                        if (wt != null) LockSupport.unpark(wt)
-                    }
-                    CMD_EXECUTE_SHORTCUT -> {
-                        val pkgLen = reader.readIntBlocking()
-                        val pkgBuf = ByteArray(pkgLen)
-                        reader.readFullyBlocking(pkgBuf, 0, pkgLen)
-                        val pkg = String(pkgBuf)
-                        val idLen = reader.readIntBlocking()
-                        val idBuf = ByteArray(idLen)
-                        reader.readFullyBlocking(idBuf, 0, idLen)
-                        val shortcutId = String(idBuf)
-                        log("Executing shortcut: $shortcutId for $pkg")
-                        // Try 'cmd shortcut execute' first — has full access under shell UID
-                        var result = execShellFullOutput(
-                            "cmd shortcut execute -s $pkg $shortcutId $displayId 2>&1"
-                        ) ?: ""
-                        log("cmd shortcut execute result: ${result.take(200)}")
-                        if (result.contains("Error") || result.contains("Unknown cmd")) {
-                            // Fall back to am start with the shortcut intent
-                            log("cmd shortcut failed, trying am start")
-                            result = execShellFullOutput(
-                                "am start --display $displayId " +
-                                "-a android.intent.action.MAIN " +
-                                "-c android.intent.category.LAUNCHER " +
-                                "-f 0x10200000 " +
-                                "--es shortcut_id \"$shortcutId\" " +
-                                "$pkg 2>&1"
-                            ) ?: ""
-                            log("am start result: ${result.take(200)}")
-                        }
-                    }
-                    CMD_STOP -> running = false
-                    else -> err("Unknown command: 0x${cmd.toString(16)}")
+                    else -> err("Unknown lifecycle command: 0x${cmd.toString(16)}")
                 }
             }
-            reader.close()
         } catch (e: IOException) {
-            if (running) err("Command error: ${e.message}")
+            if (running) err("Lifecycle reader error: ${e.message}")
         } finally {
             running = false
+            reader.close()
         }
+    }
+
+    // ── Response writer (19637 → Phone) ──
+
+    private fun runResponseWriter(ch: SocketChannel) {
+        log("ResponseWriter thread started")
+        try {
+            while (running) {
+                responseWriterThread = Thread.currentThread()
+                val buf = responseWriteQueue.poll()
+                if (buf == null) {
+                    LockSupport.park()
+                    continue
+                }
+                FrameCodec.writeAll(ch, buf)
+            }
+        } catch (e: Exception) {
+            err("ResponseWriter error: ${e.message}")
+        }
+        log("ResponseWriter thread exited")
+    }
+
+    private fun enqueueResponseByte(msgType: Byte) {
+        val buf = ByteBuffer.allocate(1)
+        buf.put(msgType)
+        buf.flip()
+        responseWriteQueue.add(buf)
+        val wt = responseWriterThread
+        if (wt != null) LockSupport.unpark(wt)
+    }
+
+    private fun enqueueResponse(msgType: Byte, payload: ByteArray) {
+        val buf = ByteBuffer.allocate(1 + 4 + payload.size)
+        buf.put(msgType)
+        buf.putInt(payload.size)
+        buf.put(payload)
+        buf.flip()
+        responseWriteQueue.add(buf)
+        val wt = responseWriterThread
+        if (wt != null) LockSupport.unpark(wt)
     }
 
     // ── App launch ──
@@ -586,17 +693,15 @@ class VirtualDisplayServer(
     // ── Touch injection ──
 
     private fun injectTouch(action: Int, pointerId: Int, x: Int, y: Int, pressure: Float) {
-        // Update pointer state
         when (action) {
-            0 -> { // DOWN
+            0 -> {
                 activePointers[pointerId] = floatArrayOf(x.toFloat(), y.toFloat(), pressure)
                 if (activePointers.size == 1) touchDownTime = android.os.SystemClock.uptimeMillis()
             }
-            1 -> { // MOVE
+            1 -> {
                 val coords = activePointers[pointerId] ?: return
                 coords[0] = x.toFloat(); coords[1] = y.toFloat(); coords[2] = pressure
             }
-            // UP: don't remove yet — need pointer in the event
         }
 
         val im = inputManager
@@ -639,7 +744,6 @@ class VirtualDisplayServer(
                 injectMethod.invoke(im, event, 0)
                 event.recycle()
 
-                // Touch injection wakes the physical display — re-power-off (throttled)
                 val nowMs = System.currentTimeMillis()
                 if (running && nowMs - lastPowerOffTime > 1000) {
                     lastPowerOffTime = nowMs
@@ -650,7 +754,6 @@ class VirtualDisplayServer(
                 if (action == 0 || action == 2) execFast("input -d $displayId tap $x $y")
             }
         } else {
-            // Fallback: shell commands
             if (action == 0) {
                 activePointers[pointerId] = floatArrayOf(x.toFloat(), y.toFloat(), pressure)
             } else if (action == 2) {
@@ -666,7 +769,6 @@ class VirtualDisplayServer(
             }
         }
 
-        // Remove pointer after UP and clear all if empty (prevents ghost fingers)
         if (action == 2) {
             activePointers.remove(pointerId)
             if (activePointers.isEmpty()) {
@@ -700,7 +802,6 @@ class VirtualDisplayServer(
         } catch (e: Exception) { null }
     }
 
-    /** Like execShellOutput but reads the full stdout (up to 64 KB). */
     private fun execShellFullOutput(command: String): String? {
         return try {
             val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
@@ -714,17 +815,12 @@ class VirtualDisplayServer(
         try {
             val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
             p.waitFor()
-            if (p.exitValue() != 0) {
-                val errBuf = ByteArray(512)
-                val len = p.errorStream.read(errBuf)
-                if (len > 0) err("Shell failed (${p.exitValue()}): ${String(errBuf, 0, len).trim()}")
-            }
         } catch (e: Exception) {
             err("execShell error: ${e.message}")
         }
     }
 
-    // ── Virtual Display creation ──
+    // ── Virtual Display creation (unchanged) ──
 
     private fun createVirtualDisplay() {
         val enc = encoder ?: return
@@ -735,10 +831,9 @@ class VirtualDisplayServer(
             log("GPU scaling: VD ${width}x${height} → encoder ${encodeWidth}x${encodeHeight}")
             scaler = SurfaceScaler(encoderSurface, width, height, encodeWidth, encodeHeight, frameIntervalMs)
             scaler!!.start()
-            scaler!!.getInputSurface() // blocks until ready
+            scaler!!.getInputSurface()
         } else encoderSurface
 
-        // Strategy 1: DisplayManagerGlobal
         try {
             log("Trying DisplayManagerGlobal approach...")
             virtualDisplay = createVirtualDisplayViaGlobal(vdSurface)
@@ -750,10 +845,8 @@ class VirtualDisplayServer(
             err("DisplayManagerGlobal returned null VD")
         } catch (e: Exception) {
             err("DisplayManagerGlobal failed: ${e.javaClass.simpleName}: ${e.message}")
-            e.printStackTrace()
         }
 
-        // Strategy 2: DisplayManager with mDisplayIdToMirror bypass
         try {
             log("Trying DisplayManager + mDisplayIdToMirror bypass...")
             val ctor = DisplayManager::class.java.getDeclaredConstructor(android.content.Context::class.java)
@@ -769,19 +862,15 @@ class VirtualDisplayServer(
                 err("mDisplayIdToMirror reflection failed: ${e.javaClass.simpleName}: ${e.message}")
             }
 
-            // SHOULD_SHOW_SYSTEM_DECORATIONS (1<<9) intentionally NOT set.
-            // On Samsung devices it activates DeX desktop UI (taskbar, window
-            // decorations) on the VD, rendering them too small for the car display.
-            // The car's own PersistentNavBar and status UI provide all chrome.
             val flags = (DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
                     or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
-                    or (1 shl 6)   // ROTATES_WITH_CONTENT
-                    or (1 shl 10)  // TRUSTED
-                    or (1 shl 11)  // OWN_DISPLAY_GROUP
-                    or (1 shl 13)  // ALWAYS_UNLOCKED
-                    or (1 shl 14)) // OWN_FOCUS
+                    or (1 shl 6)
+                    or (1 shl 10)
+                    or (1 shl 11)
+                    or (1 shl 13)
+                    or (1 shl 14))
 
-            log("Creating VD with flags=0x${flags.toString(16)} (no system decorations)")
+            log("Creating VD with flags=0x${flags.toString(16)}")
             virtualDisplay = dm.createVirtualDisplay("DiLinkAutoVD", width, height, dpi, vdSurface, flags)
 
             if (virtualDisplay != null) {
@@ -791,24 +880,20 @@ class VirtualDisplayServer(
                 execShell("settings put global force_resizable_activities 1")
                 log("Enabled force_resizable_activities for VD")
 
-                // Disable screen timeout
                 savedScreenOffTimeout = execShellOutput("settings get system screen_off_timeout") ?: "60000"
                 execShell("settings put system screen_off_timeout 2147483647")
                 log("Screen timeout disabled (was ${savedScreenOffTimeout}ms)")
 
-                // Disable proximity/lift wake
                 savedLiftWakeup = execShellOutput("settings get system lift_wakeup_enabled")
                 savedProximityWakeup = execShellOutput("settings get system proximity_wakeup_enabled")
                 execShell("settings put system lift_wakeup_enabled 0")
                 execShell("settings put system proximity_wakeup_enabled 0")
-                log("Lift/proximity wake disabled (was lift=$savedLiftWakeup prox=$savedProximityWakeup)")
-
+                log("Lift/proximity wake disabled")
             } else {
                 err("DisplayManager.createVirtualDisplay returned null")
             }
         } catch (e: Exception) {
             err("DisplayManager approach failed: ${e.javaClass.simpleName}: ${e.message}")
-            e.printStackTrace()
         }
     }
 
@@ -818,7 +903,6 @@ class VirtualDisplayServer(
         val dmg = getInstance.invoke(null)
         log("Got DisplayManagerGlobal instance")
 
-        // SHOULD_SHOW_SYSTEM_DECORATIONS (1<<9) intentionally NOT set — see comment above.
         val flags = (DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
                 or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
                 or (1 shl 6) or (1 shl 10) or (1 shl 11) or (1 shl 13) or (1 shl 14))
@@ -848,7 +932,6 @@ class VirtualDisplayServer(
         val build = configBuilderClass.getDeclaredMethod("build")
         build.isAccessible = true
         val config = build.invoke(builder)
-        log("VirtualDisplayConfig built")
 
         val configClass = Class.forName("android.hardware.display.VirtualDisplayConfig")
         val createVD: Method = try {
@@ -860,7 +943,6 @@ class VirtualDisplayServer(
         }
 
         createVD.isAccessible = true
-        log("Calling DisplayManagerGlobal.createVirtualDisplay...")
         val result = if (createVD.parameterCount == 4) {
             createVD.invoke(dmg, config, null, null, FakeContext.get().packageName)
         } else {
@@ -897,9 +979,6 @@ class VirtualDisplayServer(
     private fun checkStackEmptyImpl() {
         try {
             Thread.sleep(300)
-            // Count tasks on this display by looking for Task{ near display annotations.
-            // The -B 20 context ensures the display annotation and Task{ can be on
-            // different lines (varies by Android version).
             val p = Runtime.getRuntime().exec(arrayOf("sh", "-c",
                 "dumpsys activity activities 2>/dev/null" +
                 " | grep -B 20 'Task{'" +
@@ -913,25 +992,16 @@ class VirtualDisplayServer(
             log("Display $displayId has $taskCount task(s)")
             if (taskCount == 0) {
                 log("Display $displayId stack is empty")
-                enqueueWriteByte(MSG_STACK_EMPTY)
+                enqueueResponseByte(MSG_STACK_EMPTY)
             } else {
-                // Detect the focused app package on this display
                 val focusedPkg = getFocusedPackageOnDisplay()
                 if (focusedPkg != null) {
                     log("Focused app on display $displayId: $focusedPkg")
                     val pkgBytes = focusedPkg.toByteArray(Charsets.UTF_8)
-                    val msgBuf = java.nio.ByteBuffer.allocate(1 + 4 + pkgBytes.size)
-                    msgBuf.put(MSG_FOCUSED_APP)
-                    msgBuf.putInt(pkgBytes.size)
-                    msgBuf.put(pkgBytes)
-                    msgBuf.flip()
-                    writeQueue.add(msgBuf)
-                    writeQueueDepth++
-                    val wt = writerThread
-                    if (wt != null) java.util.concurrent.locks.LockSupport.unpark(wt)
+                    enqueueResponse(MSG_FOCUSED_APP, pkgBytes)
                 } else {
                     log("Display $displayId has tasks but no focused app — treating as empty")
-                    enqueueWriteByte(MSG_STACK_EMPTY)
+                    enqueueResponseByte(MSG_STACK_EMPTY)
                 }
             }
         } catch (e: Exception) {
@@ -939,11 +1009,8 @@ class VirtualDisplayServer(
         }
     }
 
-    /** Detects the package name of the currently focused (resumed) activity on the VD display. */
     private fun getFocusedPackageOnDisplay(): String? {
         return try {
-            // The globally resumed activity is the one with input focus.
-            // During streaming, this is on the VD (OWN_FOCUS flag).
             val fp = Runtime.getRuntime().exec(arrayOf("sh", "-c",
                 "dumpsys activity activities 2>/dev/null" +
                 " | grep -B 5 'mResumedActivity'" +
@@ -954,7 +1021,6 @@ class VirtualDisplayServer(
             fp.waitFor()
             if (flen > 0) {
                 val pkg = String(fbuf, 0, flen).trim()
-                // Exclude system/home packages — we only care about user apps
                 if (pkg.isNotEmpty() && !pkg.startsWith("com.android.") && pkg != "android") {
                     pkg
                 } else null
@@ -962,6 +1028,24 @@ class VirtualDisplayServer(
         } catch (e: Exception) {
             null
         }
+    }
+
+    // ── Shortcuts ──
+
+    private fun handleShortcutsResult(pkg: String, output: String) {
+        log("Shortcut result for $pkg: ${output.length} chars")
+        val pkgBytes = pkg.toByteArray(Charsets.UTF_8)
+        val dataBytes = output.toByteArray(Charsets.UTF_8)
+        val buf = ByteBuffer.allocate(1 + 4 + pkgBytes.size + 4 + dataBytes.size)
+        buf.put(0x13.toByte()) // MSG_SHORTCUTS_RESULT
+        buf.putInt(pkgBytes.size)
+        buf.put(pkgBytes)
+        buf.putInt(dataBytes.size)
+        buf.put(dataBytes)
+        buf.flip()
+        responseWriteQueue.add(buf)
+        val wt = responseWriterThread
+        if (wt != null) LockSupport.unpark(wt)
     }
 
     // ── Display power ──
@@ -999,7 +1083,7 @@ class VirtualDisplayServer(
     }
 
     private fun setPhysicalDisplayPower(on: Boolean) {
-        val mode = if (on) 2 else 0 // POWER_MODE_NORMAL=2, POWER_MODE_OFF=0
+        val mode = if (on) 2 else 0
         try {
             val scClass = Class.forName("android.view.SurfaceControl")
 
@@ -1026,14 +1110,11 @@ class VirtualDisplayServer(
                 }
                 log("Physical display power via SurfaceControl: ${if (on) "ON" else "OFF"}")
                 return
-            } else {
-                err("No physical display IDs found via DisplayControl or SurfaceControl")
             }
         } catch (e: Exception) {
             err("setPhysicalDisplayPower reflection failed: ${e.message}")
         }
 
-        // Fallback: shell command
         if (on) {
             execShell("cmd display power-on 0")
         } else {
@@ -1064,14 +1145,12 @@ class VirtualDisplayServer(
                 err("setDisplayId not available: ${ex.message}")
             }
 
-            log("InputManager injection ready (ServiceManager/IInputManager)")
+            log("InputManager injection ready")
         } catch (e: Exception) {
             err("InputManager init failed: ${e.javaClass.simpleName}: ${e.message}")
-            e.printStackTrace()
         }
     }
 
-    /** Returns true if IInputManager.injectInputEvent actually works (has INJECT_EVENTS). */
     private fun checkDirectInjectionWorks(): Boolean {
         if (inputManager == null || injectInputEventMethod == null) return false
         try {
@@ -1083,21 +1162,15 @@ class VirtualDisplayServer(
             val event = MotionEvent.obtain(downTime, downTime,
                 MotionEvent.ACTION_DOWN, 1, props, coords, 0, 0, 1.0f, 1.0f,
                 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
-            try {
-                setDisplayIdMethod?.invoke(event, displayId)
-            } catch (_: Exception) {}
+            try { setDisplayIdMethod?.invoke(event, displayId) } catch (_: Exception) {}
             injectInputEventMethod!!.invoke(inputManager, event, 0)
-            // Send UP to release the test pointer
             val upEvent = MotionEvent.obtain(downTime, downTime + 1,
                 MotionEvent.ACTION_UP, 1, props, coords, 0, 0, 1.0f, 1.0f,
                 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
-            try {
-                setDisplayIdMethod?.invoke(upEvent, displayId)
-            } catch (_: Exception) {}
+            try { setDisplayIdMethod?.invoke(upEvent, displayId) } catch (_: Exception) {}
             injectInputEventMethod!!.invoke(inputManager, upEvent, 0)
-            event.recycle()
-            upEvent.recycle()
-            log("Direct injection verified — INJECT_EVENTS available")
+            event.recycle(); upEvent.recycle()
+            log("Direct injection verified")
             return true
         } catch (e: Exception) {
             log("Direct injection not available: ${e.javaClass.simpleName}")
@@ -1142,7 +1215,7 @@ class VirtualDisplayServer(
         }
 
         setPhysicalDisplayPower(true)
-        execShell("input keyevent 224") // KEYCODE_WAKEUP
+        execShell("input keyevent 224")
         log("Physical display restored")
 
         scaler?.stop()
@@ -1155,6 +1228,10 @@ class VirtualDisplayServer(
             try { it.stop(); it.release() } catch (_: Exception) {}
             encoder = null
         }
+
+        // Unpark any parked threads so they can check !running and exit
+        val vwt = videoWriterThread; if (vwt != null) LockSupport.unpark(vwt)
+        val rwt = responseWriterThread; if (rwt != null) LockSupport.unpark(rwt)
 
         log("Cleanup complete")
     }
