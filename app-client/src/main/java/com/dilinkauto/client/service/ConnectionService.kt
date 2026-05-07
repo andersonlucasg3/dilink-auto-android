@@ -40,6 +40,7 @@ class ConnectionService : Service() {
     @Volatile private var vdClient: VirtualDisplayClient? = null
     private var pendingAppLaunch: String? = null
     private var vdWaitJob: Job? = null
+    private var handshakeJob: Job? = null
     private var vdWidth = 1304
     private var vdHeight = 792
     private var targetFps = 30
@@ -67,7 +68,28 @@ class ConnectionService : Service() {
         registerNetworkCallback()
         registerPackageRemovedReceiver()
         deployAssets()
+        logDeviceInfo()
         UpdateManager.checkForUpdate(force = false)
+    }
+
+    private fun logDeviceInfo() {
+        val info = buildString {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            val mi = android.app.ActivityManager.MemoryInfo()
+            am?.getMemoryInfo(mi)
+            val dm = resources.displayMetrics
+
+            appendLine("── Device Info ──")
+            appendLine("model=${android.os.Build.MODEL} manufacturer=${android.os.Build.MANUFACTURER}")
+            appendLine("product=${android.os.Build.PRODUCT} device=${android.os.Build.DEVICE}")
+            appendLine("android=${android.os.Build.VERSION.RELEASE} sdk=${android.os.Build.VERSION.SDK_INT}")
+            appendLine("display=${dm.widthPixels}x${dm.heightPixels} @${dm.densityDpi}dpi density=${dm.density}")
+            appendLine("cores=${Runtime.getRuntime().availableProcessors()}")
+            appendLine("abi=${android.os.Build.SUPPORTED_ABIS?.joinToString(",") ?: "?"}")
+            appendLine("heapMax=${Runtime.getRuntime().maxMemory()} heapTotal=${Runtime.getRuntime().totalMemory()} heapFree=${Runtime.getRuntime().freeMemory()}")
+            appendLine("totalMem=${mi.totalMem} availMem=${mi.availMem} lowMemory=${mi.lowMemory}")
+        }
+        FileLog.i(TAG, info)
     }
 
     private fun registerPackageRemovedReceiver() {
@@ -438,7 +460,8 @@ class ConnectionService : Service() {
             connectionMethod = connMethod,
             vdDpi = phoneDpi
         )
-        serviceScope.launch(Dispatchers.IO) {
+        handshakeJob?.cancel()
+        handshakeJob = serviceScope.launch(Dispatchers.IO) {
             // Check version BEFORE sending response — determines the flow
             val carVersionName = request.appVersionName.ifEmpty { request.appVersionCode.toString() }
             val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
@@ -1411,6 +1434,8 @@ class ConnectionService : Service() {
     // ─── Cleanup ───
 
     private fun cleanupSession() {
+        handshakeJob?.cancel()
+        handshakeJob = null
         vdWaitJob?.cancel()
         vdWaitJob = null
         vdClient?.disconnect()
@@ -1471,6 +1496,7 @@ class ConnectionService : Service() {
                     val intent = Intent(this@ConnectionService, Class.forName("com.dilinkauto.client.MainActivity"))
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     intent.addFlags(0x10000000) // FLAG_TURN_SCREEN_ON
                     startActivity(intent)
                     FileLog.i(TAG, "Launched MainActivity with FLAG_TURN_SCREEN_ON from cleanupSession")
