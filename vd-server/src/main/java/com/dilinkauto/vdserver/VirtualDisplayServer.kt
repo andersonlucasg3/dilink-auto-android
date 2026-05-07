@@ -256,6 +256,12 @@ class VirtualDisplayServer(
         startEncoderOutput()
 
         log("All threads started — streaming directly to car")
+
+        // Block until session ends — lifecycle reader or video/input errors set running=false
+        while (running) {
+            Thread.sleep(500)
+        }
+        log("Streaming session ended")
         return true
     }
 
@@ -622,10 +628,13 @@ class VirtualDisplayServer(
                 }
             }
         } catch (e: IOException) {
-            if (running) err("Lifecycle reader error: ${e.message}")
+            if (running) {
+                err("Lifecycle reader error: ${e.message} — keeping server alive for direct streaming")
+            }
+            // Don't set running=false — car streams directly, lifecycle drop is recoverable
         } finally {
-            running = false
             reader.close()
+            try { ch.close() } catch (_: Exception) {}
         }
     }
 
@@ -988,22 +997,19 @@ class VirtualDisplayServer(
     private fun checkStackEmptyImpl() {
         try {
             Thread.sleep(300)
-            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c",
-                "dumpsys activity activities 2>/dev/null" +
-                " | grep -B 20 'Task{'" +
-                " | grep -E 'display(Id)?=#?$displayId'" +
-                " | wc -l"))
-            val buf = ByteArray(64)
-            val len = p.inputStream.read(buf)
-            p.waitFor()
-            val result = if (len > 0) String(buf, 0, len).trim() else "0"
-            val taskCount = result.toIntOrNull() ?: 0
+            val dumpsys = getDumpsysForDisplay() ?: run {
+                // Failed to find our display section — assume empty
+                log("Display $displayId section not found in dumpsys — treating as empty")
+                enqueueResponseByte(MSG_STACK_EMPTY)
+                return
+            }
+            val taskCount = dumpsys.lines().count { it.contains("Task{") }
             log("Display $displayId has $taskCount task(s)")
             if (taskCount == 0) {
                 log("Display $displayId stack is empty")
                 enqueueResponseByte(MSG_STACK_EMPTY)
             } else {
-                val focusedPkg = getFocusedPackageOnDisplay()
+                val focusedPkg = extractFocusedPackage(dumpsys)
                 if (focusedPkg != null) {
                     log("Focused app on display $displayId: $focusedPkg")
                     val pkgBytes = focusedPkg.toByteArray(Charsets.UTF_8)
@@ -1018,25 +1024,45 @@ class VirtualDisplayServer(
         }
     }
 
-    private fun getFocusedPackageOnDisplay(): String? {
+    /** Extract the dumpsys section for our display, or null if not found. */
+    private fun getDumpsysForDisplay(): String? {
         return try {
-            val fp = Runtime.getRuntime().exec(arrayOf("sh", "-c",
-                "dumpsys activity activities 2>/dev/null" +
-                " | grep -B 5 'mResumedActivity'" +
-                " | grep -oP '[a-zA-Z][a-zA-Z0-9_.]+(?=/)'" +
-                " | head -1"))
-            val fbuf = ByteArray(256)
-            val flen = fp.inputStream.read(fbuf)
-            fp.waitFor()
-            if (flen > 0) {
-                val pkg = String(fbuf, 0, flen).trim()
-                if (pkg.isNotEmpty() && !pkg.startsWith("com.android.") && pkg != "android") {
-                    pkg
-                } else null
-            } else null
-        } catch (e: Exception) {
-            null
+            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c",
+                "dumpsys activity activities 2>/dev/null"))
+            val content = p.inputStream.bufferedReader().readText()
+            p.waitFor()
+            // Find "Display #N" section — reads until next "Display #" or EOF
+            val marker = "Display #$displayId "
+            val start = content.indexOf(marker)
+            if (start < 0) return null
+            val nextDisplay = content.indexOf("Display #", start + marker.length)
+            if (nextDisplay >= 0) content.substring(start, nextDisplay)
+            else content.substring(start)
+        } catch (_: Exception) { null }
+    }
+
+    /** Extract focused package from dumpsys display section */
+    private fun extractFocusedPackage(section: String): String? {
+        // Try topResumedActivity (Android 14+): topResumedActivity=ActivityRecord{... pkg/component tN}
+        val topResumed = Regex("topResumedActivity=ActivityRecord\\{[^}]*\\s+(\\S+)/").find(section)
+        if (topResumed != null) {
+            val pkg = topResumed.groupValues[1]
+            if (pkg.isNotEmpty() && pkg != "com.android.systemui") return pkg
         }
+        // Try mResumedActivity (older Android)
+        val resumedMatch = Regex("mResumedActivity.*?\\{([^}]+)\\}").find(section)
+        if (resumedMatch != null) {
+            val pkg = resumedMatch.groupValues[1].split(" ").firstOrNull()
+                ?.substringBefore("/") ?: ""
+            if (pkg.isNotEmpty() && !pkg.startsWith("com.android.") && pkg != "android") return pkg
+        }
+        // Fallback: find the RESUMED activity by state=RESUMED
+        val resumedBlock = Regex("Hist #\\d+: ActivityRecord\\{[^}]*\\s+(\\S+)/.*?state=RESUMED", RegexOption.DOT_MATCHES_ALL).find(section)
+        if (resumedBlock != null) {
+            val pkg = resumedBlock.groupValues[1]
+            if (pkg.isNotEmpty() && pkg != "com.android.systemui") return pkg
+        }
+        return null
     }
 
     // ── Shortcuts ──

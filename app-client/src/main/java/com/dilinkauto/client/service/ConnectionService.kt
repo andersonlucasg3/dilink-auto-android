@@ -453,21 +453,20 @@ class ConnectionService : Service() {
                     FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
                 }
 
-                // Wait for VD to connect on the lifecycle channel already opened
+                // Wait for VD to connect on the lifecycle channel already opened.
+                // Runs inside handshakeJob — cancelled properly on reconnect.
                 val client = vdClient ?: return@launch
                 if (!client.isConnected) {
-                    serviceScope.launch(Dispatchers.IO) {
-                        if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
-                            FileLog.i(TAG, "VD server lifecycle connected (displayId=${client.displayId})")
-                            InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
-                            withContext(Dispatchers.Main) {
-                                _serviceState.value = State.STREAMING
-                                updateNotification(R.string.notification_streaming)
-                            }
-                            sendAppList()
-                        } else {
-                            FileLog.w(TAG, "VD server did not connect within timeout")
+                    if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
+                        FileLog.i(TAG, "VD server lifecycle connected (displayId=${client.displayId})")
+                        InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
+                        withContext(Dispatchers.Main) {
+                            _serviceState.value = State.STREAMING
+                            updateNotification(R.string.notification_streaming)
                         }
+                        sendAppList()
+                    } else {
+                        FileLog.w(TAG, "VD server did not connect within timeout")
                     }
                 }
 

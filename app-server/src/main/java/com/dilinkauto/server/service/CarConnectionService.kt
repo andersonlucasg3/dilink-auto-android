@@ -84,6 +84,7 @@ class CarConnectionService : Service() {
     @Volatile private var updatingFromPhone = false // Phone is pushing an update — don't reconnect
     @Volatile private var shizukuMode = false  // Phone handles VD server via Shizuku
     @Volatile private var handshakeDone = false // Stop gateway retry after handshake completes
+    @Volatile private var lastAdbHost: String? = null // Track which host TCP ADB connected to
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val usbPermissionAction = "com.dilinkauto.server.USB_PERMISSION"
@@ -388,6 +389,7 @@ class CarConnectionService : Service() {
                     }
                 )
                 ctrl.sendControl(ControlMsg.HANDSHAKE_REQUEST, handshake.encode())
+                handshakeDone = true  // Stop gateway/mDNS retry loops immediately
 
                 withContext(Dispatchers.Main) { updateNotification(R.string.notification_connected) }
 
@@ -484,7 +486,14 @@ class CarConnectionService : Service() {
     // ─── Dev mode: TCP ADB track (replaces USB track) ───
 
     private fun startTcpAdbTrack() {
-        if (usbReady || adbController?.isConnected == true) return
+        // Reconnect if phone IP changed since last ADB connection
+        if (adbController?.isConnected == true && lastAdbHost == phoneHost) return
+        if (adbController?.isConnected == true && lastAdbHost != phoneHost && phoneHost != null) {
+            carLogSend("Dev mode: phone IP changed $lastAdbHost -> $phoneHost, reconnecting TCP ADB")
+            adbController?.disconnect()
+            adbController = null
+            lastAdbHost = null
+        }
         scope.launch(Dispatchers.IO) {
             var attempts = 0
             while (isActive && !usbReady && _state.value == State.CONNECTING && attempts < 60) {
@@ -492,6 +501,9 @@ class CarConnectionService : Service() {
                 if (host != null) {
                     carLogSend("Dev mode: TCP ADB connecting to $host:5555 (attempt ${attempts + 1})")
                     connectTcpAdb(host)
+                    if (adbController?.isConnected == true) {
+                        lastAdbHost = host
+                    }
                     return@launch
                 }
                 delay(1000)
@@ -504,7 +516,11 @@ class CarConnectionService : Service() {
     }
 
     private suspend fun connectTcpAdb(host: String) {
-        if (usbReady || adbController?.isConnected == true) return
+        if (usbReady) return
+        if (adbController?.isConnected == true) {
+            carLogSend("Dev mode: TCP ADB already connected, skipping duplicate")
+            return
+        }
 
         _statusMessage.value = getString(R.string.status_connecting_tcp_adb, host)
         val keyDir = java.io.File(filesDir, "adb_keys")

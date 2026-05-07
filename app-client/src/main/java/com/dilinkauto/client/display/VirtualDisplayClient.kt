@@ -38,7 +38,7 @@ class VirtualDisplayClient(
     var isConnected = false
         private set
 
-    private var serverChannel: ServerSocketChannel? = null
+    @Volatile private var serverChannel: ServerSocketChannel? = null
     private var commandRelayJob: Job? = null
 
     // Callbacks for relaying VD signals to ConnectionService
