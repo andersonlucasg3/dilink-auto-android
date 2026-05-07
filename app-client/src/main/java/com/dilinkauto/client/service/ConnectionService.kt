@@ -407,10 +407,19 @@ class ConnectionService : Service() {
         )
         handshakeJob?.cancel()
         handshakeJob = serviceScope.launch(Dispatchers.IO) {
-            // Check version BEFORE sending response — determines the flow
-            val carVersionName = request.appVersionName.ifEmpty { request.appVersionCode.toString() }
-            val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
-                it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
+            // Check version BEFORE sending response — determines the flow.
+            // When car sends empty appVersionName (pre-0.17.0), fall back to
+            // versionCode on BOTH sides so integers are compared correctly.
+            val carHasSemver = request.appVersionName.isNotEmpty()
+            val carVersionName = if (carHasSemver) request.appVersionName
+                else request.appVersionCode.toString()
+            val myVersionName = if (carHasSemver) {
+                packageManager.getPackageInfo(packageName, 0).let {
+                    it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0).versionCode.toString()
             }
             val updateCooldown = autoUpdateFailedAt > 0L &&
                 System.currentTimeMillis() - autoUpdateFailedAt < 5 * 60 * 1000L
