@@ -30,6 +30,8 @@ object ControlMsg {
     const val APP_SHORTCUTS_LIST: Byte = 0x19
     /** Car → Phone: execute a specific shortcut (payload: AppShortcutActionMessage) */
     const val APP_SHORTCUT_ACTION: Byte = 0x1A
+    /** Phone → Car: VD server has bound video (9638) and input (9639) ports — connect now */
+    const val VD_PORTS_BOUND: Byte = 0x31
 }
 
 /** Video channel message types */

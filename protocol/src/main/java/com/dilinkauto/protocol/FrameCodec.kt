@@ -134,6 +134,31 @@ object FrameCodec {
     // ─── NIO Channel Methods ───
 
     /**
+     * Read a frame from a non-blocking NIO reader (blocking API, for non-coroutine callers).
+     * Returns null on EOF.
+     */
+    fun readFrameBlocking(reader: NioReader): Frame? {
+        val frameLength = reader.readIntOrNullBlocking() ?: return null
+
+        if (frameLength < 2) {
+            throw ProtocolException("Frame too small: $frameLength")
+        }
+        val payloadSize = frameLength - 2
+        if (payloadSize > MAX_PAYLOAD_SIZE) {
+            throw ProtocolException("Frame payload too large: $payloadSize > $MAX_PAYLOAD_SIZE")
+        }
+
+        val channelId = reader.readByteBlocking()
+        val msgType = reader.readByteBlocking()
+
+        val payload = if (payloadSize > 0) {
+            ByteArray(payloadSize).also { reader.readFullyBlocking(it) }
+        } else ByteArray(0)
+
+        return Frame(channelId, msgType, payload)
+    }
+
+    /**
      * Read a frame from a non-blocking NIO reader. Returns null on EOF.
      */
     suspend fun readFrame(reader: NioReader): Frame? {

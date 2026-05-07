@@ -133,6 +133,13 @@ class NioReader(
         return buf.get()
     }
 
+    /** Blocking read — returns null on EOF, the int value if available. */
+    @Throws(IOException::class)
+    fun readIntOrNullBlocking(): Int? {
+        if (!fillOrEofBlocking(4)) return null
+        return buf.getInt()
+    }
+
     private fun ensureAvailableBlocking(count: Int) {
         if (!fillOrEofBlocking(count)) {
             throw IOException("Channel closed: expected $count bytes")
