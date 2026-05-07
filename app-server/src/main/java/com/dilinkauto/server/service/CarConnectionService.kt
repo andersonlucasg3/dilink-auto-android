@@ -21,6 +21,7 @@ import androidx.core.app.NotificationCompat
 import com.dilinkauto.protocol.*
 import com.dilinkauto.server.R
 import com.dilinkauto.server.ServerApp
+import com.dilinkauto.server.CarCrashHandler
 import com.dilinkauto.server.adb.RemoteAdbController
 import com.dilinkauto.protocol.adb.UsbAdbConnection
 import com.dilinkauto.server.decoder.VideoDecoder
@@ -162,6 +163,21 @@ class CarConnectionService : Service() {
     override fun onCreate() {
         super.onCreate()
         videoDecoder.logSink = { msg -> carLogSend(msg) }
+
+        // Wire crash handler to TCP log sink for immediate crash delivery
+        CarCrashHandler.logSink = { msg -> carLogSend(msg) }
+
+        // Log device info for diagnostics
+        carLogSend(CarCrashHandler.buildDeviceInfo(this))
+
+        // Send any crash report from the previous run
+        val crash = CarCrashHandler.consumePendingCrash()
+        if (crash != null) {
+            carLogSend("──── PREVIOUS CRASH REPORT ────", "E")
+            crash.lines().forEach { carLogSend(it, "E") }
+            carLogSend("──── END CRASH REPORT ────", "E")
+        }
+
         acquireWakeLock()
         registerNetworkCallback()
         val filter = IntentFilter().apply {

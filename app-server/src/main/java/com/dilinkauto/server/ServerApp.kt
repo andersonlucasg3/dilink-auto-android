@@ -3,6 +3,7 @@ package com.dilinkauto.server
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.util.Log
 import java.io.File
 
 class ServerApp : Application() {
@@ -11,6 +12,9 @@ class ServerApp : Application() {
         super.onCreate()
         createNotificationChannels()
         iconCache = AppIconCache(File(filesDir, "icons"))
+
+        CarCrashHandler.install(this)
+        Log.i("ServerApp", CarCrashHandler.buildDeviceInfo(this))
     }
 
     private fun createNotificationChannels() {

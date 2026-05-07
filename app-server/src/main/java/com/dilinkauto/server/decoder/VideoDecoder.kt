@@ -194,8 +194,9 @@ class VideoDecoder {
     private val drainBufferInfo = MediaCodec.BufferInfo()
 
     private fun feedBuffer(decoder: MediaCodec, data: ByteArray, flags: Int) {
+        if (!running.get()) return
         try {
-            val inputIndex = decoder.dequeueInputBuffer(50_000) // 50ms timeout
+            val inputIndex = decoder.dequeueInputBuffer(5000) // 5ms — was 50s, blocks codec stop
             if (inputIndex >= 0) {
                 val inputBuffer = decoder.getInputBuffer(inputIndex)!!
                 inputBuffer.clear()
@@ -233,6 +234,7 @@ class VideoDecoder {
     }
 
     private fun drainOutput(decoder: MediaCodec) {
+        if (!running.get()) return
         val bufferInfo = drainBufferInfo
         try {
             while (true) {

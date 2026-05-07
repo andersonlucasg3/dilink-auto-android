@@ -458,6 +458,7 @@ class VirtualDisplayClient(
                     val intent = android.content.Intent(appContext, Class.forName("com.dilinkauto.client.MainActivity"))
                     intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                     intent.addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     intent.addFlags(0x10000000) // FLAG_TURN_SCREEN_ON
                     appContext.startActivity(intent)
                     FileLog.i(TAG, "Launched MainActivity with FLAG_TURN_SCREEN_ON")
