@@ -85,6 +85,7 @@ class CarConnectionService : Service() {
     @Volatile private var shizukuMode = false  // Phone handles VD server via Shizuku
     @Volatile private var handshakeDone = false // Stop gateway retry after handshake completes
     @Volatile private var lastAdbHost: String? = null // Track which host TCP ADB connected to
+    private var noAdbCount = 0 // Consecutive deploy failures due to no ADB — stops reconnect loop
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val usbPermissionAction = "com.dilinkauto.server.USB_PERMISSION"
@@ -545,6 +546,7 @@ class CarConnectionService : Service() {
         carLogSend("Dev mode: phone app launched via TCP ADB")
 
         usbReady = true
+        noAdbCount = 0  // Reset — ADB is available now
         // If handshake already completed, deploy VD server now that ADB is available
         if (handshakeDone && !vdServerStarted) {
             carLogSend("TCP ADB ready after handshake — deploying VD server")
@@ -607,6 +609,7 @@ class CarConnectionService : Service() {
             usbAdb = adb
             _statusMessage.value = getString(R.string.status_usb_connected)
             carLogSend("USB ADB connected")
+            noAdbCount = 0  // Reset — ADB is available now
 
             // Write key diagnostic to phone for debugging USB auth issues
             val keyInfo = adb.keyDiagnostic()
@@ -781,6 +784,27 @@ class CarConnectionService : Service() {
         if (vdServerStarted) return
         if (!isAdbAvailable()) {
             carLogSend("deployVdServer: no ADB connection")
+            noAdbCount++
+            // Auto-fallback: try TCP ADB if we have the phone IP
+            val host = phoneHost
+            if (host != null && !devMode) {
+                carLogSend("Auto-fallback: trying TCP ADB to $host:5555")
+                _statusMessage.value = getString(R.string.status_connecting_tcp_adb, host)
+                scope.launch(Dispatchers.IO) {
+                    connectTcpAdb(host)
+                    if (adbController?.isConnected == true) {
+                        carLogSend("Auto-fallback TCP ADB connected — deploying VD server")
+                        deployVdServer()
+                    } else {
+                        _statusMessage.value = getString(R.string.status_no_adb)
+                        carLogSend("Auto-fallback TCP ADB failed — connect phone to car USB", "W")
+                    }
+                }
+            } else if (host == null) {
+                _statusMessage.value = getString(R.string.status_no_phone_ip)
+            } else {
+                _statusMessage.value = getString(R.string.status_no_adb)
+            }
             return
         }
         vdServerStarted = true  // Set early to prevent duplicate deploys
@@ -1048,6 +1072,14 @@ class CarConnectionService : Service() {
         }
 
         _state.value = State.IDLE
+
+        if (noAdbCount >= 3) {
+            _statusMessage.value = getString(R.string.status_no_adb)
+            carLogSend("No ADB after $noAdbCount attempts — stopping reconnect. Plug phone into car USB.")
+            scope.launch { updateNotification(R.string.plug_phone_usb) }
+            return
+        }
+
         carLogSend("Connection lost — will reconnect")
 
         scope.launch {
