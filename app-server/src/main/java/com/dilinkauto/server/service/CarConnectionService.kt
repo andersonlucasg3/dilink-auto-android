@@ -353,10 +353,10 @@ class CarConnectionService : Service() {
     private var connectJob: Job? = null
 
     private fun connectToPhone(host: String, port: Int) {
-        // Don't kill an active session — handshakeDone means we already have
-        // a working connection. Only Shizuku re-handshakes are safe to replace.
-        if (handshakeDone && !shizukuMode) {
-            carLogSend("connectToPhone: handshake already done, skipping ($host:$port)")
+        // Don't kill an active session — if we already have a working control
+        // connection with handshake completed, any new connect attempt is a race.
+        if (handshakeDone && controlConnection?.isConnected == true) {
+            carLogSend("connectToPhone: session active, skipping ($host:$port)")
             return
         }
 
