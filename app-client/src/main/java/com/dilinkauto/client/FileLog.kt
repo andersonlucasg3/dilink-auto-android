@@ -23,6 +23,9 @@ import java.util.zip.ZipOutputStream
  */
 object FileLog {
 
+    /** Toggled from Settings. When false, no file writes or logcat output. */
+    @Volatile var enabled = true
+
     private val queue = ConcurrentLinkedQueue<String>()
     @Volatile private var writer: FileWriter? = null
     private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
@@ -59,6 +62,11 @@ object FileLog {
      * Rotate: rename current log with timestamp, start fresh.
      * Keeps at most 10 log files (9 archived + current). Oldest are deleted.
      */
+    /** Read enabled state from SharedPreferences. Call on service start. */
+    fun loadEnabled(prefs: android.content.SharedPreferences) {
+        enabled = prefs.getBoolean("log_enabled", true)
+    }
+
     fun rotate() {
         queue.clear()
         try {
@@ -81,22 +89,11 @@ object FileLog {
         }
     }
 
-    fun i(tag: String, msg: String) {
-        Log.i(tag, msg)
-        write("I", tag, msg)
-    }
-
-    fun d(tag: String, msg: String) {
-        Log.d(tag, msg)
-        write("D", tag, msg)
-    }
-
-    fun w(tag: String, msg: String) {
-        Log.w(tag, msg)
-        write("W", tag, msg)
-    }
-
+    fun i(tag: String, msg: String) { if (enabled) { Log.i(tag, msg); write("I", tag, msg) } }
+    fun d(tag: String, msg: String) { if (enabled) { Log.d(tag, msg); write("D", tag, msg) } }
+    fun w(tag: String, msg: String) { if (enabled) { Log.w(tag, msg); write("W", tag, msg) } }
     fun e(tag: String, msg: String, t: Throwable? = null) {
+        if (!enabled) return
         if (t != null) Log.e(tag, msg, t) else Log.e(tag, msg)
         write("E", tag, "$msg${t?.let { " | ${it.message}" } ?: ""}")
     }

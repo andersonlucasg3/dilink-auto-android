@@ -56,6 +56,7 @@ class ConnectionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        FileLog.loadEnabled(getSharedPreferences("dilinkauto", MODE_PRIVATE))
         FileLog.rotate() // Archive previous log, start fresh
         // Clear stale static state from previous service instance
         activeConnection = null
