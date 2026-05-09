@@ -842,7 +842,7 @@ class CarConnectionService : Service() {
 
             // Kill any existing VD server
             _statusMessage.value = getString(R.string.status_preparing_vd)
-            executeAdb("pkill -f PipelineServer 2>/dev/null", noWait = false)
+            executeAdb("pkill -f VirtualDisplayServer 2>/dev/null", noWait = false)
             delay(200)
 
             // Launch VD server. Uses exec to replace shell with app_process — keeps ADB stream open.
@@ -851,7 +851,7 @@ class CarConnectionService : Service() {
             carLogSend("VD server: ${vdW}x${vdH}@${phoneDpi}dpi (car-native, no downscale)")
 
             val cmd = "CLASSPATH=$jarPath app_process / " +
-                    "com.dilinkauto.vdserver.PipelineServer $args" +
+                    "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
                     " >$logFile 2>&1 &"
             if (!executeAdb(cmd, noWait = true)) {
                 carLogSend("VD server failed to start", "E")
