@@ -59,9 +59,9 @@ class VirtualDisplayClient(
         val ch = ServerSocketChannel.open()
         ch.configureBlocking(false)
         ch.socket().reuseAddress = true
-        ch.socket().bind(InetSocketAddress("127.0.0.1", port))
+        ch.socket().bind(InetSocketAddress("0.0.0.0", port))
         serverChannel = ch
-        FileLog.i(TAG, "Listening for VD server lifecycle on localhost:$port")
+        FileLog.i(TAG, "Listening for VD server lifecycle on 0.0.0.0:$port")
     }
 
     /**

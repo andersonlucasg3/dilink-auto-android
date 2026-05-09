@@ -119,24 +119,39 @@ class SurfaceScaler(
 
         GLES20.glViewport(0, 0, outputWidth, outputHeight)
 
-        // Render loop — draws on new frames, skips GPU work on static content.
-        // The encoder's repeat-previous-frame-after setting handles frame continuity.
+        val isPassthrough = inputWidth == outputWidth && inputHeight == outputHeight
+        if (isPassthrough) println("[SurfaceScaler] 1:1 passthrough — clock gate only")
+
+        // Render loop with fixed clock for stable cadence.
         var swapCount = 0L
         var newFrameCount = 0L
         var idleSkipCount = 0L
         var consecutiveIdle = 0
+        var nextFrameTime = System.currentTimeMillis()
         println("[SurfaceScaler] Render loop starting, frameIntervalMs=$frameIntervalMs")
 
         while (running) {
+            // Fixed clock: sleep until next scheduled frame time
+            val now = System.currentTimeMillis()
+            val waitMs = nextFrameTime - now
+            if (waitMs > 0) {
+                synchronized(frameLock) {
+                    if (running) (frameLock as java.lang.Object).wait(waitMs)
+                }
+            }
+            if (!running) break
+            nextFrameTime += frameIntervalMs
+            // Catch up if we fell behind
+            if (nextFrameTime <= System.currentTimeMillis()) {
+                nextFrameTime = System.currentTimeMillis() + frameIntervalMs
+            }
+
+            // Grab latest frame (non-blocking)
             val hasNewFrame: Boolean
             synchronized(frameLock) {
-                if (!frameAvailable[0] && running) {
-                    try { (frameLock as java.lang.Object).wait(frameIntervalMs) } catch (_: InterruptedException) {}
-                }
                 hasNewFrame = frameAvailable[0]
                 frameAvailable[0] = false
             }
-            if (!running) break
 
             if (hasNewFrame) {
                 surfaceTexture.updateTexImage()
@@ -145,10 +160,8 @@ class SurfaceScaler(
             } else {
                 idleSkipCount++
                 consecutiveIdle++
-                // On static content: after N idle frames, slow to 2fps.
-                // repeat-previous-frame-after=500ms keeps encoder fed between swaps.
                 if (consecutiveIdle > 15 && consecutiveIdle % 15 != 0) {
-                    continue // skip GPU + swap, encoder repeats last frame
+                    continue // skip, encoder repeats last frame
                 }
                 if (idleSkipCount <= 3 || idleSkipCount % 30 == 0L) {
                     println("[SurfaceScaler] idle re-draw #$idleSkipCount newFrames=$newFrameCount swaps=$swapCount")
@@ -157,6 +170,11 @@ class SurfaceScaler(
             swapCount++
             if (swapCount <= 3 || swapCount % 30 == 0L) {
                 println("[SurfaceScaler] swap #$swapCount newFrames=$newFrameCount idleSkips=$idleSkipCount hasNew=$hasNewFrame")
+            }
+
+            if (isPassthrough && !hasNewFrame) {
+                // 1:1 passthrough on static content: skip GL entirely
+                continue
             }
 
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)

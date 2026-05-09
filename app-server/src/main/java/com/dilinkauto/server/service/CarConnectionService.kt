@@ -823,7 +823,8 @@ class CarConnectionService : Service() {
 
             val logFile = "/data/local/tmp/vd-server.log"
             // Args: W H DPI PHONE_HOST EW EH FPS — VD binds 9638/9639 for car, connects to phone on 19647
-            val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
+            val phoneIp = phoneHost ?: "127.0.0.1"
+            val args = "$vdW $vdH $phoneDpi $phoneIp $vdW $vdH $targetFps"
 
             // Kill any existing VD server
             _statusMessage.value = getString(R.string.status_preparing_vd)

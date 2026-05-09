@@ -39,7 +39,7 @@ class VideoDecoder {
     private var feedThread: Thread? = null
     private val running = AtomicBoolean(false)
     val isRunning: Boolean get() = running.get()
-    private val frameQueue = ArrayBlockingQueue<FrameData>(6) // 200ms @ 30fps — reduces latency, WiFi is stable enough
+    private val frameQueue = ArrayBlockingQueue<FrameData>(2) // minimal latency
 
     // CONFIG data is cached separately so it's never lost, even if it arrives
     // before start() is called or while the queue is full.
@@ -117,25 +117,13 @@ class VideoDecoder {
                 configFed = true
             }
 
-            // Catchup: graduated speedup based on queue depth.
-            // Skips non-keyframes to drain the queue faster when the decoder
-            // falls behind. Thresholds in real-time latency budget (ms), not
-            // absolute frame counts — scales with actual fps.
-            //
-            //   normal  (0-200ms) — feed all frames, smooth streaming
-            //   gentle  (200-300ms) — skip 1 of 3 non-keyframes (1.5x drain)
-            //   medium  (300-400ms) — skip 1 of 2 non-keyframes (2x drain)
-            //   aggressive (400ms+)  — skip 2 of 3 non-keyframes (3x drain)
-            //
-            // At 30fps: gentle=6, medium=9, agg=12 (queue=15 = 500ms total buffer).
-            // Normal streaming stays at 1-3 frames — catchup only protects against
-            // real congestion, not normal queue fluctuation.
-            val catchupGentle = (200L * fps / 1000).toInt().coerceAtLeast(4)
-            val catchupMedium = (300L * fps / 1000).toInt().coerceAtLeast(6)
-            val catchupAggressive = (400L * fps / 1000).toInt().coerceAtLeast(9)
+            // With 2-frame queue, catchup is unnecessary — frames arrive on time or get dropped.
             var skipCount = 0L
 
             while (running.get()) {
+                // Drain output first to free decoder buffers before trying to feed
+                drainOutput(decoder)
+
                 val frame = try {
                     frameQueue.poll(1000L / fps, TimeUnit.MILLISECONDS)
                 } catch (_: InterruptedException) {
@@ -148,30 +136,10 @@ class VideoDecoder {
                     feedBuffer(decoder, frame.data, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
                     configFed = true
                 } else if (!configFed) {
-                    // Skip non-config frames until we have SPS/PPS
                     if (frameCount == 0L) log("Waiting for CONFIG before feeding video frames")
                     continue
                 } else {
-                    val queueSize = frameQueue.size
                     val isKey = frame.isKeyFrame
-
-                    // Graduated catchup: never skip keyframes
-                    if (!isKey && queueSize > catchupGentle) {
-                        val shouldSkip = when {
-                            queueSize > catchupAggressive -> frameCount % 3 != 0L // 3x: feed 1 of 3
-                            queueSize > catchupMedium    -> frameCount % 2 == 1L  // 2x: feed 1 of 2
-                            else                         -> frameCount % 3 == 2L  // 1.5x: feed 2 of 3
-                        }
-                        if (shouldSkip) {
-                            skipCount++
-                            if (skipCount <= 3 || skipCount % 100 == 0L) {
-                                log("Catchup: skip frame (queue=$queueSize gentle=$catchupGentle medium=$catchupMedium agg=$catchupAggressive total_skips=$skipCount)")
-                            }
-                            frameCount++
-                            continue
-                        }
-                    }
-
                     if (isKey) {
                         keyFramesFed++
                         log("Feeding KEYFRAME #$keyFramesFed size=${frame.data.size} (fed=$frameCount rendered=$renderCount)")
@@ -196,7 +164,7 @@ class VideoDecoder {
     private fun feedBuffer(decoder: MediaCodec, data: ByteArray, flags: Int) {
         if (!running.get()) return
         try {
-            val inputIndex = decoder.dequeueInputBuffer(15000) // 15ms — reduced contention on car hardware
+            val inputIndex = decoder.dequeueInputBuffer(2000) // 2ms — drain-first, don't block on input
             if (inputIndex >= 0) {
                 val inputBuffer = decoder.getInputBuffer(inputIndex)!!
                 inputBuffer.clear()
@@ -280,60 +248,33 @@ class VideoDecoder {
         if (isConfig) {
             configData = data
         }
-        // When stopped, only cache CONFIG. Dropping frames during surface transitions
-        // prevents the queue from filling up and causing a 400+ frame drop storm on restart.
+        // When stopped, only cache CONFIG.
         if (!running.get() && !isConfig) {
             if (isKey) keyFramesDropped++
             return
         }
         val frame = FrameData(isConfig, isKey, data)
-        if (frameQueue.offer(frame)) return
 
-        // Queue full — apply smart drop strategy
-        if (!isConfig && !isKey) {
-            // Incoming is a disposable P-frame: drop it, don't evict anything
-            dropCount++
-            if (dropCount <= 5 || dropCount % 30 == 0L) {
-                logW("Queue full — dropped incoming P-frame #$dropCount (receive=$receiveCount)")
+        // Keyframe priority: if queue has frames, drop P-frames to make room
+        if (isConfig || isKey) {
+            while (!frameQueue.offer(frame)) {
+                // Evict oldest P-frame. If only keyframes queued, drop oldest keyframe.
+                val evicted = frameQueue.poll()
+                dropCount++
+                if (evicted != null && evicted.isKeyFrame) keyFramesDropped++
+                if (dropCount <= 3 || dropCount % 60 == 0L) {
+                    logW("Queue full — evicted for KEYFRAME #$dropCount (keys_dropped=$keyFramesDropped)")
+                }
+                if (evicted == null) break
             }
             return
         }
 
-        // Incoming is CONFIG or keyframe — try to evict a P-frame from the queue
-        val iter = frameQueue.iterator()
-        var evicted = false
-        while (iter.hasNext()) {
-            val f = iter.next()
-            if (!f.isConfig && !f.isKeyFrame) {
-                if (frameQueue.remove(f)) {
-                    evicted = true
-                    break
-                }
-            }
-        }
-
-        if (evicted) {
-            // Made room — add the important frame
-            if (frameQueue.offer(frame)) {
-                dropCount++
-                if (dropCount <= 5 || dropCount % 30 == 0L) {
-                    logW("Queue full — evicted P-frame to keep ${if (isConfig) "CONFIG" else "KEYFRAME"} #$dropCount")
-                }
-            } else {
-                dropCount++
-                logW("Queue still full after eviction — dropped incoming ${if (isConfig) "CONFIG" else "KEYFRAME"}")
-            }
-        } else {
-            // All queued frames are keyframes/CONFIG — drop oldest as last resort
-            val dropped = frameQueue.poll()
-            frameQueue.offer(frame)
+        // P-frame: try to enqueue, drop if full
+        if (!frameQueue.offer(frame)) {
             dropCount++
-            if (dropped != null && !dropped.isConfig && dropped.isKeyFrame) {
-                keyFramesDropped++
-                logW("DROPPED KEYFRAME #$keyFramesDropped (last resort, all queued were keyframes)")
-            }
-            if (dropCount <= 5 || dropCount % 30 == 0L) {
-                logW("Queue full — dropped oldest as last resort #$dropCount")
+            if (dropCount <= 5 || dropCount % 60 == 0L) {
+                logW("Queue full — dropped incoming P-frame #$dropCount (receive=$receiveCount)")
             }
         }
     }

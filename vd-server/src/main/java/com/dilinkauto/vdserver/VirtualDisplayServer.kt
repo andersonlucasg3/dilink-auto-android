@@ -64,8 +64,8 @@ class VirtualDisplayServer(
     private val videoWriteQueue = ConcurrentLinkedQueue<FrameCodec.Frame>()
     @Volatile private var videoWriterThread: Thread? = null
     @Volatile private var videoWriteQueueDepth = 0
-    private val BACKPRESSURE_THRESHOLD = 6
-    private val MAX_QUEUE_DEPTH = 30  // 1s @ 30fps — hard cap to prevent unbounded delay
+    private val BACKPRESSURE_THRESHOLD = 2
+    private val MAX_QUEUE_DEPTH = 2  // minimal latency
 
     // Response write queue — MSG_STACK_EMPTY, MSG_FOCUSED_APP to phone lifecycle channel
     private val responseWriteQueue = ConcurrentLinkedQueue<ByteBuffer>()
@@ -103,7 +103,7 @@ class VirtualDisplayServer(
         private const val CMD_STOP = 0xFF
 
         private const val BITRATE = 8_000_000
-        private const val I_FRAME_INTERVAL = 1
+        private const val I_FRAME_INTERVAL = 2  // fewer keyframes → more bitrate budget for P-frames
         private const val MAX_POINTERS = 10
 
         // Ports for direct car communication
@@ -375,19 +375,24 @@ class VirtualDisplayServer(
         format.setInteger(MediaFormat.KEY_BIT_RATE, BITRATE)
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
-        format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
-        format.setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel31)
+        format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
+        @Suppress("DEPRECATION") val level = MediaCodecInfo.CodecProfileLevel.AVCLevel4
+        format.setInteger(MediaFormat.KEY_LEVEL, level)
         format.setInteger(MediaFormat.KEY_LATENCY, 0)
         format.setInteger(MediaFormat.KEY_PRIORITY, 0)
         format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)  // no reordering delay
-        format.setLong("repeat-previous-frame-after", 500_000L)
+        format.setInteger(MediaFormat.KEY_OPERATING_RATE, fps)
+        format.setLong("repeat-previous-frame-after", 500_000L)  // idle fill only, don't race VD
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            format.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps.toFloat())
+        }
 
         try {
             encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).also {
                 it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
-            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps Main low-latency")
+            log("Encoder: ${encodeWidth}x${encodeHeight} VBR@${BITRATE / 1_000_000}Mbps High L4 30fps no-B-frames")
         } catch (e: Exception) {
             throw IOException("Failed to create encoder: ${e.message}", e)
         }
@@ -441,22 +446,24 @@ class VirtualDisplayServer(
                         lastKeyFrameAt = now
                     }
 
-                    // Encoder backpressure: drop P-frames when car isn't consuming fast enough
-                    if (!isConfig && !isKeyFrame && videoWriteQueueDepth > BACKPRESSURE_THRESHOLD) {
+                    // Backpressure: drop P-frames, NEVER keyframes or config
+                    if (!isConfig && !isKeyFrame && videoWriteQueueDepth >= BACKPRESSURE_THRESHOLD) {
                         enc.releaseOutputBuffer(outputIndex, false)
                         skippedFrameCount++
                         if (skippedFrameCount <= 3 || skippedFrameCount % 60 == 0L) {
-                            log("Encoder backpressure: skip P-frame (queueDepth=$videoWriteQueueDepth)")
+                            log("Backpressure: skip P-frame (queueDepth=$videoWriteQueueDepth)")
                         }
                         continue
                     }
-                    // Hard cap: drop oldest frames to prevent unbounded delay
-                    while (videoWriteQueueDepth >= MAX_QUEUE_DEPTH) {
-                        val dropped = videoWriteQueue.poll()
-                        videoWriteQueueDepth--
-                        skippedFrameCount++
-                        if (dropped != null && skippedFrameCount % 60 == 1L) {
-                            log("Hard cap: dropped oldest frame (queueDepth was >= $MAX_QUEUE_DEPTH)")
+                    // Hard cap: keyframes NEVER dropped. P-frames dropped if queue full.
+                    if (videoWriteQueueDepth >= MAX_QUEUE_DEPTH) {
+                        if (isConfig || isKeyFrame) {
+                            // Let keyframe through — brief overshoot is better than dropping reference frame
+                            if (skippedFrameCount % 60 == 1L) log("Hard cap: keyframe passes (queueDepth=$videoWriteQueueDepth)")
+                        } else {
+                            enc.releaseOutputBuffer(outputIndex, false)
+                            skippedFrameCount++
+                            continue
                         }
                     }
 
@@ -857,12 +864,12 @@ class VirtualDisplayServer(
         val encoderSurface = enc.createInputSurface()
         enc.start()
 
-        val vdSurface = if (width != encodeWidth || height != encodeHeight) {
-            log("GPU scaling: VD ${width}x${height} → encoder ${encodeWidth}x${encodeHeight}")
-            scaler = SurfaceScaler(encoderSurface, width, height, encodeWidth, encodeHeight, frameIntervalMs)
-            scaler!!.start()
-            scaler!!.getInputSurface()
-        } else encoderSurface
+        // SurfaceScaler is REQUIRED even at 1:1 — it synchronizes frame access
+        // via updateTexImage(), preventing tearing when VD and encoder share a buffer.
+        log("VD=encode: ${width}x${height} — passthrough (frame sync only)")
+        scaler = SurfaceScaler(encoderSurface, width, height, encodeWidth, encodeHeight, frameIntervalMs)
+        scaler!!.start()
+        val vdSurface = scaler!!.getInputSurface()
 
         try {
             log("Trying DisplayManagerGlobal approach...")
