@@ -952,6 +952,10 @@ fun SettingsScreen(
         am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
             .any { it.resolveInfo.serviceInfo.packageName == pkg }
     }
+    var logEnabled by remember {
+        mutableStateOf(context.getSharedPreferences("dilinkauto", Context.MODE_PRIVATE)
+            .getBoolean("log_enabled", true))
+    }
     val hasNotifications = remember(permissionsKey) {
         val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: ""
         flat.contains(pkg)
@@ -1084,6 +1088,38 @@ fun SettingsScreen(
             onDownloadUpdate = onDownloadUpdate,
             onInstallUpdate = onInstallUpdate
         )
+
+        Spacer(Modifier.height(32.dp))
+
+        // Debug
+        Text(stringResource(R.string.settings_debug), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+            modifier = Modifier.padding(bottom = 12.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.log_enabled), fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.log_enabled_desc), fontSize = 12.sp, color = Color.Gray)
+                }
+                Switch(
+                    checked = logEnabled,
+                    onCheckedChange = { enabled ->
+                        logEnabled = enabled
+                        context.getSharedPreferences("dilinkauto", Context.MODE_PRIVATE)
+                            .edit().putBoolean("log_enabled", enabled).apply()
+                        FileLog.enabled = enabled
+                    }
+                )
+            }
+        }
 
         Spacer(Modifier.height(32.dp))
 

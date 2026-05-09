@@ -175,6 +175,9 @@
 
     <!-- Settings Sections -->
     <string name="settings_distribution">Distribution</string>
+    <string name="settings_debug">Debug</string>
+    <string name="log_enabled">Diagnostic logs</string>
+    <string name="log_enabled_desc">Write logs to file for troubleshooting. Disable for better performance.</string>
 
     <!-- Install on Car Status -->
     <string name="car_install_status_searching">Searching for car</string>
