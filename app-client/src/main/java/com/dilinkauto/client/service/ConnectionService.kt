@@ -511,11 +511,11 @@ class ConnectionService : Service() {
                 // VD binds 9638/9639 on 0.0.0.0, connects lifecycle to phoneHost:19637
                 val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps"
 
-                ShizukuManager.execAndWait("pkill -f VirtualDisplayServer 2>/dev/null")
+                ShizukuManager.execAndWait("pkill -f PipelineServer 2>/dev/null")
                 delay(200)
 
                 val cmd = "CLASSPATH=$jarPath app_process / " +
-                        "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
+                        "com.dilinkauto.vdserver.PipelineServer $args" +
                         " >$logFile 2>&1 &"
                 ShizukuManager.execBackground(cmd)
                 FileLog.i(TAG, "VD server started via Shizuku: ${vdWidth}x${vdHeight}")
