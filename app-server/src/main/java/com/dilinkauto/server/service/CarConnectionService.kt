@@ -814,15 +814,16 @@ class CarConnectionService : Service() {
             val viewportWidth = displayMetrics.widthPixels - navBarPx
             val viewportHeight = displayMetrics.heightPixels
             val phoneDpi = handshakeVdDpi
-            val dpiScale = phoneDpi.toFloat() / 160f
-            val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
-            val scaledW = ((scaledH * viewportWidth.toFloat() / viewportHeight).toInt()) and 0x7FFFFFFE.toInt()
+
+            // VD created at car viewport size — no GPU downscale needed
+            val vdW = viewportWidth and 0x7FFFFFFE.toInt()
+            val vdH = viewportHeight and 0x7FFFFFFE.toInt()
 
             val jarPath = vdServerJarPath
 
             val logFile = "/data/local/tmp/vd-server.log"
-            // Args: W H DPI PHONE_HOST EW EH FPS — VD binds 9638/9639 for car, connects to phoneHost:19637
-            val args = "$scaledW $scaledH $phoneDpi 127.0.0.1 $viewportWidth $viewportHeight $targetFps"
+            // Args: W H DPI PHONE_HOST EW EH FPS — VD binds 9638/9639 for car, connects to phone on 19647
+            val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
 
             // Kill any existing VD server
             _statusMessage.value = getString(R.string.status_preparing_vd)
@@ -832,7 +833,7 @@ class CarConnectionService : Service() {
             // Launch VD server. Uses exec to replace shell with app_process — keeps ADB stream open.
             // VD server will die on disconnect; car re-deploys on reconnect.
             _statusMessage.value = getString(R.string.status_starting_vd)
-            carLogSend("VD server: ${scaledW}x${scaledH}@${phoneDpi}dpi → ${viewportWidth}x${viewportHeight}")
+            carLogSend("VD server: ${vdW}x${vdH}@${phoneDpi}dpi (car-native, no downscale)")
 
             val cmd = "CLASSPATH=$jarPath app_process / " +
                     "com.dilinkauto.vdserver.VirtualDisplayServer $args" +

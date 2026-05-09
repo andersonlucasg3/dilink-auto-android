@@ -39,7 +39,7 @@ class VideoDecoder {
     private var feedThread: Thread? = null
     private val running = AtomicBoolean(false)
     val isRunning: Boolean get() = running.get()
-    private val frameQueue = ArrayBlockingQueue<FrameData>(15) // 250ms @ 60fps — proven working buffer for WiFi jitter
+    private val frameQueue = ArrayBlockingQueue<FrameData>(6) // 200ms @ 30fps — reduces latency, WiFi is stable enough
 
     // CONFIG data is cached separately so it's never lost, even if it arrives
     // before start() is called or while the queue is full.
@@ -196,7 +196,7 @@ class VideoDecoder {
     private fun feedBuffer(decoder: MediaCodec, data: ByteArray, flags: Int) {
         if (!running.get()) return
         try {
-            val inputIndex = decoder.dequeueInputBuffer(5000) // 5ms — was 50s, blocks codec stop
+            val inputIndex = decoder.dequeueInputBuffer(15000) // 15ms — reduced contention on car hardware
             if (inputIndex >= 0) {
                 val inputBuffer = decoder.getInputBuffer(inputIndex)!!
                 inputBuffer.clear()

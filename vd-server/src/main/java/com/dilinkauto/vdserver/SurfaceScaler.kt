@@ -124,6 +124,7 @@ class SurfaceScaler(
         var swapCount = 0L
         var newFrameCount = 0L
         var idleSkipCount = 0L
+        var consecutiveIdle = 0
         println("[SurfaceScaler] Render loop starting, frameIntervalMs=$frameIntervalMs")
 
         while (running) {
@@ -140,14 +141,18 @@ class SurfaceScaler(
             if (hasNewFrame) {
                 surfaceTexture.updateTexImage()
                 newFrameCount++
+                consecutiveIdle = 0
             } else {
                 idleSkipCount++
+                consecutiveIdle++
+                // On static content: after N idle frames, slow to 2fps.
+                // repeat-previous-frame-after=500ms keeps encoder fed between swaps.
+                if (consecutiveIdle > 15 && consecutiveIdle % 15 != 0) {
+                    continue // skip GPU + swap, encoder repeats last frame
+                }
                 if (idleSkipCount <= 3 || idleSkipCount % 30 == 0L) {
                     println("[SurfaceScaler] idle re-draw #$idleSkipCount newFrames=$newFrameCount swaps=$swapCount")
                 }
-                // Still render the existing texture — repeat-previous-frame-after
-                // is unreliable on some chipsets (e.g. MediaTek). Always feeding
-                // the encoder prevents multi-second frame gaps on static content.
             }
             swapCount++
             if (swapCount <= 3 || swapCount % 30 == 0L) {

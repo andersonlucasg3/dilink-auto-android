@@ -348,15 +348,12 @@ class ConnectionService : Service() {
         FileLog.i(TAG, "Car display: ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi fps=${request.targetFps}")
         targetFps = request.targetFps
 
-        val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
-        val dpiScale = phoneDpi.toFloat() / 160f
-        val minHeightPx = (VideoConfig.TARGET_SW_DP * dpiScale).toInt()
-        val carAspect = request.screenWidth.toFloat() / request.screenHeight
-        val scaledH = minHeightPx and 0x7FFFFFFE.toInt()
-        val scaledW = ((scaledH * carAspect).toInt()) and 0x7FFFFFFE.toInt()
-        val vdWidth = scaledW
-        val vdHeight = scaledH
-        FileLog.i(TAG, "VD dimensions: ${vdWidth}x${vdHeight}")
+        // Create VD at car viewport size — no GPU downscale needed.
+        // Keep phone DPI (480) so apps don't blow up at car's low DPI (240).
+        val displayDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
+        val vdWidth = request.screenWidth and 0x7FFFFFFE.toInt()
+        val vdHeight = request.screenHeight and 0x7FFFFFFE.toInt()
+        FileLog.i(TAG, "VD: ${vdWidth}x${vdHeight} @${displayDpi}dpi (car-native res, no downscale)")
 
         // Open lifecycle channel if not already open (survives re-handshakes)
         if (vdClient == null) {
@@ -403,7 +400,7 @@ class ConnectionService : Service() {
             adbPort = 5555,
             vdServerJarPath = vdJarPath,
             connectionMethod = connMethod,
-            vdDpi = phoneDpi
+            vdDpi = displayDpi
         )
         handshakeJob?.cancel()
         handshakeJob = serviceScope.launch(Dispatchers.IO) {

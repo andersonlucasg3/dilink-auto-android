@@ -65,6 +65,7 @@ class VirtualDisplayServer(
     @Volatile private var videoWriterThread: Thread? = null
     @Volatile private var videoWriteQueueDepth = 0
     private val BACKPRESSURE_THRESHOLD = 6
+    private val MAX_QUEUE_DEPTH = 30  // 1s @ 30fps — hard cap to prevent unbounded delay
 
     // Response write queue — MSG_STACK_EMPTY, MSG_FOCUSED_APP to phone lifecycle channel
     private val responseWriteQueue = ConcurrentLinkedQueue<ByteBuffer>()
@@ -375,16 +376,18 @@ class VirtualDisplayServer(
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
         format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
-        format.setInteger(MediaFormat.KEY_LATENCY, 1)
+        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
+        format.setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel31)
+        format.setInteger(MediaFormat.KEY_LATENCY, 0)
         format.setInteger(MediaFormat.KEY_PRIORITY, 0)
+        format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)  // no reordering delay
         format.setLong("repeat-previous-frame-after", 500_000L)
 
         try {
             encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).also {
                 it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
-            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps Baseline low-latency")
+            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps Main low-latency")
         } catch (e: Exception) {
             throw IOException("Failed to create encoder: ${e.message}", e)
         }
@@ -446,6 +449,15 @@ class VirtualDisplayServer(
                             log("Encoder backpressure: skip P-frame (queueDepth=$videoWriteQueueDepth)")
                         }
                         continue
+                    }
+                    // Hard cap: drop oldest frames to prevent unbounded delay
+                    while (videoWriteQueueDepth >= MAX_QUEUE_DEPTH) {
+                        val dropped = videoWriteQueue.poll()
+                        videoWriteQueueDepth--
+                        skippedFrameCount++
+                        if (dropped != null && skippedFrameCount % 60 == 1L) {
+                            log("Hard cap: dropped oldest frame (queueDepth was >= $MAX_QUEUE_DEPTH)")
+                        }
                     }
 
                     // Build FrameCodec frame with proper protocol framing
