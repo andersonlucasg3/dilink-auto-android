@@ -1,9 +1,26 @@
 # Progress Tracker
 
-Current version: **v0.17.0** (stable)
-Last updated: 2026-05-02
+Current version: **v0.18.0-dev** (pre-release)
+Last updated: 2026-05-09
 
 ## Milestones
+
+### v0.18.0-dev (2026-05-09)
+
+- **PipelineServer — single-threaded VD streaming**: Replaced VirtualDisplayServer (1287 lines, 9 threads, 2 queues) with PipelineServer (~620 lines, 3 threads, 0 queues). Single pipeline thread: frame clock → GL render → encoder drain → TCP write. Eliminates all inter-thread queues and `park()`/`unpark()` synchronization.
+- **Drift-free frame clock**: Uses `System.nanoTime()` + `LockSupport.parkNanos()` for microsecond-precision timings. No `Object.wait()` — always schedules from ideal timeline, single catch-up reset when behind.
+- **Adaptive bitrate**: Starts at 5Mbps CBR, measures TCP write time per frame. Downgrades 25% on congestion (>15ms write), upgrades 1Mbps after 5s clean. Range 2-8Mbps. Eliminates write queue and backpressure frame drops.
+- **Car-native VD resolution**: VD created at car viewport dimensions (e.g., 1806×990) instead of phone DPI (3282×1800). Eliminates GPU downscale — SurfaceScaler removed. VD surface → SurfaceTexture → GL passthrough → encoder. 70% fewer pixels processed.
+- **Encoder: Main Profile, I-frame 1s, latency 0, no B-frames**: Baseline → Main profile for ~20% better compression. `KEY_OPERATING_RATE` and `KEY_MAX_B_FRAMES=0` for predictable latency.
+- **Decoder: 2-frame queue, keyframe priority**: Minimal 2-frame `ArrayBlockingQueue`. Keyframes always accepted (evict P-frames). No catchup logic — frames arrive on time or get dropped. `drainOutput()` before `feedBuffer()` to free decoder buffers first.
+- **Connection stability fixes**: `connectToPhone` won't kill active session when `handshakeDone`. Gateway retry and mDNS loops stop immediately on handshake send. TCP ADB reconnects when phone IP changes. Auto-fallback to TCP ADB when USB unavailable. Reconnect loop stops after 3 consecutive no-ADB failures.
+- **Shizuku mode**: Phone deploys VD server via Shizuku when available. Car waits for `VD_PORTS_BOUND` instead of deploying via ADB.
+- **Crash diagnostics**: `CarCrashHandler` saves crash stack + device info to file, sends to phone on next launch via TCP log channel.
+- **Device info logging**: Phone and car log memory, CPU, display, Android version at session start.
+- **Log toggle**: Settings → Debug → Diagnostic logs switch. When off, zero writes to disk. Propagated to car via `LOG_TOGGLE` data message.
+- **Lifecycle channel**: Phone binds `0.0.0.0:19647`, car passes phone IP (not `127.0.0.1`) for shell UID access on restrictive ROMs.
+- **Version comparison fix**: When car sends no `appVersionName`, compare `versionCode` on both sides instead of mixing semver with integer.
+- **VD server log in Share Logs**: `zipLogs()` now includes `/data/local/tmp/vd-server.log` when available.
 
 ### v0.17.0 (2026-05-02)
 

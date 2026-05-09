@@ -134,9 +134,10 @@ Android library module (`com.android.library`), compiled via `bundleLibRuntimeTo
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| VirtualDisplayServer | `VirtualDisplayServer.kt` | Creates VD, NIO write queue + Selector reader, H.264 encoder, configurable FPS, backpressure |
+| PipelineServer | `PipelineServer.kt` | Creates VD, single-threaded pipeline: frame clock → GL → encoder → TCP. Adaptive bitrate, drift-free clock. No queues between stages. |
 | FakeContext | `FakeContext.kt` | Spoofs `com.android.shell` for DisplayManager access |
-| SurfaceScaler | `SurfaceScaler.kt` | EGL/GLES GPU downscale pipeline, skips GL work on idle (relies on encoder repeat-previous-frame-after) |
+
+**PipelineServer architecture** (v0.18.0): Single pipeline thread processes each frame sequentially — `clock.wait()` → `updateTexImage()` → GL render → encoder drain → TCP write. Flow control is natural: if TCP stalls, the pipeline blocks, delaying the next `eglSwapBuffers`, slowing encoder input. Uses `System.nanoTime()` + `LockSupport.parkNanos()` for drift-free 30fps timing. Adaptive bitrate (2–8Mbps) measures TCP write time and adjusts encoder bitrate dynamically. SurfaceTexture provides tear-free frame synchronization. Total: 3 threads (Pipeline, TouchReader, Lifecycle) vs 9 in previous version.
 
 ## Connection Flow
 
