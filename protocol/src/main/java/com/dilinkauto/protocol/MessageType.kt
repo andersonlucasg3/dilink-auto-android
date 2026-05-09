@@ -65,6 +65,8 @@ object DataMsg {
     const val NAVIGATION_STATE: Byte = 0x20
     /** Car → Phone: log line (UTF-8 text). Phone writes to FileLog */
     const val CAR_LOG: Byte = 0x30.toByte()
+    /** Phone ↔ Car: toggle logging (payload: 1-byte 0 or 1) */
+    const val LOG_TOGGLE: Byte = 0x31.toByte()
 }
 
 /** Input channel message types */

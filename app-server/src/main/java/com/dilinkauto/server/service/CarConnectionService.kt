@@ -86,6 +86,7 @@ class CarConnectionService : Service() {
     @Volatile private var handshakeDone = false // Stop gateway retry after handshake completes
     @Volatile private var lastAdbHost: String? = null // Track which host TCP ADB connected to
     private var noAdbCount = 0 // Consecutive deploy failures due to no ADB — stops reconnect loop
+    @Volatile private var carLogEnabled = true // Toggled by phone via LOG_TOGGLE data message
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val usbPermissionAction = "com.dilinkauto.server.USB_PERMISSION"
@@ -267,6 +268,7 @@ class CarConnectionService : Service() {
             if (usbAdb == null) usbConnecting = false // only reset if no ADB instance (auth may be pending)
         }
 
+        carLogEnabled = true  // Reset to default each session
         userDisconnected = false
         _state.value = State.CONNECTING
         _statusMessage.value = getString(R.string.status_connecting)
@@ -782,6 +784,11 @@ class CarConnectionService : Service() {
                 _appInfoData.value = info
                 carLogSend("App info received: ${info.packageName} v${info.versionName}")
             }
+            DataMsg.LOG_TOGGLE -> {
+                val enabled = frame.payload.isNotEmpty() && frame.payload[0].toInt() == 1
+                carLogEnabled = enabled
+                carLogSend("Logging ${if (enabled) "enabled" else "disabled"} by phone")
+            }
         }
     }
 
@@ -1130,6 +1137,7 @@ class CarConnectionService : Service() {
     private val logBuffer = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
     private fun carLogSend(msg: String, level: String = "I") {
+        if (!carLogEnabled) return
         when (level) {
             "D" -> Log.d(TAG, msg)
             "W" -> Log.w(TAG, msg)

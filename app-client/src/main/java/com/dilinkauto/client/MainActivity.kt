@@ -1115,7 +1115,7 @@ fun SettingsScreen(
                         logEnabled = enabled
                         context.getSharedPreferences("dilinkauto", Context.MODE_PRIVATE)
                             .edit().putBoolean("log_enabled", enabled).apply()
-                        FileLog.enabled = enabled
+                        ConnectionService.setLogEnabled(enabled)
                     }
                 )
             }

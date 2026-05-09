@@ -1389,6 +1389,16 @@ class ConnectionService : Service() {
         const val ACTION_INSTALL_CAR = "com.dilinkauto.client.INSTALL_CAR"
         const val NOTIFICATION_ID = 1001
 
+        /** Propagate log toggle to car. Called from settings UI and onCreate. */
+        fun setLogEnabled(enabled: Boolean) {
+            FileLog.enabled = enabled
+            val conn = activeConnection
+            if (conn != null && conn.isConnected) {
+                try { conn.sendData(DataMsg.LOG_TOGGLE, byteArrayOf(if (enabled) 1 else 0)) }
+                catch (_: Exception) {}
+            }
+        }
+
         private val _serviceState = MutableStateFlow(State.IDLE)
         val serviceState: StateFlow<State> = _serviceState.asStateFlow()
 
