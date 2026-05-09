@@ -375,24 +375,19 @@ class VirtualDisplayServer(
         format.setInteger(MediaFormat.KEY_BIT_RATE, BITRATE)
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
-        format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
-        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
-        @Suppress("DEPRECATION") val level = MediaCodecInfo.CodecProfileLevel.AVCLevel4
-        format.setInteger(MediaFormat.KEY_LEVEL, level)
+        format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
         format.setInteger(MediaFormat.KEY_LATENCY, 0)
         format.setInteger(MediaFormat.KEY_PRIORITY, 0)
-        format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)  // no reordering delay
+        format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
         format.setInteger(MediaFormat.KEY_OPERATING_RATE, fps)
-        format.setLong("repeat-previous-frame-after", 500_000L)  // idle fill only, don't race VD
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            format.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps.toFloat())
-        }
+        format.setLong("repeat-previous-frame-after", 500_000L)
 
         try {
             encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).also {
                 it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
-            log("Encoder: ${encodeWidth}x${encodeHeight} VBR@${BITRATE / 1_000_000}Mbps High L4 30fps no-B-frames")
+            log("Encoder: ${encodeWidth}x${encodeHeight} CBR@${BITRATE / 1_000_000}Mbps Main 30fps")
         } catch (e: Exception) {
             throw IOException("Failed to create encoder: ${e.message}", e)
         }
