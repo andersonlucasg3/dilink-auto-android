@@ -95,6 +95,7 @@ Shared by both apps. Contains UsbAdbConnection, AdbProtocol, VideoConfig, and Ni
 | Discovery | `Discovery.kt` | mDNS service registration/discovery, port constants (9637/9638/9639) |
 | UsbAdbConnection | `adb/UsbAdbConnection.java` | ADB protocol over USB (CNXN, AUTH, OPEN, WRTE), logSink callback |
 | AdbProtocol | `adb/AdbProtocol.java` | ADB message constants and serialization |
+| TcpAdbConnection | `adb/TcpAdbConnection.kt` | Persistent ADB over TCP — single socket reused for all shell commands, correct ANDROID_PUBKEY encoding, PEM key storage. Replaces Dadb library. |
 
 ### app-client (Phone Application)
 

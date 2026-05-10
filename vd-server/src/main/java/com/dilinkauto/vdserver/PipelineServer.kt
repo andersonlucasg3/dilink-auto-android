@@ -456,11 +456,15 @@ class PipelineServer(
     private fun setDisplayImePolicy(id: Int) { try { val wm = Class.forName("android.view.IWindowManager\$Stub").getDeclaredMethod("asInterface", android.os.IBinder::class.java).invoke(null, Class.forName("android.os.ServiceManager").getDeclaredMethod("getService", String::class.java).invoke(null, "window")); wm.javaClass.getDeclaredMethod("setDisplayImePolicy", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(wm, id, 0) } catch (_: Exception) {} }
 
     private fun cleanup() {
-        running = false; persistentShell?.let { try { shellInput?.close() } catch (_: Exception) {}; it.destroy() }
+        running = false
+        // Restore screen BEFORE killing shell (order matters: execShell needs shellInput alive)
+        setPhysicalDisplayPower(true)
+        try { execShell("input keyevent 224") } catch (_: Exception) {}
         savedScreenOffTimeout?.let { if (it != "2147483647") execShell("settings put system screen_off_timeout $it") }
         savedLiftWakeup?.let { execShell("settings put system lift_wakeup_enabled $it") }
         savedProximityWakeup?.let { execShell("settings put system proximity_wakeup_enabled $it") }
-        setPhysicalDisplayPower(true); try { execShell("input keyevent 224") } catch (_: Exception) {}
+        // Now kill the shell
+        persistentShell?.let { try { shellInput?.close() } catch (_: Exception) {}; it.destroy() }
         // EGL cleanup
         val d = eglDisplay; val s = eglSurface; val c = eglContext
         if (d != null) EGL14.eglMakeCurrent(d, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)

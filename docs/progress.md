@@ -20,7 +20,12 @@ Last updated: 2026-05-09
 - **Log toggle**: Settings → Debug → Diagnostic logs switch. When off, zero writes to disk. Propagated to car via `LOG_TOGGLE` data message.
 - **Lifecycle channel**: Phone binds `0.0.0.0:19647`, car passes phone IP (not `127.0.0.1`) for shell UID access on restrictive ROMs.
 - **Version comparison fix**: When car sends no `appVersionName`, compare `versionCode` on both sides instead of mixing semver with integer.
-- **VD server log in Share Logs**: `zipLogs()` now includes `/data/local/tmp/vd-server.log` when available.
+- **VD server log in Share Logs**: `zipLogs()` now includes `/sdcard/DiLinkAuto/vd-server.log` when available.
+- **TcpAdbConnection — persistent single-connection ADB**: Replaced Dadb library (which opened a new TCP connection per command, causing ECONNREFUSED on Xiaomi/HyperOS) with a custom `TcpAdbConnection` in the protocol module. Maintains a single TCP socket for all shell commands. Handles CNXN/AUTH/SIGNATURE/RSAPUBLICKEY with correct ANDROID_PUBKEY format and PEM key storage. Shared between car and phone apps via protocol module.
+- **EGL/GL texture context fix**: Fixed PipelineServer crash where GL texture was created in a temporary EGL context (then destroyed) and the pipeline thread bound texture 0 instead of the actual texture ID. Moved all EGL/GL initialization to the pipeline thread with proper CountDownLatch synchronization.
+- **VD server deployment fix**: `app_process` was killed when the ADB shell process exited (non-interactive shells kill background jobs). Fixed by keeping the ADB shell stream open via `shellBackground` method, allowing the VD server process to survive.
+- **Phone screen restore fix**: Reordered PipelineServer cleanup to restore physical display BEFORE destroying the persistent shell process (was calling `input keyevent 224` after shell was already closed).
+- **Log toggle defaults**: Diagnostic logs default ON for debug/pre-release builds (`BuildConfig.DEBUG`) and OFF for release builds. Once user explicitly sets the toggle, their choice persists regardless of build type.
 
 ### v0.17.0 (2026-05-02)
 
