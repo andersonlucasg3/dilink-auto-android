@@ -18,7 +18,7 @@ import java.nio.channels.SocketChannel
  * Sends CMD_STOP and shortcut queries to the VD server.
  *
  * Video and touch flow directly between VD server and car (ports 9638/9639).
- * This class handles only the lifecycle/command channel on localhost:19637.
+ * This class handles only the lifecycle/command channel on localhost:19647.
  */
 class VirtualDisplayClient(
     private val scope: CoroutineScope,

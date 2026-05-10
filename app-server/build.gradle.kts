@@ -62,6 +62,5 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // Direct ADB client — connects to phone's adbd without needing an ADB server
-    implementation("dev.mobile:dadb:1.2.10")
+    // ADB client provided by protocol module (TcpAdbConnection)
 }

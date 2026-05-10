@@ -51,11 +51,25 @@ class PipelineServer(
     private var savedProximityWakeup: String? = null
     private var lastPowerOffTime = 0L
 
-    // SurfaceTexture + VD surface (created on main thread, used by pipeline thread + VD)
+    // SurfaceTexture + VD surface (created on pipeline thread, used by VD)
     private var vdInputSurface: Surface? = null
     private var stTexture: android.graphics.SurfaceTexture? = null
     private var encoderSurface: Surface? = null
     private var lifecycleChannel: SocketChannel? = null
+
+    // EGL/GL resources (created and used exclusively on pipeline thread)
+    private var stTexId = 0
+    private var eglDisplay: EGLDisplay? = null
+    private var eglContext: EGLContext? = null
+    private var eglSurface: EGLSurface? = null
+    private var glProgram = 0
+    private var glPosLoc = 0
+    private var glTexLoc = 0
+    private var quadBuf: FloatBuffer? = null
+
+    // Synchronization between main thread and pipeline thread
+    private val inputSurfaceReady = CountDownLatch(1)
+    @Volatile private var carVideoChannel: SocketChannel? = null
 
     companion object {
         private const val MSG_DISPLAY_READY: Byte = 0x10
@@ -89,11 +103,19 @@ class PipelineServer(
         initInputManager()
         initPersistentShell()
         try { setupEncoder() } catch (e: Exception) { err("Fatal: encoder: ${e.message}"); return }
-        if (!createVirtualDisplay()) { err("Fatal: failed to create VD"); return }
-        val conns = bindAndAccept() ?: return
+        val enc = encoder ?: return
+        encoderSurface = enc.createInputSurface()
+        enc.start()
+        // Start pipeline thread — it initializes EGL/GL and signals when VD input surface is ready
+        val pipelineThread = Thread({ runPipeline() }, "Pipeline").apply { start() }
+        try { inputSurfaceReady.await() } catch (_: InterruptedException) { return }
+        if (!createVirtualDisplay()) { running = false; err("Fatal: failed to create VD"); return }
+        val conns = bindAndAccept() ?: run { running = false; return }
         startLifecycleReader(conns.phoneChannel)
-        val pipelineThread = Thread({ runPipeline(conns.carVideo) }, "Pipeline").apply { start() }
         startTouchReader(conns.carInput)
+        // Signal pipeline to begin rendering with the car video channel
+        carVideoChannel = conns.carVideo
+        LockSupport.unpark(pipelineThread)
         try { pipelineThread.join() } catch (_: InterruptedException) {}
         cleanup()
     }
@@ -133,33 +155,7 @@ class PipelineServer(
     // ── VD Creation (ported from working VirtualDisplayServer) ──
 
     private fun createVirtualDisplay(): Boolean {
-        val enc = encoder ?: return false
-        encoderSurface = enc.createInputSurface()
-        enc.start()
-
-        // Create SurfaceTexture for VD input (no GL needed for this)
-        // EGL/GL will be initialized later on the pipeline thread
-        val texIds = IntArray(1)
-        // We need a temporary EGL context just to create the texture.
-        // Use a short-lived EGL setup.
-        val tmpDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
-        val tmpVer = IntArray(2); EGL14.eglInitialize(tmpDisplay, tmpVer, 0, tmpVer, 1)
-        val cfgAttribs = intArrayOf(EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8, EGL14.EGL_ALPHA_SIZE, 8, EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT, EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT, EGL14.EGL_NONE)
-        val cfgs = arrayOfNulls<android.opengl.EGLConfig>(1); val nc = IntArray(1)
-        EGL14.eglChooseConfig(tmpDisplay, cfgAttribs, 0, cfgs, 0, 1, nc, 0)
-        val tmpCtx = EGL14.eglCreateContext(tmpDisplay, cfgs[0], EGL14.EGL_NO_CONTEXT, intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0)
-        val tmpSurf = EGL14.eglCreatePbufferSurface(tmpDisplay, cfgs[0], intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE), 0)
-        EGL14.eglMakeCurrent(tmpDisplay, tmpSurf, tmpSurf, tmpCtx)
-        GLES20.glGenTextures(1, texIds, 0)
-        EGL14.eglMakeCurrent(tmpDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
-        EGL14.eglDestroySurface(tmpDisplay, tmpSurf); EGL14.eglDestroyContext(tmpDisplay, tmpCtx)
-        // Keep tmpDisplay alive — eglTerminate would destroy the texture we just created
-
-        stTexture = android.graphics.SurfaceTexture(texIds[0])
-        stTexture!!.setDefaultBufferSize(displayWidth, displayHeight)
-        vdInputSurface = Surface(stTexture)
-        val vdSurf = vdInputSurface!!
-        log("SurfaceTexture+VD surface ready")
+        val vdSurf = vdInputSurface ?: return false
 
         // Try DisplayManagerGlobal
         try {
@@ -278,37 +274,58 @@ class PipelineServer(
         return null
     }
 
-    // ── Single-Threaded Pipeline (EGL initialized HERE, on pipeline thread) ──
+    // ── Single-Threaded Pipeline (EGL/GL init + render loop, all on pipeline thread) ──
 
-    private fun runPipeline(carVideo: SocketChannel) {
-        try { pipelineLoop(carVideo) } catch (e: Exception) { err("Pipeline: ${e.message}"); e.printStackTrace() }
+    private fun runPipeline() {
+        try {
+            initEglAndSurfaceTexture()
+            inputSurfaceReady.countDown()
+            // Wait for main thread to create VD, accept connections, and set carVideoChannel
+            while (carVideoChannel == null && running) LockSupport.park()
+            if (!running) return
+            pipelineLoop(carVideoChannel!!)
+        } catch (e: Exception) { err("Pipeline: ${e.message}"); e.printStackTrace() }
         log("Pipeline exited")
     }
 
-    private fun pipelineLoop(carVideo: SocketChannel) {
-        val enc = encoder ?: return
-        val encSurf = encoderSurface ?: return
-        val st = stTexture ?: return
-        val bufInfo = MediaCodec.BufferInfo()
-
-        // ── EGL/GL init ON PIPELINE THREAD ──
+    private fun initEglAndSurfaceTexture() {
         val display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
         val ver = IntArray(2); EGL14.eglInitialize(display, ver, 0, ver, 1)
         val cfgA = intArrayOf(EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8, EGL14.EGL_ALPHA_SIZE, 8, EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT, EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT, EGL14.EGL_NONE)
         val cfgs = arrayOfNulls<android.opengl.EGLConfig>(1); val nc = IntArray(1)
         EGL14.eglChooseConfig(display, cfgA, 0, cfgs, 0, 1, nc, 0)
         val ctx = EGL14.eglCreateContext(display, cfgs[0], EGL14.EGL_NO_CONTEXT, intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0)
-        val surf = EGL14.eglCreateWindowSurface(display, cfgs[0], encSurf, intArrayOf(EGL14.EGL_NONE), 0)
+        val surf = EGL14.eglCreateWindowSurface(display, cfgs[0], encoderSurface, intArrayOf(EGL14.EGL_NONE), 0)
         EGL14.eglMakeCurrent(display, surf, surf, ctx)
+        eglDisplay = display; eglContext = ctx; eglSurface = surf
 
-        val prog = createProgram(); GLES20.glUseProgram(prog)
-        val posL = GLES20.glGetAttribLocation(prog, "aPosition"); val texL = GLES20.glGetAttribLocation(prog, "aTexCoord")
+        // GL program
+        glProgram = createProgram(); GLES20.glUseProgram(glProgram)
+        glPosLoc = GLES20.glGetAttribLocation(glProgram, "aPosition")
+        glTexLoc = GLES20.glGetAttribLocation(glProgram, "aTexCoord")
         GLES20.glViewport(0, 0, encodeWidth, encodeHeight)
 
-        // Bind the existing SurfaceTexture to GL
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0) // will be rebound each frame
+        // Create GL texture for SurfaceTexture (VD input)
+        val texIds = IntArray(1); GLES20.glGenTextures(1, texIds, 0); stTexId = texIds[0]
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, stTexId)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        stTexture = android.graphics.SurfaceTexture(stTexId)
+        stTexture!!.setDefaultBufferSize(displayWidth, displayHeight)
+        vdInputSurface = Surface(stTexture)
+
+        // Fullscreen quad
         val quad = floatArrayOf(-1f, -1f, 0f, 1f, 1f, -1f, 1f, 1f, -1f, 1f, 0f, 0f, 1f, 1f, 1f, 0f)
-        val qBuf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer(); qBuf.put(quad).position(0)
+        quadBuf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        quadBuf!!.put(quad).position(0)
+
+        log("EGL/GL ready, VD input surface created")
+    }
+
+    private fun pipelineLoop(carVideo: SocketChannel) {
+        val enc = encoder ?: return
+        val st = stTexture ?: return
+        val bufInfo = MediaCodec.BufferInfo()
 
         // Frame sync
         val frameLock = Any(); val frameAvail = booleanArrayOf(false)
@@ -331,12 +348,13 @@ class PipelineServer(
             val hasNew: Boolean; synchronized(frameLock) { hasNew = frameAvail[0]; frameAvail[0] = false }
             if (hasNew) st.updateTexImage()
 
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT); GLES20.glUseProgram(prog)
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0) // use implicit texture from SurfaceTexture
-            qBuf.position(0); GLES20.glVertexAttribPointer(posL, 2, GLES20.GL_FLOAT, false, 16, qBuf); GLES20.glEnableVertexAttribArray(posL)
-            qBuf.position(2); GLES20.glVertexAttribPointer(texL, 2, GLES20.GL_FLOAT, false, 16, qBuf); GLES20.glEnableVertexAttribArray(texL)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, stTexId)
+            val qb = quadBuf!!; qb.position(0)
+            GLES20.glVertexAttribPointer(glPosLoc, 2, GLES20.GL_FLOAT, false, 16, qb); GLES20.glEnableVertexAttribArray(glPosLoc)
+            qb.position(2); GLES20.glVertexAttribPointer(glTexLoc, 2, GLES20.GL_FLOAT, false, 16, qb); GLES20.glEnableVertexAttribArray(glTexLoc)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-            EGL14.eglSwapBuffers(display, surf)
+            EGL14.eglSwapBuffers(eglDisplay, eglSurface)
 
             var drained = 0
             while (true) {
@@ -363,8 +381,6 @@ class PipelineServer(
             if (frameCount - lastLogAt >= 120) { lastLogAt = frameCount; log("Pipeline: $frameCount frames ${bitrate/1_000_000}Mbps keys=$keyFrameCount") }
         }
         cbThread.quitSafely()
-        EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
-        EGL14.eglDestroySurface(display, surf); EGL14.eglDestroyContext(display, ctx); EGL14.eglTerminate(display)
         log("Pipeline exited: $frameCount frames")
     }
 
@@ -445,6 +461,11 @@ class PipelineServer(
         savedLiftWakeup?.let { execShell("settings put system lift_wakeup_enabled $it") }
         savedProximityWakeup?.let { execShell("settings put system proximity_wakeup_enabled $it") }
         setPhysicalDisplayPower(true); try { execShell("input keyevent 224") } catch (_: Exception) {}
+        // EGL cleanup
+        val d = eglDisplay; val s = eglSurface; val c = eglContext
+        if (d != null) EGL14.eglMakeCurrent(d, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+        if (d != null && s != null) EGL14.eglDestroySurface(d, s)
+        if (d != null && c != null) EGL14.eglDestroyContext(d, c)
         encoder?.let { try { it.stop() } catch (_: Exception) {}; try { it.release() } catch (_: Exception) {} }
         virtualDisplay?.let { try { it.release() } catch (_: Exception) {} }; vdInputSurface?.release(); stTexture?.release()
         log("Cleanup complete")

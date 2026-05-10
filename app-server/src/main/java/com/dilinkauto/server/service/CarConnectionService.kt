@@ -87,6 +87,7 @@ class CarConnectionService : Service() {
     @Volatile private var lastAdbHost: String? = null // Track which host TCP ADB connected to
     private var noAdbCount = 0 // Consecutive deploy failures due to no ADB — stops reconnect loop
     @Volatile private var carLogEnabled = true // Toggled by phone via LOG_TOGGLE data message
+    @Volatile private var tcpAdbConnecting = false // Prevent duplicate TCP ADB attempts
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val usbPermissionAction = "com.dilinkauto.server.USB_PERMISSION"
@@ -261,6 +262,7 @@ class CarConnectionService : Service() {
         wifiReady = false
         vdServerStarted = false
         shizukuMode = false
+        vdDeployRetries = 0
         handshakeDone = false
         _videoReady.value = false
         if (usbAdb?.isConnected != true) {
@@ -496,6 +498,7 @@ class CarConnectionService : Service() {
     // ─── Dev mode: TCP ADB track (replaces USB track) ───
 
     private fun startTcpAdbTrack() {
+        if (tcpAdbConnecting) return
         // Reconnect if phone IP changed since last ADB connection
         if (adbController?.isConnected == true && lastAdbHost == phoneHost) return
         if (adbController?.isConnected == true && lastAdbHost != phoneHost && phoneHost != null) {
@@ -504,23 +507,28 @@ class CarConnectionService : Service() {
             adbController = null
             lastAdbHost = null
         }
+        tcpAdbConnecting = true
         scope.launch(Dispatchers.IO) {
-            var attempts = 0
-            while (isActive && !usbReady && _state.value == State.CONNECTING && attempts < 60) {
-                val host = phoneHost
-                if (host != null) {
-                    carLogSend("Dev mode: TCP ADB connecting to $host:5555 (attempt ${attempts + 1})")
-                    connectTcpAdb(host)
-                    if (adbController?.isConnected == true) {
-                        lastAdbHost = host
+            try {
+                var attempts = 0
+                while (isActive && !usbReady && _state.value == State.CONNECTING && attempts < 60) {
+                    val host = phoneHost
+                    if (host != null) {
+                        carLogSend("Dev mode: TCP ADB connecting to $host:5555 (attempt ${attempts + 1})")
+                        connectTcpAdb(host)
+                        if (adbController?.isConnected == true) {
+                            lastAdbHost = host
+                        }
+                        return@launch
                     }
-                    return@launch
+                    delay(1000)
+                    attempts++
                 }
-                delay(1000)
-                attempts++
-            }
-            if (!usbReady) {
-                carLogSend("Dev mode: could not determine phone IP after ${attempts}s")
+                if (!usbReady) {
+                    carLogSend("Dev mode: could not determine phone IP after ${attempts}s")
+                }
+            } finally {
+                tcpAdbConnecting = false
             }
         }
     }
@@ -551,21 +559,30 @@ class CarConnectionService : Service() {
         _statusMessage.value = getString(R.string.status_tcp_adb_connected)
         carLogSend("Dev mode: TCP ADB connected to $host:5555")
 
-        controller.shell("am start -n com.dilinkauto.client/.MainActivity")
-        carLogSend("Dev mode: phone app launched via TCP ADB")
-
         usbReady = true
         noAdbCount = 0  // Reset — ADB is available now
-        // If handshake already completed, deploy VD server now that ADB is available
+
+        // Deploy VD server IMMEDIATELY using the same Dadb connection
         if (handshakeDone && !vdServerStarted) {
-            carLogSend("TCP ADB ready after handshake — deploying VD server")
-            deployVdServer()
+            carLogSend("TCP ADB ready — deploying VD server immediately")
+            deployVdServerDirect(controller)
         }
+
+        // Launch phone app after VD server
+        try { controller.shell("am start -n com.dilinkauto.client/.MainActivity") } catch (_: Exception) {}
+        carLogSend("Dev mode: phone app launched via TCP ADB")
+
         checkAndAdvance()
     }
 
-    private fun isAdbAvailable(): Boolean =
-        (adbController?.isConnected == true) || (usbAdb?.isConnected == true)
+    private fun isAdbAvailable(): Boolean {
+        val tcpOk = adbController?.isConnected == true
+        val usbOk = usbAdb?.isConnected == true
+        if (!tcpOk && !usbOk) {
+            carLogSend("isAdbAvailable: tcp=${adbController != null}.${adbController?.isConnected} usb=${usbAdb != null}.${usbAdb?.isConnected}")
+        }
+        return tcpOk || usbOk
+    }
 
     private fun executeAdb(command: String, noWait: Boolean): Boolean {
         return when {
@@ -666,9 +683,9 @@ class CarConnectionService : Service() {
                     carLogSend("Shizuku mode — phone will deploy VD server, waiting for VD_PORTS_BOUND")
                 } else {
                     // Car deploys VD server via ADB (USB or TCP).
-                    // Deploy NOW before video/input connections — VD binds 9638/9639 directly.
-                    carLogSend("Car deploying VD server via ADB")
-                    deployVdServer()
+                    // Don't deploy here — ADB may not be ready yet.
+                    // connectTcpAdb() will call deployVdServer() once ADB connects.
+                    carLogSend("Handshake OK — waiting for ADB to deploy VD server")
                 }
             }
             ControlMsg.VD_PORTS_BOUND -> {
@@ -794,10 +811,21 @@ class CarConnectionService : Service() {
 
     // ─── VD Server Deploy ───
 
+    private var vdDeployRetries = 0
+
     private fun deployVdServer() {
         if (vdServerStarted) return
         if (!isAdbAvailable()) {
-            carLogSend("deployVdServer: no ADB connection")
+            carLogSend("deployVdServer: no ADB connection (retry=${vdDeployRetries})")
+            // Retry once after short delay — ADB connection may be re-establishing
+            if (vdDeployRetries < 2) {
+                vdDeployRetries++
+                scope.launch(Dispatchers.IO) {
+                    delay(500)
+                    deployVdServer()
+                }
+                return
+            }
             noAdbCount++
             // Auto-fallback: try TCP ADB if we have the phone IP
             val host = phoneHost
@@ -835,14 +863,14 @@ class CarConnectionService : Service() {
 
             val jarPath = vdServerJarPath
 
-            val logFile = "/data/local/tmp/vd-server.log"
+            val logFile = "/sdcard/DiLinkAuto/vd-server.log"
             // Args: W H DPI PHONE_HOST EW EH FPS — VD binds 9638/9639 for car, connects to phone on 19647
-            val phoneIp = phoneHost ?: "127.0.0.1"
-            val args = "$vdW $vdH $phoneDpi $phoneIp $vdW $vdH $targetFps"
+            // Use 127.0.0.1: VD server runs on phone (via ADB), same device as ConnectionService
+            val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
 
             // Kill any existing VD server
             _statusMessage.value = getString(R.string.status_preparing_vd)
-            executeAdb("pkill -f VirtualDisplayServer 2>/dev/null", noWait = false)
+            executeAdb("pkill -f PipelineServer 2>/dev/null", noWait = false)
             delay(200)
 
             // Launch VD server. Uses exec to replace shell with app_process — keeps ADB stream open.
@@ -851,7 +879,7 @@ class CarConnectionService : Service() {
             carLogSend("VD server: ${vdW}x${vdH}@${phoneDpi}dpi (car-native, no downscale)")
 
             val cmd = "CLASSPATH=$jarPath app_process / " +
-                    "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
+                    "com.dilinkauto.vdserver.PipelineServer $args" +
                     " >$logFile 2>&1 &"
             if (!executeAdb(cmd, noWait = true)) {
                 carLogSend("VD server failed to start", "E")
@@ -983,7 +1011,7 @@ class CarConnectionService : Service() {
     }
 
     fun requestShortcuts(packageName: String) {
-        // Shortcuts still go through phone (request-reply via lifecycle channel 19637)
+        // Shortcuts still go through phone (request-reply via lifecycle channel 19647)
         _shortcutsCache.value = _shortcutsCache.value - packageName
         scope.launch(Dispatchers.IO) {
             try {
@@ -1123,6 +1151,12 @@ class CarConnectionService : Service() {
     // ─── WiFi helpers ───
 
     private fun getWifiGatewayIp(): String? {
+        // Dev mode: check for manual phone IP in SharedPreferences first
+        if (devMode) {
+            val devIp = getSharedPreferences("dilinkauto", MODE_PRIVATE)
+                .getString("dev_phone_ip", null)
+            if (!devIp.isNullOrBlank()) return devIp
+        }
         return try {
             val wm = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
             val gw = wm.dhcpInfo.gateway
@@ -1130,6 +1164,37 @@ class CarConnectionService : Service() {
             else String.format("%d.%d.%d.%d", gw and 0xFF, (gw shr 8) and 0xFF,
                 (gw shr 16) and 0xFF, (gw shr 24) and 0xFF)
         } catch (e: Exception) { null }
+    }
+
+    /** Deploy VD server using the Dadb connection directly, bypassing isConnected check */
+    private suspend fun deployVdServerDirect(controller: RemoteAdbController) {
+        if (vdServerStarted) return
+        vdServerStarted = true  // Set early to prevent duplicate deploys
+        val displayMetrics = resources.displayMetrics
+        val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
+        val viewportWidth = displayMetrics.widthPixels - navBarPx
+        val viewportHeight = displayMetrics.heightPixels
+        val phoneDpi = handshakeVdDpi
+        val vdW = viewportWidth and 0x7FFFFFFE.toInt()
+        val vdH = viewportHeight and 0x7FFFFFFE.toInt()
+        val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
+        _statusMessage.value = getString(R.string.status_preparing_vd)
+        carLogSend("VD server: ${vdW}x${vdH}@${phoneDpi}dpi (car-native, no downscale)")
+        // Use shell (sync) to capture result. pkill old instance first, then start new one.
+        controller.shell("pkill -f PipelineServer 2>/dev/null")
+        val cmd = "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
+                "com.dilinkauto.vdserver.PipelineServer $args" +
+                " >/sdcard/DiLinkAuto/vd-server.log 2>&1"
+        // Use shellBackground to keep ADB stream open — prevents shell from killing the process
+        val streamId = controller.shellBackground(cmd)
+        val ok = streamId >= 0
+        _statusMessage.value = getString(R.string.status_starting_vd)
+        if (ok) {
+            carLogSend("VD server started, waiting for video")
+        } else {
+            carLogSend("VD server failed to start", "E")
+            vdServerStarted = false  // Allow retry
+        }
     }
 
     // ─── Car Log (sent to phone via protocol, phone writes to file) ───

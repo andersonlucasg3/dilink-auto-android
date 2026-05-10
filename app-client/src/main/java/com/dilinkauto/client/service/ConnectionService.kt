@@ -492,7 +492,7 @@ class ConnectionService : Service() {
      *
      * Shizuku provides shell-level privileges so the phone can run app_process
      * without waiting for the car's USB ADB connection. The VD server will
-     * reverse-connect to localhost:19637 as usual.
+     * reverse-connect to localhost:19647 as usual.
      */
     private fun startVdServerViaShizuku(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int) {
         if (!ShizukuManager.isAvailable) {
@@ -506,16 +506,16 @@ class ConnectionService : Service() {
                     java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
                     "vd-server.jar"
                 ).absolutePath
-                val logFile = "/data/local/tmp/vd-server.log"
+                val logFile = "/sdcard/DiLinkAuto/vd-server.log"
                 // Args: W H DPI PHONE_HOST EW EH FPS
-                // VD binds 9638/9639 on 0.0.0.0, connects lifecycle to phoneHost:19637
+                // VD binds 9638/9639 on 0.0.0.0, connects lifecycle to phoneHost:19647
                 val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps"
 
-                ShizukuManager.execAndWait("pkill -f VirtualDisplayServer 2>/dev/null")
+                ShizukuManager.execAndWait("pkill -f PipelineServer 2>/dev/null")
                 delay(200)
 
                 val cmd = "CLASSPATH=$jarPath app_process / " +
-                        "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
+                        "com.dilinkauto.vdserver.PipelineServer $args" +
                         " >$logFile 2>&1 &"
                 ShizukuManager.execBackground(cmd)
                 FileLog.i(TAG, "VD server started via Shizuku: ${vdWidth}x${vdHeight}")
@@ -1383,7 +1383,7 @@ class ConnectionService : Service() {
 
     companion object {
         private const val TAG = "ConnectionService"
-        private const val VD_SERVER_PORT = 19637
+        private const val VD_SERVER_PORT = 19647
         const val ACTION_START = "com.dilinkauto.client.START"
         const val ACTION_STOP = "com.dilinkauto.client.STOP"
         const val ACTION_INSTALL_CAR = "com.dilinkauto.client.INSTALL_CAR"
