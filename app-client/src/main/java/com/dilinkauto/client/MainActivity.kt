@@ -1113,9 +1113,7 @@ fun SettingsScreen(
                     checked = logEnabled,
                     onCheckedChange = { enabled ->
                         logEnabled = enabled
-                        context.getSharedPreferences("dilinkauto", Context.MODE_PRIVATE)
-                            .edit().putBoolean("log_enabled", enabled).apply()
-                        ConnectionService.setLogEnabled(enabled)
+                        ConnectionService.setLogEnabled(context, enabled)
                     }
                 )
             }

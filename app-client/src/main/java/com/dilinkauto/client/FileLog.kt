@@ -62,9 +62,18 @@ object FileLog {
      * Rotate: rename current log with timestamp, start fresh.
      * Keeps at most 10 log files (9 archived + current). Oldest are deleted.
      */
-    /** Read enabled state from SharedPreferences. Call on service start. */
+    /**
+     * Read enabled state from SharedPreferences. Call on service start.
+     * Default: ON for debug/pre-release builds, OFF for release builds.
+     * Once user explicitly toggles, that choice persists regardless of build type.
+     */
     fun loadEnabled(prefs: android.content.SharedPreferences) {
-        enabled = prefs.getBoolean("log_enabled", true)
+        val userSet = prefs.getBoolean("log_enabled_user_set", false)
+        enabled = if (userSet) {
+            prefs.getBoolean("log_enabled", false)
+        } else {
+            com.dilinkauto.client.BuildConfig.DEBUG  // true for pre-release, false for release
+        }
     }
 
     fun rotate() {

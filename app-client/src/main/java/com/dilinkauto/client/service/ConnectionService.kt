@@ -1390,8 +1390,12 @@ class ConnectionService : Service() {
         const val NOTIFICATION_ID = 1001
 
         /** Propagate log toggle to car. Called from settings UI and onCreate. */
-        fun setLogEnabled(enabled: Boolean) {
+        fun setLogEnabled(context: android.content.Context, enabled: Boolean) {
             FileLog.enabled = enabled
+            // Persist both the value and the fact that user explicitly set it
+            context.getSharedPreferences("dilinkauto", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean("log_enabled", enabled)
+                .putBoolean("log_enabled_user_set", true).apply()
             val conn = activeConnection
             if (conn != null && conn.isConnected) {
                 try { conn.sendData(DataMsg.LOG_TOGGLE, byteArrayOf(if (enabled) 1 else 0)) }
