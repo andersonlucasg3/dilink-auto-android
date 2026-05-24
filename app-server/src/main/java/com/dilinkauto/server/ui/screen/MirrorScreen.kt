@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dilinkauto.protocol.InputMsg
 import com.dilinkauto.protocol.TouchEvent
+import com.dilinkauto.server.NativeCarBridge
 import com.dilinkauto.server.service.CarConnectionService
 
 /**
@@ -37,21 +38,16 @@ fun MirrorContent(service: CarConnectionService, visible: Boolean = true) {
                         width: Int,
                         height: Int
                     ) {
-                        service.log("[MirrorScreen] TextureView surface available: ${width}x${height}, decoder.isRunning=${service.videoDecoder.isRunning}")
+                        service.log("[MirrorScreen] TextureView surface available: ${width}x${height}, nativeRunning=${NativeCarBridge.nativeIsRunning()}")
                         val surface = Surface(surfaceTexture)
-                        if (service.videoDecoder.isRunning) {
-                            // Decoder already running (early start on offscreen surface
-                            // or survived a navigation hide/show). Switch surface without
-                            // restarting — zero frame loss, zero keyframe drops.
-                            service.videoDecoder.switchSurface(surface)
-                            service.releaseOffscreenSurface()
+                        if (NativeCarBridge.nativeIsRunning()) {
+                            // Native decoder already running — switch output surface.
+                            // Uses AMediaCodec_setOutputSurface — zero frame loss.
+                            NativeCarBridge.nativeSetSurface(surface)
                             service.log("[MirrorScreen] Decoder surface switched to TextureView (no restart)")
-                        } else {
-                            // First start — decoder hasn't been created yet
-                            service.videoDecoder.start(surface, service.vdWidth, service.vdHeight, service.targetFps)
-                            service.releaseOffscreenSurface()
-                            service.log("[MirrorScreen] Decoder started on TextureView surface")
                         }
+                        // If native is not running yet, it will start when connectVideoAndInput
+                        // receives the CONFIG frame and creates the decoder.
                     }
 
                     override fun onSurfaceTextureSizeChanged(

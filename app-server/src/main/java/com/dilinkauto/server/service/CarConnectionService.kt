@@ -24,7 +24,7 @@ import com.dilinkauto.server.ServerApp
 import com.dilinkauto.server.CarCrashHandler
 import com.dilinkauto.server.adb.RemoteAdbController
 import com.dilinkauto.protocol.adb.UsbAdbConnection
-import com.dilinkauto.server.decoder.VideoDecoder
+import com.dilinkauto.server.NativeCarBridge
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
@@ -47,9 +47,8 @@ class CarConnectionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     @Volatile private var controlConnection: Connection? = null
-    @Volatile private var videoConnection: Connection? = null
-    @Volatile private var inputConnection: Connection? = null
-    val videoDecoder = VideoDecoder()
+    // Video + input connections managed by NativeCarBridge (libdilink-car.so)
+    // No more Kotlin VideoDecoder — native AMediaCodec decoder handles everything
     @Volatile private var adbController: RemoteAdbController? = null
     @Volatile private var phoneHost: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -71,10 +70,6 @@ class CarConnectionService : Service() {
     private var handshakeVdDpi = VideoConfig.VIRTUAL_DISPLAY_DPI // DPI from phone (may be adjusted for DeX)
 
     private var vdServerJarPath = "/sdcard/DiLinkAuto/vd-server.jar"
-
-    private val touchExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-        Thread(r, "touch-sender").apply { isDaemon = true }
-    }
 
     // ─── Parallel prerequisites ───
     @Volatile private var wifiReady = false       // WiFi TCP handshake completed
@@ -167,8 +162,6 @@ class CarConnectionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        videoDecoder.logSink = { msg -> carLogSend(msg) }
-
         // Wire crash handler to TCP log sink for immediate crash delivery
         CarCrashHandler.logSink = { msg -> carLogSend(msg) }
 
@@ -432,42 +425,40 @@ class CarConnectionService : Service() {
                     carLogSend("Skipping video/input connections — update flag set during launch")
                     return@launch
                 }
-                carLogSend("Connecting video (${Discovery.VIDEO_PORT}) and input (${Discovery.INPUT_PORT})...")
+                carLogSend("Starting native car pipeline to $host:${Discovery.VIDEO_PORT}+${Discovery.INPUT_PORT}")
 
-                val videoDef = async { Connection.connect(host, Discovery.VIDEO_PORT, scope) }
-                val inputDef = async { Connection.connect(host, Discovery.INPUT_PORT, scope) }
+                // Native pipeline handles: TCP connect → H.264 decode → Surface render
+                // and touch encode → TCP send. No Kotlin NIO connections or VideoDecoder.
+                // Surface is set later when MirrorScreen provides TextureView.
+                val result = NativeCarBridge.nativeStart(
+                    host, Discovery.VIDEO_PORT, Discovery.INPUT_PORT,
+                    null, // surface — set later when TextureView is ready
+                    displayWidth = vdWidth,
+                    displayHeight = vdHeight,
+                    encodeWidth = vdWidth,
+                    encodeHeight = vdHeight
+                )
 
-                val video = videoDef.await()
-                videoConnection = video
-                video.onLog { msg -> carLogSend("VideoConn: $msg") }
-                video.onDisconnect { scope.launch { handleDisconnect() } }
-                video.onFrames(Channel.VIDEO) { handleVideoFrame(it) }
-                video.start(enableHeartbeat = false)
-                carLogSend("Video connection established")
-
-                val input = inputDef.await()
-                inputConnection = input
-                input.onLog { msg -> carLogSend("InputConn: $msg") }
-                input.onDisconnect { scope.launch { handleDisconnect() } }
-                input.start(enableHeartbeat = false)
-                carLogSend("Input connection established — all 3 connections ready")
-
-                wifiReady = true
-                checkAndAdvance()
+                if (result == 0) {
+                    carLogSend("Native car pipeline started")
+                    _videoReady.value = true
+                    wifiReady = true
+                    checkAndAdvance()
+                } else {
+                    carLogSend("Native car pipeline failed to start: $result", "E")
+                    handleDisconnect()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                carLogSend("Failed to connect video/input: ${e.message}")
+                carLogSend("Failed to start native pipeline: ${e.message}")
                 handleDisconnect()
             }
         }
     }
 
     private fun disconnectAllConnections() {
-        videoConnection?.disconnect()
-        videoConnection = null
-        inputConnection?.disconnect()
-        inputConnection = null
+        NativeCarBridge.nativeStop()
         controlConnection?.disconnect()
         controlConnection = null
     }
@@ -721,37 +712,8 @@ class CarConnectionService : Service() {
         }
     }
 
-    private var videoFrameCount = 0L
-    private var offscreenTexture: android.graphics.SurfaceTexture? = null
-    private var offscreenSurface: android.view.Surface? = null
-
-    private fun handleVideoFrame(frame: FrameCodec.Frame) {
-        val isConfig = frame.messageType == VideoMsg.CONFIG
-        videoFrameCount++
-        if (isConfig || videoFrameCount % 60 == 0L) {
-            carLogSend("Video ${if (isConfig) "CONFIG" else "FRAME"} size=${frame.payload.size} total=$videoFrameCount")
-        }
-
-        // Start decoder immediately on first CONFIG — don't wait for MirrorScreen's TextureView.
-        // Uses an offscreen SurfaceTexture so the decoder can consume frames right away.
-        // MirrorScreen will restart the decoder with the real surface when it appears.
-        if (isConfig && !videoDecoder.isRunning) {
-            carLogSend("Starting decoder with offscreen surface (pre-MirrorScreen)")
-            val tex = android.graphics.SurfaceTexture(0)
-            tex.setDefaultBufferSize(vdWidth, vdHeight)
-            val surf = android.view.Surface(tex)
-            offscreenTexture = tex
-            offscreenSurface = surf
-            videoDecoder.start(surf, vdWidth, vdHeight, targetFps)
-        }
-
-        if (!_videoReady.value && !isConfig) {
-            _videoReady.value = true
-            carLogSend("First video frame — VD stream ready")
-            checkAndAdvance()
-        }
-        videoDecoder.onFrameReceived(isConfig, frame.payload)
-    }
+    // Video frames are handled by NativeCarBridge (libdilink-car.so).
+    // No Kotlin VideoDecoder or offscreen surface — native AMediaCodec does it all.
 
     private fun handleDataFrame(frame: FrameCodec.Frame) {
         when (frame.messageType) {
@@ -862,34 +824,36 @@ class CarConnectionService : Service() {
             val vdH = viewportHeight and 0x7FFFFFFE.toInt()
 
             val jarPath = vdServerJarPath
+            val libDir = java.io.File(vdServerJarPath).parent ?: "/sdcard/DiLinkAuto"
 
             val logFile = "/sdcard/DiLinkAuto/vd-server.log"
-            // Args: W H DPI PHONE_HOST EW EH FPS — VD binds 9638/9639 for car, connects to phone on 19647
-            // Use 127.0.0.1: VD server runs on phone (via ADB), same device as ConnectionService
+            // Args: W H DPI PHONE_HOST EW EH FPS — daemon binds 9638/9639 for car
             val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
 
-            // Kill any existing VD server
+            // Kill any existing daemon/VD server
             _statusMessage.value = getString(R.string.status_preparing_vd)
+            executeAdb("pkill -f DaemonEntry 2>/dev/null", noWait = false)
             executeAdb("pkill -f PipelineServer 2>/dev/null", noWait = false)
             delay(200)
 
-            // Launch VD server. Uses exec to replace shell with app_process — keeps ADB stream open.
-            // VD server will die on disconnect; car re-deploys on reconnect.
+            // Launch native daemon via app_process.
+            // LD_LIBRARY_PATH enables loading of libdilinkd.so.
             _statusMessage.value = getString(R.string.status_starting_vd)
-            carLogSend("VD server: ${vdW}x${vdH}@${phoneDpi}dpi (car-native, no downscale)")
+            carLogSend("Native daemon: ${vdW}x${vdH}@${phoneDpi}dpi")
 
-            val cmd = "CLASSPATH=$jarPath app_process / " +
-                    "com.dilinkauto.vdserver.PipelineServer $args" +
+            val cmd = "LD_LIBRARY_PATH=$libDir CLASSPATH=$jarPath app_process / " +
+                    "com.dilinkauto.vdserver.DaemonEntry $args" +
                     " >$logFile 2>&1 &"
             if (!executeAdb(cmd, noWait = true)) {
-                carLogSend("VD server failed to start", "E")
+                carLogSend("Native daemon failed to start", "E")
                 _statusMessage.value = getString(R.string.status_vd_failed)
+                vdServerStarted = false
                 return@launch
             }
 
             vdServerStarted = true
             _statusMessage.value = getString(R.string.status_waiting_video)
-            carLogSend("VD server started, waiting for video")
+            carLogSend("Native daemon started, waiting for video")
         }
     }
 
@@ -906,78 +870,37 @@ class CarConnectionService : Service() {
     fun log(msg: String) = carLogSend(msg)
 
     fun releaseOffscreenSurface() {
-        offscreenSurface?.release()
-        offscreenSurface = null
-        offscreenTexture?.release()
-        offscreenTexture = null
+        // Native decoder manages its own offscreen surface lifecycle.
+        // Kept as no-op for API compatibility with MirrorScreen.
     }
 
-    private var touchDropCount = 0L
-    private var touchSendCount = 0L
-
+    // Touch events routed directly to native pipeline via JNI.
+    // Native encodes + sends on the input TCP connection (port 9639).
+    // Eliminates: ByteArray alloc, TouchEvent.encode(), Java NIO write, touchExecutor thread.
     fun sendTouchEvent(event: TouchEvent) {
-        val conn = inputConnection
-        if (conn == null) {
-            touchDropCount++
-            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch DROP #$touchDropCount: inputConnection=null state=${_state.value}")
-            }
-            return
-        }
-        if (!conn.isConnected) {
-            touchDropCount++
-            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch DROP #$touchDropCount: inputConnection not connected")
-            }
-            return
-        }
-        val payload = event.encode()
-        touchExecutor.execute {
-            try {
-                conn.sendInput(event.action, payload)
-                touchSendCount++
-                if (touchSendCount <= 5 || touchSendCount % 100 == 0L) {
-                    carLogSend("Touch #$touchSendCount action=${event.action} ptr=${event.pointerId} x=${"%.2f".format(event.x)} y=${"%.2f".format(event.y)}")
-                }
-            }
-            catch (e: Exception) { carLogSend("Touch send failed: ${e.message}", "W") }
+        val x = (event.x * vdWidth).toInt()
+        val y = (event.y * vdHeight).toInt()
+        when (event.action) {
+            InputMsg.TOUCH_DOWN -> NativeCarBridge.nativeTouchDown(x, y, event.pointerId, event.pressure)
+            InputMsg.TOUCH_MOVE -> NativeCarBridge.nativeTouchMove(x, y, event.pointerId, event.pressure)
+            InputMsg.TOUCH_UP   -> NativeCarBridge.nativeTouchUp(x, y, event.pointerId, event.pressure)
         }
     }
 
     fun sendTouchBatch(pointers: List<TouchEvent>) {
-        val conn = inputConnection
-        if (conn == null) {
-            touchDropCount++
-            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch batch DROP #$touchDropCount: inputConnection=null state=${_state.value}")
-            }
-            return
-        }
-        if (!conn.isConnected) {
-            touchDropCount++
-            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch batch DROP #$touchDropCount: inputConnection not connected")
-            }
-            return
-        }
-        val payload = TouchMoveBatch(pointers).encode()
-        touchExecutor.execute {
-            try {
-                conn.sendInput(InputMsg.TOUCH_MOVE_BATCH, payload)
-                touchSendCount++
-                if (touchSendCount <= 5 || touchSendCount % 100 == 0L) {
-                    carLogSend("Touch batch #$touchSendCount (${pointers.size} pointers)")
-                }
-            }
-            catch (e: Exception) { carLogSend("Touch batch send failed: ${e.message}", "W") }
+        for (p in pointers) {
+            val x = (p.x * vdWidth).toInt()
+            val y = (p.y * vdHeight).toInt()
+            NativeCarBridge.nativeTouchMove(x, y, p.pointerId, p.pressure)
         }
     }
 
-    /** Send a control command to the VD server directly via the input connection (port 9639) */
+    /** Send a control command via the control connection (port 9637).
+     *  VD commands (launch app, go back, etc.) go through control channel. */
     private fun sendCommandToVd(msgType: Byte, payload: ByteArray = ByteArray(0)) {
         scope.launch(Dispatchers.IO) {
             try {
-                inputConnection?.sendControl(msgType, payload)
+                controlConnection?.sendControl(msgType, payload)
             } catch (e: Exception) {
                 carLogSend("sendCommandToVd 0x${msgType.toString(16)} failed: ${e.message}", "E")
             }
@@ -1070,8 +993,6 @@ class CarConnectionService : Service() {
         connectJob?.cancel()
         connectJob = null
 
-        videoDecoder.stop()
-        releaseOffscreenSurface()
         // Don't disconnect ADB controller on every disconnect — TCP ADB connections
         // survive WiFi flaps. Only null it if the connection is actually broken.
         if (adbController?.isConnected != true) {
@@ -1083,9 +1004,6 @@ class CarConnectionService : Service() {
         _phoneName.value = ""
         _appList.value = emptyList()
         _videoReady.value = false
-        videoFrameCount = 0
-        touchSendCount = 0
-        touchDropCount = 0
         wifiReady = false
         vdServerStarted = false
         handshakeDone = false
@@ -1139,7 +1057,6 @@ class CarConnectionService : Service() {
     }
 
     private fun shutdown() {
-        videoDecoder.stop()
         adbController?.disconnect()
         adbController = null
         disconnectAllConnections()
@@ -1179,20 +1096,20 @@ class CarConnectionService : Service() {
         val vdH = viewportHeight and 0x7FFFFFFE.toInt()
         val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
         _statusMessage.value = getString(R.string.status_preparing_vd)
-        carLogSend("VD server: ${vdW}x${vdH}@${phoneDpi}dpi (car-native, no downscale)")
-        // Use shell (sync) to capture result. pkill old instance first, then start new one.
+        carLogSend("Native daemon: ${vdW}x${vdH}@${phoneDpi}dpi")
+        controller.shell("pkill -f DaemonEntry 2>/dev/null")
         controller.shell("pkill -f PipelineServer 2>/dev/null")
-        val cmd = "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
-                "com.dilinkauto.vdserver.PipelineServer $args" +
+        val cmd = "LD_LIBRARY_PATH=/sdcard/DiLinkAuto " +
+                "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
+                "com.dilinkauto.vdserver.DaemonEntry $args" +
                 " >/sdcard/DiLinkAuto/vd-server.log 2>&1"
-        // Use shellBackground to keep ADB stream open — prevents shell from killing the process
         val streamId = controller.shellBackground(cmd)
         val ok = streamId >= 0
         _statusMessage.value = getString(R.string.status_starting_vd)
         if (ok) {
-            carLogSend("VD server started, waiting for video")
+            carLogSend("Native daemon started, waiting for video")
         } else {
-            carLogSend("VD server failed to start", "E")
+            carLogSend("Native daemon failed to start", "E")
             vdServerStarted = false  // Allow retry
         }
     }
@@ -1252,7 +1169,6 @@ class CarConnectionService : Service() {
 
     override fun onDestroy() {
         shutdown()
-        touchExecutor.shutdownNow()
         try { unregisterReceiver(usbReceiver) } catch (_: Exception) {}
         networkCallback?.let {
             try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) }

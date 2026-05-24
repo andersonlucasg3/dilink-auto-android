@@ -126,6 +126,16 @@ class ConnectionService : Service() {
             val dir = java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
             dir.mkdirs()
             extractAsset("vd-server.jar", java.io.File(dir, "vd-server.jar"))
+
+            // Deploy native library for the correct ABI
+            val abi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
+            try {
+                extractAsset("native/${abi}/libdilinkd.so",
+                    java.io.File(dir, "libdilinkd.so"))
+            } catch (e: Exception) {
+                FileLog.w(TAG, "Native lib not bundled for $abi")
+            }
+
             extractAsset("app-server.apk", java.io.File(filesDir, "app-server.apk"))
             assetsReady = true
         }
@@ -490,9 +500,9 @@ class ConnectionService : Service() {
     /**
      * Start the VD server process directly on the phone using Shizuku.
      *
-     * Shizuku provides shell-level privileges so the phone can run app_process
-     * without waiting for the car's USB ADB connection. The VD server will
-     * reverse-connect to localhost:19647 as usual.
+     * Launches the native daemon (dilinkd) via app_process with shell UID.
+     * The daemon runs the full C++ pipeline: VD → EGL → AMediaCodec → TCP.
+     * Car connects directly to daemon TCP ports (9638/9639) over WiFi.
      */
     private fun startVdServerViaShizuku(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int) {
         if (!ShizukuManager.isAvailable) {
@@ -502,25 +512,27 @@ class ConnectionService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
-                val jarPath = java.io.File(
-                    java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
-                    "vd-server.jar"
-                ).absolutePath
+                val diLinkDir = java.io.File(
+                    android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
+                val jarPath = java.io.File(diLinkDir, "vd-server.jar").absolutePath
+                val soPath = java.io.File(diLinkDir, "libdilinkd.so").absolutePath
                 val logFile = "/sdcard/DiLinkAuto/vd-server.log"
                 // Args: W H DPI PHONE_HOST EW EH FPS
-                // VD binds 9638/9639 on 0.0.0.0, connects lifecycle to phoneHost:19647
                 val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps"
 
+                ShizukuManager.execAndWait("pkill -f DaemonEntry 2>/dev/null")
                 ShizukuManager.execAndWait("pkill -f PipelineServer 2>/dev/null")
                 delay(200)
 
-                val cmd = "CLASSPATH=$jarPath app_process / " +
-                        "com.dilinkauto.vdserver.PipelineServer $args" +
+                // LD_LIBRARY_PATH enables System.loadLibrary("dilinkd") in DaemonEntry
+                val cmd = "LD_LIBRARY_PATH=${diLinkDir.absolutePath} " +
+                        "CLASSPATH=$jarPath app_process / " +
+                        "com.dilinkauto.vdserver.DaemonEntry $args" +
                         " >$logFile 2>&1 &"
                 ShizukuManager.execBackground(cmd)
-                FileLog.i(TAG, "VD server started via Shizuku: ${vdWidth}x${vdHeight}")
+                FileLog.i(TAG, "Native daemon started via Shizuku: ${vdWidth}x${vdHeight}")
             } catch (e: Exception) {
-                FileLog.e(TAG, "Shizuku VD server start failed", e)
+                FileLog.e(TAG, "Shizuku daemon start failed", e)
             }
         }
     }

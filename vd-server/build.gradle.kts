@@ -6,9 +6,20 @@ plugins {
 android {
     namespace = "com.dilinkauto.vdserver"
     compileSdk = 34
+    ndkVersion = "29.0.13846066"
 
     defaultConfig {
         minSdk = 29
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("${rootDir}/dilinkd/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     compileOptions {

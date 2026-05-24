@@ -7,12 +7,24 @@ android {
     namespace = "com.dilinkauto.server"
     compileSdk = 34
 
+    ndkVersion = "29.0.13846066"
+
     defaultConfig {
         applicationId = "com.dilinkauto.server"
         minSdk = 29
         targetSdk = 34
         versionCode = project.property("app.versionCode").toString().toInt()
         versionName = project.property("app.versionName").toString()
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("${rootDir}/dilink-car/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {

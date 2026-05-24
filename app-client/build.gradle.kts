@@ -92,13 +92,17 @@ dependencies {
 // vd-server is a proper Gradle module — compilation handled by AGP/Kotlin.
 // This task just runs d8 + jar packaging.
 tasks.register("buildVdServer") {
-    dependsOn(":vd-server:bundleLibRuntimeToJarDebug")
+    dependsOn(":vd-server:bundleLibRuntimeToJarDebug",
+              ":vd-server:buildCMakeDebug[arm64-v8a]",
+              ":vd-server:buildCMakeDebug[armeabi-v7a]",
+              ":vd-server:buildCMakeDebug[x86_64]")
 
     val vdBuildDir = file("${rootDir}/vd-server/build/tmp/vds-d8")
     val vdClassesJar = file("${rootDir}/vd-server/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
     val protocolJar = file("${rootDir}/protocol/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
     val d8Jar = file("${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/lib/d8.jar")
     val assetsDir = file("src/main/assets")
+    val cmakeObjDir = file("${rootDir}/vd-server/build/intermediates/cmake/debug/obj")
 
     // Kotlin stdlib + coroutines (needed at runtime by vd-server via app_process)
     val kotlinLibs = project.configurations.detachedConfiguration(
@@ -148,11 +152,23 @@ tasks.register("buildVdServer") {
             jarClassesDex.delete()
         }
 
-        // Copy to phone app assets only (car deploys it over USB-ADB)
+        // Copy to phone app assets
         assetsDir.mkdirs()
         jarFile.copyTo(file("${assetsDir}/vd-server.jar"), overwrite = true)
-
         println("VD server JAR built: ${jarFile.length()} bytes -> assets")
+
+        // Copy native .so files for deployment to phone
+        for (abi in listOf("arm64-v8a", "armeabi-v7a", "x86_64")) {
+            val soFile = file("${cmakeObjDir}/${abi}/libdilinkd.so")
+            if (soFile.exists()) {
+                val destDir = file("${assetsDir}/native/${abi}")
+                destDir.mkdirs()
+                soFile.copyTo(file("${destDir}/libdilinkd.so"), overwrite = true)
+                println("Native lib ${abi}: ${soFile.length()} bytes -> assets/native/${abi}/")
+            } else {
+                println("WARNING: libdilinkd.so not found for ${abi}")
+            }
+        }
     }
 }
 
