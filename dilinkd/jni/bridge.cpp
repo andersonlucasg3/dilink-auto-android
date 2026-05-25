@@ -19,6 +19,7 @@ static jmethodID g_inject_input_method = nullptr;
 static jmethodID g_display_power_method = nullptr;
 static jmethodID g_exec_shell_method = nullptr;
 static jmethodID g_launch_app_method = nullptr;
+static jmethodID g_update_tex_method = nullptr;
 
 bool init_bridge(JNIEnv* env, jobject bridge_obj) {
     // Create global reference to prevent GC
@@ -41,6 +42,7 @@ bool init_bridge(JNIEnv* env, jobject bridge_obj) {
                                             "(Ljava/lang/String;)Ljava/lang/String;");
     g_launch_app_method = env->GetMethodID(g_bridge_class, "launchApp",
                                             "(ILjava/lang/String;)Z");
+    g_update_tex_method = env->GetMethodID(g_bridge_class, "updateTexImage", "()V");
 
     if (!g_create_vd_method || !g_inject_input_method || !g_display_power_method ||
         !g_exec_shell_method || !g_launch_app_method) {
@@ -102,6 +104,12 @@ std::string exec_shell(JNIEnv* env, const std::string& cmd) {
     env->ReleaseStringUTFChars(result, str);
     env->DeleteLocalRef(result);
     return out;
+}
+
+void update_tex_image(JNIEnv* env) {
+    if (!g_update_tex_method || !g_bridge_obj) return;
+    env->CallVoidMethod(g_bridge_obj, g_update_tex_method);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
 }
 
 bool launch_app(JNIEnv* env, int display_id, const std::string& package_name) {

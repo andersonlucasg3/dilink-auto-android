@@ -830,20 +830,17 @@ class CarConnectionService : Service() {
             // Args: W H DPI PHONE_HOST EW EH FPS — daemon binds 9638/9639 for car
             val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
 
-            // Kill any existing daemon/VD server
             _statusMessage.value = getString(R.string.status_preparing_vd)
-            executeAdb("pkill -f DaemonEntry 2>/dev/null", noWait = false)
-            executeAdb("pkill -f PipelineServer 2>/dev/null", noWait = false)
-            delay(200)
+            // Don't pkill — daemon may already be running from previous session
 
             // Launch native daemon via app_process.
             // LD_LIBRARY_PATH enables loading of libdilinkd.so.
             _statusMessage.value = getString(R.string.status_starting_vd)
             carLogSend("Native daemon: ${vdW}x${vdH}@${phoneDpi}dpi")
 
-            val cmd = "LD_LIBRARY_PATH=$libDir CLASSPATH=$jarPath app_process / " +
+            val cmd = "nohup sh -c 'LD_LIBRARY_PATH=$libDir CLASSPATH=$jarPath app_process / " +
                     "com.dilinkauto.vdserver.DaemonEntry $args" +
-                    " >$logFile 2>&1 &"
+                    " >$logFile 2>&1' </dev/null >/dev/null 2>&1 &"
             if (!executeAdb(cmd, noWait = true)) {
                 carLogSend("Native daemon failed to start", "E")
                 _statusMessage.value = getString(R.string.status_vd_failed)
@@ -853,7 +850,11 @@ class CarConnectionService : Service() {
 
             vdServerStarted = true
             _statusMessage.value = getString(R.string.status_waiting_video)
-            carLogSend("Native daemon started, waiting for VD_PORTS_BOUND")
+            carLogSend("Native daemon started, connecting video+input")
+            val host = phoneHost
+            if (host != null) {
+                connectVideoAndInput(host)
+            }
         }
     }
 
@@ -1097,18 +1098,20 @@ class CarConnectionService : Service() {
         val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
         _statusMessage.value = getString(R.string.status_preparing_vd)
         carLogSend("Native daemon: ${vdW}x${vdH}@${phoneDpi}dpi")
-        controller.shell("pkill -f DaemonEntry 2>/dev/null")
-        controller.shell("pkill -f PipelineServer 2>/dev/null")
-        // & backgrounds daemon so it survives ADB stream closure
-        val cmd = "LD_LIBRARY_PATH=/data/local/tmp " +
+        // Don't pkill — daemon may already be running
+        val cmd = "nohup sh -c 'LD_LIBRARY_PATH=/data/local/tmp " +
                 "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
                 "com.dilinkauto.vdserver.DaemonEntry $args" +
-                " >/sdcard/DiLinkAuto/vd-server.log 2>&1 &"
+                " >/sdcard/DiLinkAuto/vd-server.log 2>&1' </dev/null >/dev/null 2>&1 &"
         val streamId = controller.shellBackground(cmd)
         val ok = streamId >= 0
         _statusMessage.value = getString(R.string.status_starting_vd)
         if (ok) {
-            carLogSend("Native daemon started, waiting for VD_PORTS_BOUND")
+            carLogSend("Native daemon started, connecting video+input")
+            val host = phoneHost
+            if (host != null) {
+                connectVideoAndInput(host)
+            }
         } else {
             carLogSend("Native daemon failed to start", "E")
             vdServerStarted = false  // Allow retry

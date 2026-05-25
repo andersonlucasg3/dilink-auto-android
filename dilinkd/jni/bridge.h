@@ -39,5 +39,8 @@ std::string exec_shell(JNIEnv* env, const std::string& cmd);
 // Launch an app on the virtual display.
 bool launch_app(JNIEnv* env, int display_id, const std::string& package_name);
 
+// Update the SurfaceTexture (call before each GL render).
+void update_tex_image(JNIEnv* env);
+
 } // namespace jni
 } // namespace dilink

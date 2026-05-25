@@ -424,7 +424,8 @@ class ConnectionService : Service() {
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
             "vd-server.jar"
         ).absolutePath
-        val connMethod = if (ShizukuManager.isAvailable) CONNECTION_METHOD_SHIZUKU else CONNECTION_METHOD_USB_ADB
+        // Always USB_ADB — car deploys daemon independently, no Shizuku wait needed
+        val connMethod = CONNECTION_METHOD_USB_ADB
         val resp = HandshakeResponse(
             accepted = true,
             deviceName = android.os.Build.MODEL,
@@ -493,14 +494,8 @@ class ConnectionService : Service() {
                     FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
                 }
 
-                // Launch daemon via Shizuku if available. Daemon will connect to the
-                // persistent lifecycle listener on :19647 when VD + ports are ready.
-                // Listener triggers VD_PORTS_BOUND to car automatically.
-                if (ShizukuManager.isAvailable) {
-                    startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
-                } else {
-                    FileLog.i(TAG, "Shizuku not available — car will deploy daemon via ADB")
-                }
+                // Car deploys daemon via ADB (Track B). Daemon connects to persistent
+                // lifecycle listener on :19647 when ready. Listener triggers VD_PORTS_BOUND.
 
                 withContext(Dispatchers.Main) {
                     _serviceState.value = State.STREAMING

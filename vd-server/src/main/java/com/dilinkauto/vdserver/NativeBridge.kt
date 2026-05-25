@@ -32,10 +32,15 @@ class NativeBridge {
     private var displayControlLoaded = false
     private var persistentShell: Process? = null
     private var shellOutput: java.io.OutputStream? = null
+    private var surfaceTexture: android.graphics.SurfaceTexture? = null
 
     init {
         initInputManager()
         initPersistentShell()
+    }
+
+    fun updateTexImage() {
+        surfaceTexture?.updateTexImage()
     }
 
     // ── VirtualDisplay Creation ──
@@ -50,6 +55,7 @@ class NativeBridge {
     fun createVirtualDisplayFromTexture(texId: Int, width: Int, height: Int, dpi: Int): Int {
         val st = android.graphics.SurfaceTexture(texId)
         st.setDefaultBufferSize(width, height)
+        surfaceTexture = st // store for updateTexImage calls from native pipeline
         val surface = Surface(st)
         return createVirtualDisplay(width, height, dpi, surface)
     }

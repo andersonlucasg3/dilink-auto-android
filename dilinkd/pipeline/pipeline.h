@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <jni.h>
 #include "../encoder/amc_encoder.h"
 #include "../encoder/bitrate_ctrl.h"
 #include "../renderer/egl_core.h"
@@ -37,10 +38,8 @@ public:
     // in Java, then creates VirtualDisplay with that Surface.
     GLuint init(const PipelineConfig& config);
 
-    // Phase 2: Run the pipeline loop. Blocks until stopped.
-    // Call on the pipeline thread. VD must be created before calling this.
-    // Returns 0 on clean exit, -1 on fatal error.
-    int run_loop();
+    // Phase 2: Run the pipeline loop. env is for JNI up-calls (updateTexImage).
+    int run_loop(JNIEnv* env);
 
     // Signal stop from another thread.
     void stop();

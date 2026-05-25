@@ -1,5 +1,6 @@
 #include "pipeline.h"
 #include "../network/protocol.h"
+#include "../jni/bridge.h"
 #include <android/log.h>
 #include <media/NdkMediaCodec.h>
 #include <ctime>
@@ -65,13 +66,13 @@ GLuint Pipeline::init(const PipelineConfig& config) {
     return input_tex;
 }
 
-int Pipeline::run_loop() {
+int Pipeline::run_loop(JNIEnv* env) {
     if (!initialized_) {
         LOGE("Pipeline not initialized");
         return -1;
     }
 
-    // ── Wait for car video connection ──
+    LOGI("Pipeline waiting for car video connection...");
     LOGI("Pipeline waiting for car video connection...");
     while (running_ && car_video_ == nullptr) {
         struct timespec ts = {0, 50'000'000};
@@ -102,6 +103,9 @@ int Pipeline::run_loop() {
         if (next_frame_ns <= now_ns()) {
             next_frame_ns = now_ns() + frame_interval_ns_;
         }
+
+        // Update GL texture from SurfaceTexture (JNI up-call to Java)
+        if (env) jni::update_tex_image(env);
 
         if (content_changed) {
             egl_.begin_frame();

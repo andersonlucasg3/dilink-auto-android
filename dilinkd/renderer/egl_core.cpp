@@ -169,12 +169,23 @@ bool EglCore::create_input_texture(int display_w, int display_h,
     input_tex_id_ = tex_id;
     out_tex_id = tex_id;
 
-    // Create ASurfaceTexture from the GL texture (caller does this via NDK API).
-    // The SurfaceTexture provides the ANativeWindow (Surface) for the VirtualDisplay.
-    // This is done in texture_blit.cpp.
+    // SurfaceTexture is created in Java (createVirtualDisplayFromTexture).
+    // Java passes it via NativeBridge.setSurfaceTexture(texId, st).
+    // We store the reference and get ANativeWindow at that point.
+    out_vd_surface = nullptr; // Set by set_surface_texture
     (void)display_w; (void)display_h;
-    out_vd_surface = nullptr; // caller sets this
     return true;
+}
+
+void EglCore::set_surface_texture(void* st) {
+    // Store a global ref to the Java SurfaceTexture
+    // ANativeWindow will be acquired from it for VD creation
+    surface_texture_ = st;
+}
+
+void EglCore::update_tex_image() {
+    // Java bridge calls SurfaceTexture.updateTexImage() from the Java side.
+    // This is done via NativeBridge.updateTexImage() called from the pipeline.
 }
 
 bool EglCore::make_current() {
@@ -198,30 +209,19 @@ void EglCore::begin_frame() {
 }
 
 void EglCore::destroy() {
+    if (vd_surface_) { ANativeWindow_release(vd_surface_); vd_surface_ = nullptr; }
+    surface_texture_ = nullptr; // Java-owned, released by GC
+
     if (display_ != EGL_NO_DISPLAY) {
         eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-
-        if (surface_ != EGL_NO_SURFACE) {
-            eglDestroySurface(display_, surface_);
-            surface_ = EGL_NO_SURFACE;
-        }
-        if (context_ != EGL_NO_CONTEXT) {
-            eglDestroyContext(display_, context_);
-            context_ = EGL_NO_CONTEXT;
-        }
+        if (surface_ != EGL_NO_SURFACE) { eglDestroySurface(display_, surface_); surface_ = EGL_NO_SURFACE; }
+        if (context_ != EGL_NO_CONTEXT) { eglDestroyContext(display_, context_); context_ = EGL_NO_CONTEXT; }
         eglTerminate(display_);
         display_ = EGL_NO_DISPLAY;
     }
 
-    if (program_) {
-        glDeleteProgram(program_);
-        program_ = 0;
-    }
-    if (input_tex_id_) {
-        glDeleteTextures(1, &input_tex_id_);
-        input_tex_id_ = 0;
-    }
-
+    if (program_) { glDeleteProgram(program_); program_ = 0; }
+    if (input_tex_id_) { glDeleteTextures(1, &input_tex_id_); input_tex_id_ = 0; }
     initialized_ = false;
 }
 

@@ -106,7 +106,14 @@ void AmcEncoder::stop() {
 int AmcEncoder::dequeue_output(AMediaCodecBufferInfo& info) {
     if (!codec_) return -1;
     ssize_t idx = AMediaCodec_dequeueOutputBuffer(codec_, &info, 0); // non-blocking
-    return (idx >= 0) ? static_cast<int>(idx) : -1;
+    if (idx >= 0) return static_cast<int>(idx);
+    // FORMAT_CHANGED means output format is ready — get it, then retry
+    if (idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
+        AMediaFormat* fmt = AMediaCodec_getOutputFormat(codec_);
+        if (fmt) AMediaFormat_delete(fmt);
+        return -1; // caller will retry next time
+    }
+    return -1; // INFO_TRY_AGAIN_LATER or error
 }
 
 uint8_t* AmcEncoder::get_output_buffer(int index, size_t& out_size) {
