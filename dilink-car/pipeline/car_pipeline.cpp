@@ -38,14 +38,18 @@ int CarPipeline::start(const char* phone_host, int video_port, int input_port,
 
     running_.store(true);
 
-    // Start epoll reader thread (waits for first CONFIG frame before starting decoder)
-    pthread_create(&epoll_thread_, nullptr, epoll_reader_thread, this);
+    // Start epoll reader thread
+    if (pthread_create(&epoll_thread_, nullptr, epoll_reader_thread, this) != 0) {
+        LOGE("Failed to create epoll thread");
+        running_.store(false);
+        epoll_thread_ = 0;
+        return -1;
+    }
 
-    // Wait for CONFIG frame (SPS/PPS needed to start decoder)
-    // config_data received via queue from epoll thread
+    // Wait for CONFIG frame
     int wait_ms = 0;
     while (running_.load() && queue_.empty() && wait_ms < 5000) {
-        struct timespec ts = {0, 10'000'000}; // 10ms
+        struct timespec ts = {0, 10'000'000};
         nanosleep(&ts, nullptr);
         wait_ms += 10;
     }
@@ -53,16 +57,15 @@ int CarPipeline::start(const char* phone_host, int video_port, int input_port,
     if (queue_.empty()) {
         LOGE("Timeout waiting for CONFIG frame");
         running_.store(false);
-        pthread_join(epoll_thread_, nullptr);
+        pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
         return -1;
     }
 
-    // Start decoder with config
     const FrameQueue::Slot* config = queue_.peek();
     if (!config || !config->is_config) {
         LOGE("First frame is not CONFIG");
         running_.store(false);
-        pthread_join(epoll_thread_, nullptr);
+        pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
         return -1;
     }
 
@@ -70,13 +73,19 @@ int CarPipeline::start(const char* phone_host, int video_port, int input_port,
                          encode_w, encode_h)) {
         LOGE("Failed to start decoder");
         running_.store(false);
-        pthread_join(epoll_thread_, nullptr);
+        pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
         return -1;
     }
-    queue_.consume(); // consume config
+    queue_.consume();
 
     // Start decoder thread
-    pthread_create(&decoder_thread_, nullptr, decoder_thread, this);
+    if (pthread_create(&decoder_thread_, nullptr, decoder_thread, this) != 0) {
+        LOGE("Failed to create decoder thread");
+        running_.store(false);
+        decoder_thread_ = 0;
+        pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
+        return -1;
+    }
 
     LOGI("Car pipeline started: %d×%d → %s:%d+%d",
          encode_w, encode_h, phone_host, video_port, input_port);
@@ -89,11 +98,11 @@ void CarPipeline::stop() {
     video_tcp_.close_conn();
     input_tcp_.close_conn();
 
-    if (epoll_thread_) {
+    if (epoll_thread_ != 0) {
         pthread_join(epoll_thread_, nullptr);
         epoll_thread_ = 0;
     }
-    if (decoder_thread_) {
+    if (decoder_thread_ != 0) {
         pthread_join(decoder_thread_, nullptr);
         decoder_thread_ = 0;
     }

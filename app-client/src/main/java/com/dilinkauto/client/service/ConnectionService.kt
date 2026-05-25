@@ -104,12 +104,17 @@ class ConnectionService : Service() {
         FileLog.i(TAG, "Daemon lifecycle listener on :${VirtualDisplayClient.SERVER_PORT}")
 
         // Accept daemon connections in a loop. Each connection signals daemon readiness.
+        // Waits for disconnect before re-accepting.
         serviceScope.launch(Dispatchers.IO) {
             while (vdClient != null) {
-                if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
-                    FileLog.i(TAG, "Daemon lifecycle connected (displayId=${client.displayId})")
+                if (!client.isConnected) {
+                    client.startListening(VirtualDisplayClient.SERVER_PORT)
+                    client.acceptConnection(VirtualDisplayClient.SERVER_PORT)
+                    // acceptConnection returns when daemon connects (success) or times out.
+                    // On success, startCommandRelay runs until daemon disconnects.
+                    // On timeout, loop retries (startListening reopens if needed).
                 } else {
-                    delay(1000) // retry after timeout
+                    delay(1000) // daemon is connected, wait for disconnect
                 }
             }
         }
@@ -550,9 +555,9 @@ class ConnectionService : Service() {
                     FileLog.w(TAG, "Failed to deploy .so via Shizuku: ${e.message}")
                 }
 
-                // setsid detaches daemon from Shizuku's process group so it survives
-                // sh -c exit. Without this, Shizuku kills the entire process group.
-                val cmd = "setsid LD_LIBRARY_PATH=/data/local/tmp " +
+                // env sets vars before setsid; & backgrounds so shell exits quickly.
+                // Shizuku execAndWait reads shell's rapid exit, daemon survives via setsid.
+                val cmd = "setsid env LD_LIBRARY_PATH=/data/local/tmp " +
                         "CLASSPATH=$jarPath app_process / " +
                         "com.dilinkauto.vdserver.DaemonEntry $args" +
                         " >$logFile 2>&1 &"

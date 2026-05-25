@@ -118,9 +118,6 @@ class VirtualDisplayClient(
             } catch (e: Exception) {
                 FileLog.e(TAG, "VD accept failed: ${e.message}")
                 false
-            } finally {
-                try { serverChannel?.close() } catch (_: Exception) {}
-                serverChannel = null
             }
         }
     }
