@@ -18,11 +18,10 @@ bool init_bridge(JNIEnv* env, jobject bridge_obj);
 
 // ── Bridge calls (these up-call to Java) ──
 
-// Create a VirtualDisplay with the given parameters.
-// surface: ANativeWindow from SurfaceTexture (created by native EGL).
+// Create a VirtualDisplay. Java creates SurfaceTexture(tex_id) + Surface + VD.
 // Returns display ID, or -1 on failure.
 int create_virtual_display(JNIEnv* env, int width, int height, int dpi,
-                            jobject surface);
+                            uint32_t tex_id);
 
 // Inject a MotionEvent via IInputManager.
 bool inject_motion_event(JNIEnv* env, int action, int display_id,

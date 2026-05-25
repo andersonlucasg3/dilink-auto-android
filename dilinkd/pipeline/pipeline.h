@@ -32,24 +32,26 @@ public:
     Pipeline(const Pipeline&) = delete;
     Pipeline& operator=(const Pipeline&) = delete;
 
-    // Start the pipeline. Blocks until stopped (runs on calling thread).
+    // Phase 1: Initialize encoder + EGL + GL texture for SurfaceTexture.
+    // Returns the GL texture ID. Caller creates SurfaceTexture(texId) + Surface
+    // in Java, then creates VirtualDisplay with that Surface.
+    GLuint init(const PipelineConfig& config);
+
+    // Phase 2: Run the pipeline loop. Blocks until stopped.
+    // Call on the pipeline thread. VD must be created before calling this.
     // Returns 0 on clean exit, -1 on fatal error.
-    int run(const PipelineConfig& config);
+    int run_loop();
 
     // Signal stop from another thread.
     void stop();
 
     // Whether the pipeline is actively running.
     bool is_running() const { return running_; }
+    bool is_initialized() const { return initialized_; }
 
     // Set car connections (set by main thread after accept).
     void set_car_video(TcpStream* stream) { car_video_ = stream; }
     void set_car_input(TcpStream* stream) { car_input_ = stream; }
-
-    // Touch injection callback (called from touch reader thread).
-    // The pipeline thread handles frame encoding; touch injection happens
-    // on a separate touch reader thread via JNI up-call.
-    // These are set by main() after pipeline starts.
 
 private:
     struct TouchState {

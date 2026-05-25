@@ -31,8 +31,8 @@ bool init_bridge(JNIEnv* env, jobject bridge_obj) {
     jclass cls = env->GetObjectClass(bridge_obj);
     g_bridge_class = static_cast<jclass>(env->NewGlobalRef(cls));
 
-    g_create_vd_method = env->GetMethodID(g_bridge_class, "createVirtualDisplay",
-                                           "(IIILandroid/view/Surface;)I");
+    g_create_vd_method = env->GetMethodID(g_bridge_class, "createVirtualDisplayFromTexture",
+                                           "(IIII)I");
     g_inject_input_method = env->GetMethodID(g_bridge_class, "injectMotionEvent",
                                               "(IILjava/lang/String;)Z");
     g_display_power_method = env->GetMethodID(g_bridge_class, "setDisplayPower",
@@ -53,11 +53,11 @@ bool init_bridge(JNIEnv* env, jobject bridge_obj) {
 }
 
 int create_virtual_display(JNIEnv* env, int width, int height, int dpi,
-                            jobject surface) {
+                            uint32_t tex_id) {
     if (!g_create_vd_method || !g_bridge_obj) return -1;
 
     jint id = env->CallIntMethod(g_bridge_obj, g_create_vd_method,
-                                  width, height, dpi, surface);
+                                  tex_id, width, height, dpi);
     if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
         env->ExceptionClear();

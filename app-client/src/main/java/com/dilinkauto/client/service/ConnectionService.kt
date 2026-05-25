@@ -127,11 +127,11 @@ class ConnectionService : Service() {
             dir.mkdirs()
             extractAsset("vd-server.jar", java.io.File(dir, "vd-server.jar"))
 
-            // Deploy native library for the correct ABI
+            // Deploy native library to /data/local/tmp (executable, unlike /sdcard which is noexec)
             val abi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
             try {
                 extractAsset("native/${abi}/libdilinkd.so",
-                    java.io.File(dir, "libdilinkd.so"))
+                    java.io.File("/data/local/tmp/libdilinkd.so"))
             } catch (e: Exception) {
                 FileLog.w(TAG, "Native lib not bundled for $abi")
             }
@@ -470,27 +470,26 @@ class ConnectionService : Service() {
                     FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
                 }
 
-                // Wait for VD to connect on the lifecycle channel already opened.
-                // Runs inside handshakeJob — cancelled properly on reconnect.
-                val client = vdClient ?: return@launch
-                if (!client.isConnected) {
-                    if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
-                        FileLog.i(TAG, "VD server lifecycle connected (displayId=${client.displayId})")
-                        InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
-                        withContext(Dispatchers.Main) {
-                            _serviceState.value = State.STREAMING
-                            updateNotification(R.string.notification_streaming)
-                        }
-                        sendAppList()
-                    } else {
-                        FileLog.w(TAG, "VD server did not connect within timeout")
-                    }
-                }
-
-                // If Shizuku is available, deploy VD server directly
+                // Daemon path: launch via Shizuku if available, else car deploys via ADB.
+                // Daemon binds 9638/9639 on 0.0.0.0 — no localhost relay, no VirtualDisplayClient.
                 if (ShizukuManager.isAvailable) {
                     startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
+                    delay(2000)
+                    try {
+                        conn.sendControl(ControlMsg.VD_PORTS_BOUND)
+                        FileLog.i(TAG, "Sent VD_PORTS_BOUND to car")
+                    } catch (e: Exception) {
+                        FileLog.w(TAG, "Failed to send VD_PORTS_BOUND: ${e.message}")
+                    }
+                } else {
+                    FileLog.w(TAG, "Shizuku not available — car will deploy daemon via ADB")
                 }
+
+                withContext(Dispatchers.Main) {
+                    _serviceState.value = State.STREAMING
+                    updateNotification(R.string.notification_streaming)
+                }
+                sendAppList()
             }
         }
     }
@@ -515,21 +514,37 @@ class ConnectionService : Service() {
                 val diLinkDir = java.io.File(
                     android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
                 val jarPath = java.io.File(diLinkDir, "vd-server.jar").absolutePath
-                val soPath = java.io.File(diLinkDir, "libdilinkd.so").absolutePath
                 val logFile = "/sdcard/DiLinkAuto/vd-server.log"
                 // Args: W H DPI PHONE_HOST EW EH FPS
                 val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps"
 
                 ShizukuManager.execAndWait("pkill -f DaemonEntry 2>/dev/null")
-                ShizukuManager.execAndWait("pkill -f PipelineServer 2>/dev/null")
                 delay(200)
 
-                // LD_LIBRARY_PATH enables System.loadLibrary("dilinkd") in DaemonEntry
-                val cmd = "LD_LIBRARY_PATH=${diLinkDir.absolutePath} " +
+                // Deploy .so to /data/local/tmp (executable; /sdcard is noexec)
+                // The .so is bundled in the APK assets; extract via Shizuku which has shell access.
+                val cpuAbi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
+                val soAssetPath = "native/${cpuAbi}/libdilinkd.so"
+                val soTmp = "/data/local/tmp/libdilinkd.so"
+                // Read from APK assets via Shizuku: copy from app's internal storage if already extracted
+                val appSoPath = "${filesDir.absolutePath}/libdilinkd.so"
+                try {
+                    // Write .so to app-private dir (we can write here), then Shizuku copies to /data/local/tmp
+                    val soBytes = assets.open(soAssetPath).use { it.readBytes() }
+                    java.io.File(appSoPath).writeBytes(soBytes)
+                    ShizukuManager.execAndWait("cp $appSoPath $soTmp && chmod 644 $soTmp")
+                    FileLog.i(TAG, "Native .so deployed to $soTmp (${soBytes.size} bytes)")
+                } catch (e: Exception) {
+                    FileLog.w(TAG, "Failed to deploy .so via Shizuku: ${e.message}")
+                }
+
+                // setsid detaches daemon from Shizuku's process group so it survives
+                // sh -c exit. Without this, Shizuku kills the entire process group.
+                val cmd = "setsid LD_LIBRARY_PATH=/data/local/tmp " +
                         "CLASSPATH=$jarPath app_process / " +
                         "com.dilinkauto.vdserver.DaemonEntry $args" +
                         " >$logFile 2>&1 &"
-                ShizukuManager.execBackground(cmd)
+                ShizukuManager.execAndWait(cmd)
                 FileLog.i(TAG, "Native daemon started via Shizuku: ${vdWidth}x${vdHeight}")
             } catch (e: Exception) {
                 FileLog.e(TAG, "Shizuku daemon start failed", e)

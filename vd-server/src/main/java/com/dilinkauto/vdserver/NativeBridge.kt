@@ -41,8 +41,22 @@ class NativeBridge {
     // ── VirtualDisplay Creation ──
 
     /**
-     * Create a VirtualDisplay with the given parameters.
-     * Called from native code after EGL creates the input Surface.
+     * Create a VirtualDisplay from a GL texture ID.
+     * Creates SurfaceTexture(texId) + Surface, then creates VD with reflection.
+     * Called from native code after EGL creates the GL texture.
+     *
+     * @return display ID, or -1 on failure
+     */
+    fun createVirtualDisplayFromTexture(texId: Int, width: Int, height: Int, dpi: Int): Int {
+        val st = android.graphics.SurfaceTexture(texId)
+        st.setDefaultBufferSize(width, height)
+        val surface = Surface(st)
+        return createVirtualDisplay(width, height, dpi, surface)
+    }
+
+    /**
+     * Create a VirtualDisplay with the given Surface.
+     * Called from createVirtualDisplayFromTexture or externally.
      *
      * @return display ID, or -1 on failure
      */

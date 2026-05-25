@@ -824,7 +824,7 @@ class CarConnectionService : Service() {
             val vdH = viewportHeight and 0x7FFFFFFE.toInt()
 
             val jarPath = vdServerJarPath
-            val libDir = java.io.File(vdServerJarPath).parent ?: "/sdcard/DiLinkAuto"
+            val libDir = "/data/local/tmp"
 
             val logFile = "/sdcard/DiLinkAuto/vd-server.log"
             // Args: W H DPI PHONE_HOST EW EH FPS — daemon binds 9638/9639 for car
@@ -852,8 +852,17 @@ class CarConnectionService : Service() {
             }
 
             vdServerStarted = true
-            _statusMessage.value = getString(R.string.status_waiting_video)
-            carLogSend("Native daemon started, waiting for video")
+
+            // Daemon is running on phone. Connect car to its video+input ports.
+            delay(1000)
+            val host = phoneHost
+            if (host != null) {
+                _statusMessage.value = getString(R.string.status_waiting_video)
+                carLogSend("Native daemon started, connecting video+input to $host...")
+                connectVideoAndInput(host)
+            } else {
+                carLogSend("ERROR: phoneHost null after daemon start")
+            }
         }
     }
 
@@ -1099,7 +1108,7 @@ class CarConnectionService : Service() {
         carLogSend("Native daemon: ${vdW}x${vdH}@${phoneDpi}dpi")
         controller.shell("pkill -f DaemonEntry 2>/dev/null")
         controller.shell("pkill -f PipelineServer 2>/dev/null")
-        val cmd = "LD_LIBRARY_PATH=/sdcard/DiLinkAuto " +
+        val cmd = "LD_LIBRARY_PATH=/data/local/tmp " +
                 "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
                 "com.dilinkauto.vdserver.DaemonEntry $args" +
                 " >/sdcard/DiLinkAuto/vd-server.log 2>&1"
@@ -1107,7 +1116,15 @@ class CarConnectionService : Service() {
         val ok = streamId >= 0
         _statusMessage.value = getString(R.string.status_starting_vd)
         if (ok) {
-            carLogSend("Native daemon started, waiting for video")
+            carLogSend("Native daemon started, connecting video+input...")
+            // Wait for daemon to bind ports, then connect via native pipeline
+            delay(1000)
+            val host = phoneHost
+            if (host != null) {
+                connectVideoAndInput(host)
+            } else {
+                carLogSend("ERROR: phoneHost is null, cannot connect video+input", "E")
+            }
         } else {
             carLogSend("Native daemon failed to start", "E")
             vdServerStarted = false  // Allow retry

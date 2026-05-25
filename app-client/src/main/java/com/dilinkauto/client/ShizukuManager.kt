@@ -31,6 +31,7 @@ object ShizukuManager {
         private set
 
     private var listenersRegistered = false
+    private var daemonProcess: Any? = null // keep alive to prevent GC kill (IRemoteProcess)
 
     fun init(context: Context) {
         if (listenersRegistered) return
@@ -162,7 +163,7 @@ object ShizukuManager {
         if (!isAvailable) return
         try {
             val service = getService() ?: return
-            service.newProcess(arrayOf("sh", "-c", "$command &"), null, null)
+            daemonProcess = service.newProcess(arrayOf("sh", "-c", command), null, null)
         } catch (e: Exception) {
             FileLog.w(TAG, "Shizuku execBackground failed: ${e.message}")
         }

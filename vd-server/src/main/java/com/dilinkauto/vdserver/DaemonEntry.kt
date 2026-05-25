@@ -17,14 +17,14 @@ import android.os.Looper
 object DaemonEntry {
 
     init {
-        // Try deployed path first (alongside JAR), then standard path
+        // /data/local/tmp is executable; /sdcard is noexec
         try {
-            System.load("/sdcard/DiLinkAuto/libdilinkd.so")
+            System.load("/data/local/tmp/libdilinkd.so")
         } catch (e: UnsatisfiedLinkError) {
             try {
-                System.load("/data/local/tmp/libdilinkd.so")
-            } catch (e2: UnsatisfiedLinkError) {
                 System.loadLibrary("dilinkd")
+            } catch (e2: UnsatisfiedLinkError) {
+                System.load("/sdcard/DiLinkAuto/libdilinkd.so")
             }
         }
     }
