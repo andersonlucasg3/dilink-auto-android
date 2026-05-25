@@ -852,17 +852,8 @@ class CarConnectionService : Service() {
             }
 
             vdServerStarted = true
-
-            // Daemon is running on phone. Connect car to its video+input ports.
-            delay(1000)
-            val host = phoneHost
-            if (host != null) {
-                _statusMessage.value = getString(R.string.status_waiting_video)
-                carLogSend("Native daemon started, connecting video+input to $host...")
-                connectVideoAndInput(host)
-            } else {
-                carLogSend("ERROR: phoneHost null after daemon start")
-            }
+            _statusMessage.value = getString(R.string.status_waiting_video)
+            carLogSend("Native daemon started, waiting for VD_PORTS_BOUND")
         }
     }
 
@@ -1108,23 +1099,16 @@ class CarConnectionService : Service() {
         carLogSend("Native daemon: ${vdW}x${vdH}@${phoneDpi}dpi")
         controller.shell("pkill -f DaemonEntry 2>/dev/null")
         controller.shell("pkill -f PipelineServer 2>/dev/null")
+        // & backgrounds daemon so it survives ADB stream closure
         val cmd = "LD_LIBRARY_PATH=/data/local/tmp " +
                 "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
                 "com.dilinkauto.vdserver.DaemonEntry $args" +
-                " >/sdcard/DiLinkAuto/vd-server.log 2>&1"
+                " >/sdcard/DiLinkAuto/vd-server.log 2>&1 &"
         val streamId = controller.shellBackground(cmd)
         val ok = streamId >= 0
         _statusMessage.value = getString(R.string.status_starting_vd)
         if (ok) {
-            carLogSend("Native daemon started, connecting video+input...")
-            // Wait for daemon to bind ports, then connect via native pipeline
-            delay(1000)
-            val host = phoneHost
-            if (host != null) {
-                connectVideoAndInput(host)
-            } else {
-                carLogSend("ERROR: phoneHost is null, cannot connect video+input", "E")
-            }
+            carLogSend("Native daemon started, waiting for VD_PORTS_BOUND")
         } else {
             carLogSend("Native daemon failed to start", "E")
             vdServerStarted = false  // Allow retry

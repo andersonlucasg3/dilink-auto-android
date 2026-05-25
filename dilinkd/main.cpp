@@ -149,9 +149,34 @@ Java_com_dilinkauto_vdserver_DaemonEntry_nativeRun(
         " -a android.intent.action.MAIN -c android.intent.category.HOME");
     jni::exec_shell(env, "settings put system screen_off_timeout 2147483647");
 
-    // ── Phase 3: Start TCP servers, accept car ──
+    // ── Phase 3: Bind TCP servers, signal phone we're ready ──
     if (!g_video_server.listen(9638)) { LOGE("Bind :9638 failed"); return -1; }
     if (!g_input_server.listen(9639)) { LOGE("Bind :9639 failed"); return -1; }
+
+    // Signal phone app that daemon is ready (ports bound, VD created).
+    // Phone receives this via VirtualDisplayClient on 19647 and sends
+    // VD_PORTS_BOUND to car. Car then calls nativeStart to connect.
+    {
+        TcpStream signal;
+        char signal_host[256];
+        snprintf(signal_host, sizeof(signal_host), "%s", g_config.phone_host);
+        if (signal.connect(signal_host, 19647, 5000)) {
+            uint8_t ready_msg[7];
+            ready_msg[0] = protocol::MSG_DISPLAY_READY; // 0x10
+            ready_msg[1] = static_cast<uint8_t>((display_id >> 24) & 0xFF);
+            ready_msg[2] = static_cast<uint8_t>((display_id >> 16) & 0xFF);
+            ready_msg[3] = static_cast<uint8_t>((display_id >> 8) & 0xFF);
+            ready_msg[4] = static_cast<uint8_t>(display_id & 0xFF);
+            ready_msg[5] = 1; // hasInputInjection = true
+            ready_msg[6] = 0;
+            signal.write_all(ready_msg, 7);
+            signal.close_client();
+            LOGI("Sent MSG_DISPLAY_READY to phone at %s:19647 (displayId=%d)",
+                 signal_host, display_id);
+        } else {
+            LOGI("Phone lifecycle not available, daemon still ready");
+        }
+    }
 
     LOGI("Waiting for car connections...");
     if (!g_video_server.accept(30000)) { LOGE("Car video timeout"); return -1; }

@@ -21,6 +21,10 @@ public:
     // Bind and listen on the given port. Non-blocking.
     bool listen(int port);
 
+    // Connect to host:port as a client (for signaling, etc).
+    // Returns true when connected.
+    bool connect(const char* host, int port, int timeout_ms = 5000);
+
     // Accept a single connection with timeout (milliseconds).
     // Returns true when connected.
     bool accept(int timeout_ms);

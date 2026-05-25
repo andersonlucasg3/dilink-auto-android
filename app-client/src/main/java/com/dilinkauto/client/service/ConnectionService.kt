@@ -67,6 +67,52 @@ class ConnectionService : Service() {
         deployAssets()
         logDeviceInfo()
         UpdateManager.checkForUpdate(force = false)
+
+        // Start persistent daemon lifecycle listener. Daemon connects on :19647
+        // when VD is created and ports are bound. Triggers VD_PORTS_BOUND to car.
+        startDaemonLifecycleListener()
+    }
+
+    private fun startDaemonLifecycleListener() {
+        if (vdClient != null) return // already running
+        val client = VirtualDisplayClient(serviceScope, this@ConnectionService)
+        client.onDisplayReady = {
+            val c = controlConnection
+            if (c?.isConnected == true) {
+                try {
+                    c.sendControl(ControlMsg.VD_PORTS_BOUND)
+                    FileLog.i(TAG, "Daemon ready — sent VD_PORTS_BOUND to car")
+                } catch (e: Exception) {
+                    FileLog.e(TAG, "Failed to send VD_PORTS_BOUND", e)
+                }
+            }
+        }
+        client.onStackEmpty = {
+            val c = controlConnection
+            if (c?.isConnected == true) {
+                try { c.sendControl(ControlMsg.VD_STACK_EMPTY) } catch (_: Exception) {}
+            }
+        }
+        client.onFocusedApp = { pkg ->
+            val c = controlConnection
+            if (c?.isConnected == true) {
+                try { c.sendControl(ControlMsg.FOCUSED_APP, pkg.toByteArray(Charsets.UTF_8)) } catch (_: Exception) {}
+            }
+        }
+        client.startListening(VirtualDisplayClient.SERVER_PORT)
+        vdClient = client
+        FileLog.i(TAG, "Daemon lifecycle listener on :${VirtualDisplayClient.SERVER_PORT}")
+
+        // Accept daemon connections in a loop. Each connection signals daemon readiness.
+        serviceScope.launch(Dispatchers.IO) {
+            while (vdClient != null) {
+                if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
+                    FileLog.i(TAG, "Daemon lifecycle connected (displayId=${client.displayId})")
+                } else {
+                    delay(1000) // retry after timeout
+                }
+            }
+        }
     }
 
     private fun logDeviceInfo() {
@@ -366,36 +412,8 @@ class ConnectionService : Service() {
         val vdHeight = request.screenHeight and 0x7FFFFFFE.toInt()
         FileLog.i(TAG, "VD: ${vdWidth}x${vdHeight} @${displayDpi}dpi (car-native res, no downscale)")
 
-        // Open lifecycle channel if not already open (survives re-handshakes)
-        if (vdClient == null) {
-            val lifecycleClient = VirtualDisplayClient(serviceScope, this@ConnectionService)
-            lifecycleClient.onStackEmpty = {
-            val c = controlConnection
-            if (c?.isConnected == true) {
-                try { c.sendControl(ControlMsg.VD_STACK_EMPTY) } catch (_: Exception) {}
-            }
-        }
-        lifecycleClient.onFocusedApp = { pkg ->
-            val c = controlConnection
-            if (c?.isConnected == true) {
-                try { c.sendControl(ControlMsg.FOCUSED_APP, pkg.toByteArray(Charsets.UTF_8)) } catch (_: Exception) {}
-            }
-        }
-        lifecycleClient.onDisplayReady = {
-            val c = controlConnection
-            if (c?.isConnected == true) {
-                try {
-                    c.sendControl(ControlMsg.VD_PORTS_BOUND)
-                    FileLog.i(TAG, "Sent VD_PORTS_BOUND to car — direct video/input streaming")
-                } catch (e: Exception) {
-                    FileLog.e(TAG, "Failed to send VD_PORTS_BOUND", e)
-                }
-            }
-        }
-            lifecycleClient.startListening(VirtualDisplayClient.SERVER_PORT)
-            vdClient = lifecycleClient
-            FileLog.i(TAG, "VD lifecycle channel open on localhost:${VirtualDisplayClient.SERVER_PORT}")
-        }
+        // Daemon lifecycle listener is persistent (started in onStartCommand).
+        // It accepts daemon connections on :19647 and triggers VD_PORTS_BOUND.
 
         val vdJarPath = java.io.File(
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
@@ -470,19 +488,13 @@ class ConnectionService : Service() {
                     FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
                 }
 
-                // Daemon path: launch via Shizuku if available, else car deploys via ADB.
-                // Daemon binds 9638/9639 on 0.0.0.0 — no localhost relay, no VirtualDisplayClient.
+                // Launch daemon via Shizuku if available. Daemon will connect to the
+                // persistent lifecycle listener on :19647 when VD + ports are ready.
+                // Listener triggers VD_PORTS_BOUND to car automatically.
                 if (ShizukuManager.isAvailable) {
                     startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
-                    delay(2000)
-                    try {
-                        conn.sendControl(ControlMsg.VD_PORTS_BOUND)
-                        FileLog.i(TAG, "Sent VD_PORTS_BOUND to car")
-                    } catch (e: Exception) {
-                        FileLog.w(TAG, "Failed to send VD_PORTS_BOUND: ${e.message}")
-                    }
                 } else {
-                    FileLog.w(TAG, "Shizuku not available — car will deploy daemon via ADB")
+                    FileLog.i(TAG, "Shizuku not available — car will deploy daemon via ADB")
                 }
 
                 withContext(Dispatchers.Main) {

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
+#include <poll.h>
 
 #define LOG_TAG "dilinkd.TcpStream"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -56,6 +57,38 @@ bool TcpStream::listen(int port) {
     set_nonblocking(server_fd_);
     port_ = port;
     LOGI("Listening on :%d", port);
+    return true;
+}
+
+bool TcpStream::connect(const char* host, int port, int timeout_ms) {
+    client_fd_ = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (client_fd_ < 0) { LOGE("socket() failed: %s", strerror(errno)); return false; }
+
+    set_nonblocking(client_fd_);
+    set_socket_options();
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
+        LOGE("inet_pton(%s) failed", host); close_client(); return false;
+    }
+
+    int ret = ::connect(client_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    if (ret < 0 && errno != EINPROGRESS) {
+        LOGE("connect(%s:%d) failed: %s", host, port, strerror(errno));
+        close_client(); return false;
+    }
+
+    pollfd pfd{client_fd_, POLLOUT, 0};
+    int pr = poll(&pfd, 1, timeout_ms);
+    if (pr <= 0) { LOGE("connect(%s:%d) timeout", host, port); close_client(); return false; }
+
+    int sock_err = 0; socklen_t err_len = sizeof(sock_err);
+    getsockopt(client_fd_, SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
+    if (sock_err != 0) { close_client(); return false; }
+
+    LOGI("Connected to %s:%d", host, port);
     return true;
 }
 
