@@ -24,27 +24,24 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 extern "C" JNIEXPORT jint JNICALL
 Java_com_dilinkauto_server_NativeCarBridge_nativeStart(
     JNIEnv* env, jclass,
-    jstring phone_host, jint video_port, jint input_port,
+    jint video_port, jint input_port,
     jobject surface_obj,
     jint display_w, jint display_h,
     jint encode_w, jint encode_h) {
-
-    const char* host = env->GetStringUTFChars(phone_host, nullptr);
 
     ANativeWindow* surface = nullptr;
     if (surface_obj) {
         surface = ANativeWindow_fromSurface(env, surface_obj);
     }
 
-    int result = g_pipeline.start(host, video_port, input_port,
+    int result = g_pipeline.start(video_port, input_port,
                                    surface,
                                    display_w, display_h,
                                    encode_w, encode_h);
 
-    env->ReleaseStringUTFChars(phone_host, host);
-
     if (result != 0) {
         LOGE("nativeStart failed: %d", result);
+        g_pipeline.stop();  // Clean up any bound sockets
     }
 
     return result;

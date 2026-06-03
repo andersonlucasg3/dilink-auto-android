@@ -199,6 +199,7 @@ fun CarShell(service: CarConnectionService) {
     }
 
     val showStreamingMode = appList.isNotEmpty() && isConnected
+    android.util.Log.i("CarShell", "showStreamingMode=$showStreamingMode appList=${appList.size} state=$state isConnected=$isConnected")
 
     if (showStreamingMode) {
         Row(

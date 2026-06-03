@@ -20,6 +20,22 @@ public:
     // Connect to host:port. Non-blocking with timeout.
     bool connect(const char* host, int port, int timeout_ms = 5000);
 
+    // Listen on port (server mode for reversed connection).
+    bool listen(int port);
+
+    // Accept a single connection with timeout (milliseconds).
+    bool accept(int timeout_ms);
+
+    // Server fd for accept.
+    int server_fd() const { return server_fd_; }
+    bool is_listening() const { return server_fd_ >= 0; }
+
+    // Close only the client connection, keep server fd.
+    void close_client();
+
+    // Close both client and server fds.
+    void close_all();
+
     // Read available data. Returns bytes read, 0 if none, -1 on error/EOF.
     ssize_t read_some(uint8_t* buffer, size_t max_size);
 
@@ -38,6 +54,7 @@ public:
 
 private:
     int fd_ = -1;
+    int server_fd_ = -1;
     bool connected_ = false;
 };
 

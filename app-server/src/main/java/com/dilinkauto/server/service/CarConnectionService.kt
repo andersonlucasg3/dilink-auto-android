@@ -13,6 +13,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
@@ -65,6 +66,14 @@ class CarConnectionService : Service() {
                     .getBoolean("dev_mode", false)
         set(value) = getSharedPreferences("dilinkauto", MODE_PRIVATE)
             .edit().putBoolean("dev_mode", value).apply()
+
+    val devAdbPort: Int
+        get() = getSharedPreferences("dilinkauto", MODE_PRIVATE)
+            .getString("dev_adb_port", null)?.toIntOrNull() ?: 5555
+
+    val devAdbHost: String?
+        get() = getSharedPreferences("dilinkauto", MODE_PRIVATE)
+            .getString("dev_adb_host", null)
 
     // ─── Handshake ───
     private var handshakeVdDpi = VideoConfig.VIRTUAL_DISPLAY_DPI // DPI from phone (may be adjusted for DeX)
@@ -211,6 +220,7 @@ class CarConnectionService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, buildNotification(R.string.notification_searching))
+                userDisconnected = false
                 startConnection()
             }
             ACTION_CONNECT -> {
@@ -256,6 +266,7 @@ class CarConnectionService : Service() {
         vdServerStarted = false
         shizukuMode = false
         vdDeployRetries = 0
+        noAdbCount = 0
         handshakeDone = false
         _videoReady.value = false
         if (usbAdb?.isConnected != true) {
@@ -414,7 +425,7 @@ class CarConnectionService : Service() {
      * Opens video and input connections after handshake succeeds.
      * Called from handleControlFrame when HANDSHAKE_RESPONSE is received.
      */
-    private fun connectVideoAndInput(host: String) {
+    private fun connectVideoAndInput() {
         if (updatingFromPhone) {
             carLogSend("Skipping video/input connections — update in progress")
             return
@@ -425,13 +436,13 @@ class CarConnectionService : Service() {
                     carLogSend("Skipping video/input connections — update flag set during launch")
                     return@launch
                 }
-                carLogSend("Starting native car pipeline to $host:${Discovery.VIDEO_PORT}+${Discovery.INPUT_PORT}")
+                carLogSend("Starting native car pipeline (listening on ${Discovery.VIDEO_PORT}+${Discovery.INPUT_PORT})")
 
                 // Native pipeline handles: TCP connect → H.264 decode → Surface render
                 // and touch encode → TCP send. No Kotlin NIO connections or VideoDecoder.
                 // Surface is set later when MirrorScreen provides TextureView.
                 val result = NativeCarBridge.nativeStart(
-                    host, Discovery.VIDEO_PORT, Discovery.INPUT_PORT,
+                    Discovery.VIDEO_PORT, Discovery.INPUT_PORT,
                     null, // surface — set later when TextureView is ready
                     displayWidth = vdWidth,
                     displayHeight = vdHeight,
@@ -442,11 +453,14 @@ class CarConnectionService : Service() {
                 if (result == 0) {
                     carLogSend("Native car pipeline started")
                     _videoReady.value = true
-                    wifiReady = true
                     checkAndAdvance()
                 } else {
-                    carLogSend("Native car pipeline failed to start: $result", "E")
-                    handleDisconnect()
+                    carLogSend("Native car pipeline failed to start: $result — retrying", "E")
+                    delay(3000)
+                    if (_state.value == State.CONNECTED || _state.value == State.CONNECTING) {
+                        carLogSend("Retrying native pipeline...")
+                        connectVideoAndInput()
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -491,7 +505,11 @@ class CarConnectionService : Service() {
     private fun startTcpAdbTrack() {
         if (tcpAdbConnecting) return
         // Reconnect if phone IP changed since last ADB connection
-        if (adbController?.isConnected == true && lastAdbHost == phoneHost) return
+        if (adbController?.isConnected == true && lastAdbHost == phoneHost) {
+            usbReady = true
+            checkAndAdvance()
+            return
+        }
         if (adbController?.isConnected == true && lastAdbHost != phoneHost && phoneHost != null) {
             carLogSend("Dev mode: phone IP changed $lastAdbHost -> $phoneHost, reconnecting TCP ADB")
             adbController?.disconnect()
@@ -505,7 +523,7 @@ class CarConnectionService : Service() {
                 while (isActive && !usbReady && _state.value == State.CONNECTING && attempts < 60) {
                     val host = phoneHost
                     if (host != null) {
-                        carLogSend("Dev mode: TCP ADB connecting to $host:5555 (attempt ${attempts + 1})")
+                        carLogSend("Dev mode: TCP ADB connecting to ${devAdbHost ?: host}:$devAdbPort (attempt ${attempts + 1})")
                         connectTcpAdb(host)
                         if (adbController?.isConnected == true) {
                             lastAdbHost = host
@@ -533,22 +551,24 @@ class CarConnectionService : Service() {
 
         _statusMessage.value = getString(R.string.status_connecting_tcp_adb, host)
         val keyDir = java.io.File(filesDir, "adb_keys")
+        val adbHost = if (devMode) (devAdbHost ?: host) else host
+        val adbPort = if (devMode) devAdbPort else 5555
         val controller = RemoteAdbController(
-            phoneHost = host,
-            adbPort = 5555,
+            phoneHost = adbHost,
+            adbPort = adbPort,
             virtualDisplayId = -1,
             keyDir = keyDir
         )
 
         if (!controller.connect()) {
             _statusMessage.value = getString(R.string.status_tcp_adb_failed)
-            carLogSend("Dev mode: TCP ADB connection failed to $host:5555")
+            carLogSend("Dev mode: TCP ADB connection failed to $adbHost:$adbPort")
             return
         }
 
         adbController = controller
         _statusMessage.value = getString(R.string.status_tcp_adb_connected)
-        carLogSend("Dev mode: TCP ADB connected to $host:5555")
+        carLogSend("Dev mode: TCP ADB connected to $adbHost:$adbPort")
 
         usbReady = true
         noAdbCount = 0  // Reset — ADB is available now
@@ -669,24 +689,21 @@ class CarConnectionService : Service() {
                 }
 
                 handshakeDone = true  // Stop WiFi gateway retry loop
+                wifiReady = true  // Control connection established via WiFi
                 if (response.connectionMethod == CONNECTION_METHOD_SHIZUKU) {
                     shizukuMode = true
                     carLogSend("Shizuku mode — phone will deploy VD server, waiting for VD_PORTS_BOUND")
                 } else {
                     // Car deploys VD server via ADB (USB or TCP).
-                    // Don't deploy here — ADB may not be ready yet.
-                    // connectTcpAdb() will call deployVdServer() once ADB connects.
-                    carLogSend("Handshake OK — waiting for ADB to deploy VD server")
+                    // Deploy now if ADB is available; otherwise connectTcpAdb will retry.
+                    carLogSend("Handshake OK — deploying VD server")
+                    deployVdServer()
                 }
+                checkAndAdvance()  // Transition to CONNECTED so UI shows streaming mode
             }
             ControlMsg.VD_PORTS_BOUND -> {
-                carLogSend("VD ports bound — connecting video and input directly to VD server")
-                val host = phoneHost
-                if (host != null) {
-                    connectVideoAndInput(host)
-                } else {
-                    carLogSend("ERROR: phoneHost is null when VD_PORTS_BOUND received")
-                }
+                carLogSend("VD ports bound — starting native pipeline (listening)")
+                connectVideoAndInput()
             }
             ControlMsg.APP_STARTED -> {}
             ControlMsg.UPDATING_CAR -> {
@@ -827,34 +844,56 @@ class CarConnectionService : Service() {
             val libDir = "/data/local/tmp"
 
             val logFile = "/sdcard/DiLinkAuto/vd-server.log"
-            // Args: W H DPI PHONE_HOST EW EH FPS — daemon binds 9638/9639 for car
-            val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
+            // Args: W H DPI PHONE_HOST EW EH FPS CAR_IP — daemon connects outbound to car
+            val carIp = getCarWifiIp() ?: phoneHost ?: "127.0.0.1"
+            val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps $carIp"
 
             _statusMessage.value = getString(R.string.status_preparing_vd)
-            // Don't pkill — daemon may already be running from previous session
+            // Kill old daemon first, then start new one
+            executeAdb("pkill -f DaemonEntry 2>/dev/null", noWait = true)
+            delay(300) // let processes die
 
             // Launch native daemon via app_process.
             // LD_LIBRARY_PATH enables loading of libdilinkd.so.
             _statusMessage.value = getString(R.string.status_starting_vd)
+            carLogSend("Native daemon deploy: car_ip=$carIp")
             carLogSend("Native daemon: ${vdW}x${vdH}@${phoneDpi}dpi")
 
-            val cmd = "nohup sh -c 'LD_LIBRARY_PATH=$libDir CLASSPATH=$jarPath app_process / " +
+            val cmd = "cp /sdcard/DiLinkAuto/libdilinkd.so /data/local/tmp/ && " +
+                    "LD_LIBRARY_PATH=/data/local/tmp " +
+                    "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
                     "com.dilinkauto.vdserver.DaemonEntry $args" +
-                    " >$logFile 2>&1' </dev/null >/dev/null 2>&1 &"
+                    " >/sdcard/DiLinkAuto/vd-server.log 2>&1"
             if (!executeAdb(cmd, noWait = true)) {
                 carLogSend("Native daemon failed to start", "E")
                 _statusMessage.value = getString(R.string.status_vd_failed)
                 vdServerStarted = false
+                // Schedule retry in 3 seconds — ADB connection may recover
+                scope.launch(Dispatchers.IO) {
+                    delay(3000)
+                    vdDeployRetries++
+                    if (vdDeployRetries >= 3) {
+                        carLogSend("VD deploy failed after $vdDeployRetries attempts — triggering disconnect", "W")
+                        withContext(Dispatchers.Main) { handleDisconnect() }
+                    } else if (_state.value == State.CONNECTED || _state.value == State.CONNECTING) {
+                        carLogSend("VD deploy retry ${vdDeployRetries}/3")
+                        deployVdServer()
+                    }
+                }
+                // Daemon may already be running from a previous session
+                val host = phoneHost
+                if (host != null && (_state.value == State.CONNECTED || _state.value == State.CONNECTING)) {
+                    carLogSend("Daemon deploy failed — trying to connect if already running")
+                    connectVideoAndInput()
+                }
                 return@launch
             }
 
             vdServerStarted = true
             _statusMessage.value = getString(R.string.status_waiting_video)
-            carLogSend("Native daemon started, connecting video+input")
-            val host = phoneHost
-            if (host != null) {
-                connectVideoAndInput(host)
-            }
+            carLogSend("Native daemon started — waiting for VD_PORTS_BOUND")
+            // connectVideoAndInput is called when VD_PORTS_BOUND arrives
+            // (triggered by daemon's MSG_DISPLAY_READY via lifecycle channel)
         }
     }
 
@@ -1008,14 +1047,12 @@ class CarConnectionService : Service() {
         wifiReady = false
         vdServerStarted = false
         handshakeDone = false
-        if (usbAdb?.isConnected != true) {
-            usbReady = false
-            if (usbAdb == null) usbConnecting = false
-        }
-        // Preserve TCP ADB readiness if controller is still connected
-        if (adbController?.isConnected == true) {
-            usbReady = true
-        }
+        // Reset USB/ADB state — must re-establish on reconnect
+        usbReady = false
+        tcpAdbConnecting = false
+        if (usbAdb == null) usbConnecting = false
+        noAdbCount = 0
+        vdDeployRetries = 0
 
         if (updatingFromPhone) {
             _state.value = State.IDLE
@@ -1025,7 +1062,7 @@ class CarConnectionService : Service() {
             return
         }
 
-        if (userDisconnected) {
+        if (userDisconnected && _state.value != State.CONNECTING) {
             _state.value = State.IDLE
             // Don't clear userDisconnected — persisted until USB re-plug or manual START
             usbReady = false
@@ -1084,6 +1121,26 @@ class CarConnectionService : Service() {
         } catch (e: Exception) { null }
     }
 
+    /** Returns the car's own WiFi IP address (assigned by phone's hotspot DHCP). */
+    private fun getCarWifiIp(): String? {
+        // Dev mode: check for manual car IP in SharedPreferences first
+        if (devMode) {
+            val devIp = getSharedPreferences("dilinkauto", MODE_PRIVATE)
+                .getString("dev_car_ip", null)
+            if (!devIp.isNullOrBlank()) return devIp
+        }
+        return try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val ip = wm.connectionInfo.ipAddress
+            if (ip == 0) null
+            else String.format("%d.%d.%d.%d", ip and 0xFF, (ip shr 8) and 0xFF,
+                (ip shr 16) and 0xFF, (ip shr 24) and 0xFF)
+        } catch (e: Exception) {
+            carLogSend("getCarWifiIp failed: ${e.message}", "E")
+            null
+        }
+    }
+
     /** Deploy VD server using the Dadb connection directly, bypassing isConnected check */
     private suspend fun deployVdServerDirect(controller: RemoteAdbController) {
         if (vdServerStarted) return
@@ -1095,23 +1152,26 @@ class CarConnectionService : Service() {
         val phoneDpi = handshakeVdDpi
         val vdW = viewportWidth and 0x7FFFFFFE.toInt()
         val vdH = viewportHeight and 0x7FFFFFFE.toInt()
-        val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
+        val carIp = getCarWifiIp() ?: phoneHost ?: "127.0.0.1"
+        val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps $carIp"
         _statusMessage.value = getString(R.string.status_preparing_vd)
+        carLogSend("Native daemon deploy: car_ip=$carIp")
         carLogSend("Native daemon: ${vdW}x${vdH}@${phoneDpi}dpi")
-        // Don't pkill — daemon may already be running
-        val cmd = "nohup sh -c 'LD_LIBRARY_PATH=/data/local/tmp " +
+        // Kill old daemon first
+        controller.shell("pkill -f DaemonEntry 2>/dev/null")
+        // Copy native lib to executable location, then start daemon
+        val cmd = "cp /sdcard/DiLinkAuto/libdilinkd.so /data/local/tmp/ && " +
+                "LD_LIBRARY_PATH=/data/local/tmp " +
                 "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
                 "com.dilinkauto.vdserver.DaemonEntry $args" +
-                " >/sdcard/DiLinkAuto/vd-server.log 2>&1' </dev/null >/dev/null 2>&1 &"
+                " >/sdcard/DiLinkAuto/vd-server.log 2>&1"
         val streamId = controller.shellBackground(cmd)
         val ok = streamId >= 0
         _statusMessage.value = getString(R.string.status_starting_vd)
         if (ok) {
-            carLogSend("Native daemon started, connecting video+input")
-            val host = phoneHost
-            if (host != null) {
-                connectVideoAndInput(host)
-            }
+            carLogSend("Native daemon started — waiting for VD_PORTS_BOUND")
+            // Don't connectVideoAndInput here — wait for MSG_DISPLAY_READY → VD_PORTS_BOUND
+            // from the phone's lifecycle channel callback
         } else {
             carLogSend("Native daemon failed to start", "E")
             vdServerStarted = false  // Allow retry

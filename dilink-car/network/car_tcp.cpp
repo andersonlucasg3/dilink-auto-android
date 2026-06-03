@@ -90,6 +90,62 @@ bool CarTcp::connect(const char* host, int port, int timeout_ms) {
     return true;
 }
 
+bool CarTcp::listen(int port) {
+    server_fd_ = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (server_fd_ < 0) { LOGE("socket() failed: %s", strerror(errno)); return false; }
+    int reuse = 1;
+    setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (bind(server_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        LOGE("bind(:%d) failed: %s", port, strerror(errno));
+        close(server_fd_); server_fd_ = -1; return false;
+    }
+    if (::listen(server_fd_, 1) < 0) {
+        LOGE("listen() failed: %s", strerror(errno));
+        close(server_fd_); server_fd_ = -1; return false;
+    }
+    // Keep server_fd_ blocking: accept() uses plain blocking accept4()
+    LOGI("Listening on :%d", port);
+    return true;
+}
+
+bool CarTcp::accept(int timeout_ms) {
+    (void)timeout_ms; // unused — blocking accept, daemon connects quickly
+    if (server_fd_ < 0) return false;
+
+    fd_ = ::accept4(server_fd_, nullptr, nullptr, SOCK_CLOEXEC);
+    if (fd_ < 0) {
+        LOGE("accept4() failed: %s", strerror(errno));
+        return false;
+    }
+
+    set_nonblocking(fd_);
+    set_low_latency();
+
+    sockaddr_in peer{};
+    socklen_t peer_len = sizeof(peer);
+    if (getpeername(fd_, reinterpret_cast<sockaddr*>(&peer), &peer_len) == 0) {
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+        LOGI("Accepted connection from %s:%d", ip, ntohs(peer.sin_port));
+    }
+
+    connected_ = true;
+    return true;
+}
+
+void CarTcp::close_client() {
+    if (fd_ >= 0) { close(fd_); fd_ = -1; }
+    connected_ = false;
+}
+void CarTcp::close_all() {
+    close_client();
+    if (server_fd_ >= 0) { close(server_fd_); server_fd_ = -1; }
+}
+
 ssize_t CarTcp::read_some(uint8_t* buffer, size_t max_size) {
     if (fd_ < 0 || !connected_) return -1;
     ssize_t n = recv(fd_, buffer, max_size, MSG_DONTWAIT);
@@ -117,11 +173,7 @@ bool CarTcp::write_all(const uint8_t* data, size_t size) {
 }
 
 void CarTcp::close_conn() {
-    if (fd_ >= 0) {
-        close(fd_);
-        fd_ = -1;
-    }
-    connected_ = false;
+    close_all();
 }
 
 bool CarTcp::set_low_latency(int send_buf, int recv_buf) {

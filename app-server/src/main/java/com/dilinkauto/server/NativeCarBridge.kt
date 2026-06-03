@@ -19,9 +19,8 @@ object NativeCarBridge {
 
     // ── Pipeline lifecycle ──
 
-    /** Start the native pipeline. Connects to daemon and starts decoding. */
+    /** Start the native pipeline. Listens on given ports for daemon to connect. */
     external fun nativeStart(
-        phoneHost: String,
         videoPort: Int,
         inputPort: Int,
         surface: Surface?,

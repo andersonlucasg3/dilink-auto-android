@@ -28,7 +28,7 @@ public:
     // Start the pipeline. Connects to daemon on video_port and input_port.
     // output_surface: ANativeWindow from TextureView.
     // Returns 0 on success, -1 on failure.
-    int start(const char* phone_host, int video_port, int input_port,
+    int start(int video_port, int input_port,
               ANativeWindow* output_surface,
               int display_w, int display_h, int encode_w, int encode_h);
 

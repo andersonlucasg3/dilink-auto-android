@@ -259,8 +259,8 @@ Key event (e.g., media keys, navigation keys). Reserved for future use.
 APP_VERSION_COMPARISON = versionName via semver (with versionCode fallback for older cars)
 PROTOCOL_VERSION      = 1
 CONTROL_PORT          = 9637 (phone <-> car, handshake + heartbeat + commands + data)
-VIDEO_PORT            = 9638 (phone -> car, H.264 frames only)
-INPUT_PORT            = 9639 (car -> phone, touch events only)
+VIDEO_PORT            = 9638 (daemon -> car, H.264 frames, daemon connects outbound to car)
+INPUT_PORT            = 9639 (car -> daemon, touch events, daemon connects outbound to car)
 VD_SERVER_PORT        = 19637 (phone <-> VD server, localhost only, NIO non-blocking)
 TARGET_FPS            = 60 (configurable via handshake, default 30)
 FRAME_INTERVAL_MS     = 1000 / TARGET_FPS (16ms at 60fps, max wait for video-path loops)

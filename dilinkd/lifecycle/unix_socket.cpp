@@ -5,8 +5,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <sys/poll.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define LOG_TAG "dilinkd.Lifecycle"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -20,60 +21,64 @@ LifecycleChannel::~LifecycleChannel() {
     close_channel();
 }
 
-bool LifecycleChannel::connect(const char* socket_path) {
-    fd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+bool LifecycleChannel::connect(const char* host, int port) {
+    fd_ = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd_ < 0) {
-        LOGE("Unix socket() failed: %s", strerror(errno));
+        LOGE("TCP socket() failed: %s", strerror(errno));
         return false;
     }
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
+        LOGE("inet_pton(%s) failed: %s", host, strerror(errno));
+        close(fd_);
+        fd_ = -1;
+        return false;
+    }
 
     int flags = fcntl(fd_, F_GETFL, 0);
     fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
 
     int ret = ::connect(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
     if (ret < 0 && errno != EINPROGRESS) {
-        LOGE("Unix connect(%s) failed: %s", socket_path, strerror(errno));
+        LOGE("TCP connect(%s:%d) failed: %s", host, port, strerror(errno));
         close(fd_);
         fd_ = -1;
         return false;
     }
 
-    // Wait for connection to complete (non-blocking connect)
+    // Wait for non-blocking connect to complete
     pollfd pfd;
     pfd.fd = fd_;
     pfd.events = POLLOUT;
     int pr = poll(&pfd, 1, 2000); // 2s timeout
     if (pr <= 0) {
-        LOGE("Unix connect timeout: %s", socket_path);
+        LOGE("TCP connect timeout: %s:%d", host, port);
         close(fd_);
         fd_ = -1;
         return false;
     }
 
-    // Check for connection error
     int sock_err = 0;
     socklen_t err_len = sizeof(sock_err);
     getsockopt(fd_, SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
     if (sock_err != 0) {
-        LOGE("Unix connect error: %s", strerror(sock_err));
+        LOGE("TCP connect error: %s", strerror(sock_err));
         close(fd_);
         fd_ = -1;
         return false;
     }
 
-    fcntl(fd_, F_SETFL, flags & ~O_NONBLOCK); // back to blocking for simple reads
-    LOGI("Connected to lifecycle channel: %s", socket_path);
+    fcntl(fd_, F_SETFL, flags); // restore original flags (blocking for reads)
+    LOGI("Connected to lifecycle channel: %s:%d", host, port);
     return true;
 }
 
 bool LifecycleChannel::send(uint8_t msg_type, const uint8_t* payload, size_t payload_size) {
     if (fd_ < 0) return false;
 
-    // Simple protocol: 1 byte msg_type + optional 4B size + payload
     uint8_t header[5];
     header[0] = msg_type;
     if (payload && payload_size > 0) {

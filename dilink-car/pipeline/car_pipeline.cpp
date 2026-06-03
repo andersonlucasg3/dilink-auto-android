@@ -16,22 +16,37 @@ CarPipeline::CarPipeline() = default;
 
 CarPipeline::~CarPipeline() { stop(); }
 
-int CarPipeline::start(const char* phone_host, int video_port, int input_port,
+int CarPipeline::start(int video_port, int input_port,
                         ANativeWindow* output_surface,
                         int display_w, int display_h, int encode_w, int encode_h) {
     encode_w_ = encode_w;
     encode_h_ = encode_h;
 
-    // Connect to daemon
-    if (!video_tcp_.connect(phone_host, video_port, 10000)) {
-        LOGE("Failed to connect video TCP to %s:%d", phone_host, video_port);
+    // Listen for daemon connections (reversed direction — daemon connects to car)
+    if (!video_tcp_.listen(video_port)) {
+        LOGE("Failed to listen on :%d for video", video_port);
         return -1;
     }
+    if (!input_tcp_.listen(input_port)) {
+        LOGE("Failed to listen on :%d for input", input_port);
+        video_tcp_.close_all();
+        return -1;
+    }
+    LOGI("Listening for daemon on :%d + :%d...", video_port, input_port);
 
-    if (!input_tcp_.connect(phone_host, input_port, 10000)) {
-        LOGE("Failed to connect input TCP to %s:%d", phone_host, input_port);
+    if (!video_tcp_.accept(60000)) {
+        LOGE("Daemon video connect timeout (60s)");
+        video_tcp_.close_all();
+        input_tcp_.close_all();
         return -1;
     }
+    if (!input_tcp_.accept(60000)) {
+        LOGE("Daemon input connect timeout (60s)");
+        video_tcp_.close_all();
+        input_tcp_.close_all();
+        return -1;
+    }
+    LOGI("Daemon connected on both video and input ports");
 
     // Init touch encoder
     input_encoder_.init(&input_tcp_, display_w, display_h);
@@ -43,6 +58,8 @@ int CarPipeline::start(const char* phone_host, int video_port, int input_port,
         LOGE("Failed to create epoll thread");
         running_.store(false);
         epoll_thread_ = 0;
+        video_tcp_.close_all();
+        input_tcp_.close_all();
         return -1;
     }
 
@@ -58,6 +75,8 @@ int CarPipeline::start(const char* phone_host, int video_port, int input_port,
         LOGE("Timeout waiting for CONFIG frame");
         running_.store(false);
         pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
+        video_tcp_.close_all();
+        input_tcp_.close_all();
         return -1;
     }
 
@@ -66,6 +85,8 @@ int CarPipeline::start(const char* phone_host, int video_port, int input_port,
         LOGE("First frame is not CONFIG");
         running_.store(false);
         pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
+        video_tcp_.close_all();
+        input_tcp_.close_all();
         return -1;
     }
 
@@ -74,6 +95,8 @@ int CarPipeline::start(const char* phone_host, int video_port, int input_port,
         LOGE("Failed to start decoder");
         running_.store(false);
         pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
+        video_tcp_.close_all();
+        input_tcp_.close_all();
         return -1;
     }
     queue_.consume();
@@ -84,11 +107,13 @@ int CarPipeline::start(const char* phone_host, int video_port, int input_port,
         running_.store(false);
         decoder_thread_ = 0;
         pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
+        video_tcp_.close_all();
+        input_tcp_.close_all();
         return -1;
     }
 
-    LOGI("Car pipeline started: %d×%d → %s:%d+%d",
-         encode_w, encode_h, phone_host, video_port, input_port);
+    LOGI("Car pipeline started: %d×%d, ports video:%d + input:%d",
+         encode_w, encode_h, video_port, input_port);
     return 0;
 }
 

@@ -4,9 +4,9 @@
 
 namespace dilink {
 
-// Unix domain socket for phone app ↔ daemon lifecycle communication.
-// The phone app connects and sends control commands (CMD_STOP, etc.).
-// The daemon sends responses (MSG_DISPLAY_READY, MSG_STACK_EMPTY, etc.).
+// TCP lifecycle channel for phone app ↔ daemon lifecycle communication.
+// Daemon connects to phone's VirtualDisplayClient on host:port (e.g. 127.0.0.1:19647).
+// Phone sends CMD_STOP (0xFF), daemon sends MSG_DISPLAY_READY, etc.
 class LifecycleChannel {
 public:
     LifecycleChannel();
@@ -15,9 +15,8 @@ public:
     LifecycleChannel(const LifecycleChannel&) = delete;
     LifecycleChannel& operator=(const LifecycleChannel&) = delete;
 
-    // Connect to the phone app's lifecycle listener.
-    // phone_host: phone IP (for TCP) or path for Unix socket.
-    bool connect(const char* socket_path);
+    // Connect to the phone app's lifecycle listener via TCP.
+    bool connect(const char* host, int port);
 
     // Send a message to the phone app.
     bool send(uint8_t msg_type, const uint8_t* payload = nullptr, size_t payload_size = 0);

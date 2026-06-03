@@ -14,7 +14,6 @@
 #include "network/protocol.h"
 #include "input/touch_parser.h"
 #include "lifecycle/unix_socket.h"
-#include "lifecycle/watchdog.h"
 #include "jni/bridge.h"
 
 #define LOG_TAG "dilinkd"
@@ -31,6 +30,7 @@ struct DaemonConfig {
     int display_w = 1408, display_h = 792, display_dpi = 120;
     int encode_w = 1408, encode_h = 792, fps = 30;
     char phone_host[256] = "127.0.0.1";
+    char car_host[256] = "";
 };
 static DaemonConfig g_config;
 
@@ -83,8 +83,11 @@ static void* lifecycle_reader_thread(void* arg) {
     auto* lc = static_cast<LifecycleChannel*>(arg);
     while (g_pipeline.is_running()) {
         int cmd = lc->read_command(1000);
-        if (cmd == protocol::CMD_STOP) { LOGI("CMD_STOP"); g_pipeline.stop(); break; }
-        if (cmd < 0 && !lc->is_connected()) break;
+        if (cmd == protocol::CMD_STOP) { LOGI("CMD_STOP from phone"); g_pipeline.stop(); break; }
+        if (cmd < 0 && !lc->is_connected()) {
+            LOGI("Lifecycle channel lost");
+            break;
+        }
     }
     return nullptr;
 }
@@ -113,11 +116,16 @@ Java_com_dilinkauto_vdserver_DaemonEntry_nativeRun(
         g_config.fps = atoi(argv[6]);
     }
 
+    if (arg_count >= 8) {
+        std::strncpy(g_config.car_host, argv[7], sizeof(g_config.car_host) - 1);
+    }
+
     if (!jni::init_bridge(env, bridge_obj)) { LOGE("JNI bridge init failed"); return -1; }
 
-    LOGI("Config: VD=%dx%d@%ddpi encode=%dx%d@%dfps host=%s",
+    LOGI("Config: VD=%dx%d@%ddpi encode=%dx%d@%dfps host=%s car=%s",
          g_config.display_w, g_config.display_h, g_config.display_dpi,
-         g_config.encode_w, g_config.encode_h, g_config.fps, g_config.phone_host);
+         g_config.encode_w, g_config.encode_h, g_config.fps,
+         g_config.phone_host, g_config.car_host);
 
     // ── Phase 1: Init pipeline (encoder + EGL + SurfaceTexture) ──
     PipelineConfig pipe_cfg;
@@ -133,7 +141,6 @@ Java_com_dilinkauto_vdserver_DaemonEntry_nativeRun(
     if (tex_id == 0) { LOGE("Pipeline init failed"); return -1; }
 
     // ── Phase 2: Create VirtualDisplay via JNI up-call ──
-    // Java creates SurfaceTexture(texId) + Surface, then creates VD with it
     int display_id = jni::create_virtual_display(env,
         g_config.display_w, g_config.display_h, g_config.display_dpi,
         tex_id);
@@ -149,14 +156,45 @@ Java_com_dilinkauto_vdserver_DaemonEntry_nativeRun(
         " -a android.intent.action.MAIN -c android.intent.category.HOME");
     jni::exec_shell(env, "settings put system screen_off_timeout 2147483647");
 
-    // ── Phase 3: Bind TCP servers, signal phone, wait for car ──
-    if (!g_video_server.listen(9638)) { LOGE("Bind :9638 failed"); return -1; }
-    if (!g_input_server.listen(9639)) { LOGE("Bind :9639 failed"); return -1; }
+    // ── Phase 3: Connect to phone lifecycle channel (TCP 127.0.0.1:19647) ──
+    LifecycleChannel lifecycle;
+    if (lifecycle.connect(g_config.phone_host, 19647)) {
+        // Send MSG_DISPLAY_READY: 1 byte msg_type + 4 bytes display_id + 1 byte flags
+        uint8_t ready_payload[5];
+        ready_payload[0] = static_cast<uint8_t>((display_id >> 24) & 0xFF);
+        ready_payload[1] = static_cast<uint8_t>((display_id >> 16) & 0xFF);
+        ready_payload[2] = static_cast<uint8_t>((display_id >> 8) & 0xFF);
+        ready_payload[3] = static_cast<uint8_t>(display_id & 0xFF);
+        ready_payload[4] = 1; // hasDirectInjection = true
+        lifecycle.send(0x10, ready_payload, 5); // MSG_DISPLAY_READY
+        LOGI("Display ready sent to phone");
+    } else {
+        LOGI("Lifecycle channel not available — continuing without phone signaling");
+    }
 
-    LOGI("Waiting for car connections...");
-    if (!g_video_server.accept(30000)) { LOGE("Car video timeout"); return -1; }
-    if (!g_input_server.accept(30000)) { LOGE("Car input timeout"); return -1; }
-    LOGI("Car connected");
+    // ── Phase 4: Connect to car (reverse direction — daemon is TCP client, outbound passes firewall) ──
+    if (g_config.car_host[0] == '\0') {
+        LOGE("car_host not provided -- cannot connect to car");
+        return -1;
+    }
+
+    LOGI("Connecting to car %s for video (port 9638)...", g_config.car_host);
+    for (int retry = 0; retry < 30; ++retry) {
+        if (!g_pipeline.is_running()) { LOGE("Pipeline stopped before car connect"); return -1; }
+        if (g_video_server.connect(g_config.car_host, 9638, 5000)) break;
+        struct timespec ts = {1, 0}; nanosleep(&ts, nullptr);
+    }
+    if (!g_video_server.is_connected()) { LOGE("Car video connect failed after 30 retries"); return -1; }
+    LOGI("Car video connection established");
+
+    LOGI("Connecting to car %s for input (port 9639)...", g_config.car_host);
+    for (int retry = 0; retry < 30; ++retry) {
+        if (!g_pipeline.is_running()) { LOGE("Pipeline stopped before car connect"); return -1; }
+        if (g_input_server.connect(g_config.car_host, 9639, 5000)) break;
+        struct timespec ts = {1, 0}; nanosleep(&ts, nullptr);
+    }
+    if (!g_input_server.is_connected()) { LOGE("Car input connect failed after 30 retries"); return -1; }
+    LOGI("Car input connection established");
 
     g_pipeline.set_car_video(&g_video_server);
     g_pipeline.set_car_input(&g_input_server);
@@ -167,7 +205,9 @@ Java_com_dilinkauto_vdserver_DaemonEntry_nativeRun(
         reinterpret_cast<void*>(static_cast<intptr_t>(display_id)));
     pthread_t touch_thread, lc_thread;
     pthread_create(&touch_thread, nullptr, touch_reader_thread, &touch_handler);
-    pthread_create(&lc_thread, nullptr, lifecycle_reader_thread, nullptr);
+    if (lifecycle.is_connected()) {
+        pthread_create(&lc_thread, nullptr, lifecycle_reader_thread, &lifecycle);
+    }
 
     // ── Run pipeline loop ──
     LOGI("Starting pipeline loop...");
@@ -175,9 +215,12 @@ Java_com_dilinkauto_vdserver_DaemonEntry_nativeRun(
 
     // Cleanup
     jni::set_display_power(env, true);
+    jni::exec_shell(env, "input keyevent 224"); // wake screen
     g_pipeline.stop();
     pthread_join(touch_thread, nullptr);
-    pthread_join(lc_thread, nullptr);
+    if (lifecycle.is_connected()) {
+        pthread_join(lc_thread, nullptr);
+    }
     g_video_server.close_all();
     g_input_server.close_all();
 

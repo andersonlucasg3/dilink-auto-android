@@ -178,13 +178,14 @@ class ConnectionService : Service() {
             dir.mkdirs()
             extractAsset("vd-server.jar", java.io.File(dir, "vd-server.jar"))
 
-            // Deploy native library to /data/local/tmp (executable, unlike /sdcard which is noexec)
+            // Deploy native library to sdcard (app can't write to /data/local/tmp).
+            // The car's ADB deploy command copies it to /data/local/tmp before starting the daemon.
             val abi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
             try {
                 extractAsset("native/${abi}/libdilinkd.so",
-                    java.io.File("/data/local/tmp/libdilinkd.so"))
+                    java.io.File(dir, "libdilinkd.so"))
             } catch (e: Exception) {
-                FileLog.w(TAG, "Native lib not bundled for $abi")
+                FileLog.w(TAG, "Native lib not bundled for $abi: ${e.message}")
             }
 
             extractAsset("app-server.apk", java.io.File(filesDir, "app-server.apk"))
@@ -424,8 +425,11 @@ class ConnectionService : Service() {
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
             "vd-server.jar"
         ).absolutePath
-        // Always USB_ADB — car deploys daemon independently, no Shizuku wait needed
-        val connMethod = CONNECTION_METHOD_USB_ADB
+        // Use Shizuku when available — phone deploys daemon locally.
+        // Car waits for VD_PORTS_BOUND instead of deploying via ADB.
+        val shizukuAvailable = ShizukuManager.isAvailable
+        val connMethod = if (shizukuAvailable) CONNECTION_METHOD_SHIZUKU else CONNECTION_METHOD_USB_ADB
+        FileLog.i(TAG, "Handshake: connMethod=${if (shizukuAvailable) "SHIZUKU" else "USB_ADB"}")
         val resp = HandshakeResponse(
             accepted = true,
             deviceName = android.os.Build.MODEL,
@@ -483,6 +487,12 @@ class ConnectionService : Service() {
                 try {
                     conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
                     FileLog.i(TAG, "Handshake response sent")
+
+                    // Deploy daemon via Shizuku while car waits for VD_PORTS_BOUND
+                    if (shizukuAvailable) {
+                        FileLog.i(TAG, "Deploying daemon via Shizuku...")
+                        startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
+                    }
                 } catch (e: Exception) {
                     FileLog.e(TAG, "Failed to send handshake response", e)
                     return@launch
@@ -527,8 +537,9 @@ class ConnectionService : Service() {
                     android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
                 val jarPath = java.io.File(diLinkDir, "vd-server.jar").absolutePath
                 val logFile = "/sdcard/DiLinkAuto/vd-server.log"
-                // Args: W H DPI PHONE_HOST EW EH FPS
-                val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps"
+                val carIp = controlConnection?.remoteAddress ?: "127.0.0.1"
+                // Args: W H DPI PHONE_HOST EW EH FPS CAR_IP
+                val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps $carIp"
 
                 ShizukuManager.execAndWait("pkill -f DaemonEntry 2>/dev/null")
                 delay(200)
