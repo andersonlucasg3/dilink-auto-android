@@ -211,6 +211,9 @@
     <!-- Notification Actions -->
     <string name="notification_action_stop">Stop</string>
 
+    <!-- Android Auto mode -->
+    <string name="aa_exit">Exit</string>
+
     <!-- Update Manager Errors -->
     <string name="update_no_release">No release found</string>
     <string name="update_no_version">Could not determine current version</string>

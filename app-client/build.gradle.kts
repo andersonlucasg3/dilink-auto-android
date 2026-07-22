@@ -101,6 +101,8 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:aidl:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // Android Auto mode: renders the VD mirror inside the stock AA host (NavigationTemplate surface)
+    implementation("androidx.car.app:app:1.4.0")
 }
 
 // Build the VD server JAR and native .so, copy to assets before the client APK is assembled.

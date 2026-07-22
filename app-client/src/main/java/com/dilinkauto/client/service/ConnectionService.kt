@@ -174,20 +174,7 @@ class ConnectionService : Service() {
 
     private fun deployAssets() {
         serviceScope.launch(Dispatchers.IO) {
-            val dir = java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
-            dir.mkdirs()
-            extractAsset("vd-server.jar", java.io.File(dir, "vd-server.jar"))
-
-            // Deploy native library to sdcard (app can't write to /data/local/tmp).
-            // The car's ADB deploy command copies it to /data/local/tmp before starting the daemon.
-            val abi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
-            try {
-                extractAsset("native/${abi}/libdilinkd.so",
-                    java.io.File(dir, "libdilinkd.so"))
-            } catch (e: Exception) {
-                FileLog.w(TAG, "Native lib not bundled for $abi: ${e.message}")
-            }
-
+            DaemonDeployer.ensureAssets(this@ConnectionService)
             extractAsset("app-server.apk", java.io.File(filesDir, "app-server.apk"))
             assetsReady = true
         }
@@ -529,10 +516,8 @@ class ConnectionService : Service() {
     /**
      * Start the VD server process directly on the phone with elevated privileges
      * (root via su, or shell via Shizuku — selected by PrivilegeRouter).
-     *
-     * Launches the native daemon (dilinkd) via app_process.
-     * The daemon runs the full C++ pipeline: VD → EGL → AMediaCodec → TCP.
-     * Car connects directly to daemon TCP ports (9638/9639) over WiFi.
+     * Deploy is delegated to DaemonDeployer; the daemon connects its lifecycle
+     * channel to the persistent listener on :19647 and video/input to the car.
      */
     private fun startVdServerLocally(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int) {
         if (!PrivilegeRouter.isAvailable) {
@@ -540,46 +525,12 @@ class ConnectionService : Service() {
             return
         }
         serviceScope.launch(Dispatchers.IO) {
-            try {
-                val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
-                val diLinkDir = java.io.File(
-                    android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
-                val jarPath = java.io.File(diLinkDir, "vd-server.jar").absolutePath
-                val logFile = "/sdcard/DiLinkAuto/vd-server.log"
-                val carIp = controlConnection?.remoteAddress ?: "127.0.0.1"
-                // Args: W H DPI PHONE_HOST EW EH FPS CAR_IP
-                val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps $carIp"
-
-                PrivilegeRouter.execAndWait("pkill -f DaemonEntry 2>/dev/null")
-                delay(200)
-
-                // Deploy .so to /data/local/tmp (executable; /sdcard is noexec)
-                // The .so is bundled in the APK assets; the privileged shell copies it out.
-                val cpuAbi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
-                val soAssetPath = "native/${cpuAbi}/libdilinkd.so"
-                val soTmp = "/data/local/tmp/libdilinkd.so"
-                // Write .so to app-private dir (we can write here), then privileged shell copies to /data/local/tmp
-                val appSoPath = "${filesDir.absolutePath}/libdilinkd.so"
-                try {
-                    val soBytes = assets.open(soAssetPath).use { it.readBytes() }
-                    java.io.File(appSoPath).writeBytes(soBytes)
-                    PrivilegeRouter.execAndWait("cp $appSoPath $soTmp && chmod 644 $soTmp")
-                    FileLog.i(TAG, "Native .so deployed to $soTmp (${soBytes.size} bytes)")
-                } catch (e: Exception) {
-                    FileLog.w(TAG, "Failed to deploy .so via privileged shell: ${e.message}")
-                }
-
-                // env sets vars before setsid; & backgrounds so shell exits quickly.
-                // execAndWait reads shell's rapid exit, daemon survives via setsid.
-                val cmd = "setsid env LD_LIBRARY_PATH=/data/local/tmp " +
-                        "CLASSPATH=$jarPath app_process / " +
-                        "com.dilinkauto.vdserver.DaemonEntry $args" +
-                        " >$logFile 2>&1 &"
-                PrivilegeRouter.execAndWait(cmd)
-                FileLog.i(TAG, "Native daemon started via ${PrivilegeRouter.displayName}: ${vdWidth}x${vdHeight}")
-            } catch (e: Exception) {
-                FileLog.e(TAG, "Shizuku daemon start failed", e)
-            }
+            val carIp = controlConnection?.remoteAddress ?: "127.0.0.1"
+            DaemonDeployer.start(
+                this@ConnectionService,
+                vdWidth, vdHeight, VideoConfig.VIRTUAL_DISPLAY_DPI,
+                carWidth, carHeight, targetFps, carIp
+            )
         }
     }
 

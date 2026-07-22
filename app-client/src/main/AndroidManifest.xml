@@ -103,5 +103,21 @@
             android:name="moe.shizuku.client.V3_SUPPORT"
             android:value="true" />
 
+        <!-- Android Auto mode: VD mirror rendered inside the stock AA host -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="2" />
+        <service
+            android:name=".auto.DilinkCarAppService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.NAVIGATION" />
+            </intent-filter>
+        </service>
+
     </application>
 </manifest>
