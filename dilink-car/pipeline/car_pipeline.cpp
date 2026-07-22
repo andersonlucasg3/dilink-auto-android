@@ -4,6 +4,7 @@
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <ctime>
+#include <cstring>
 
 #define LOG_TAG "dilink-car.Pipeline"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -80,6 +81,7 @@ int CarPipeline::start(int video_port, int input_port,
         return -1;
     }
 
+    // Cache config data
     const FrameQueue::Slot* config = queue_.peek();
     if (!config || !config->is_config) {
         LOGE("First frame is not CONFIG");
@@ -90,30 +92,46 @@ int CarPipeline::start(int video_port, int input_port,
         return -1;
     }
 
-    if (!decoder_.start(output_surface, config->data, config->size,
-                         encode_w, encode_h)) {
-        LOGE("Failed to start decoder");
+    if (config->size > sizeof(cached_config_)) {
+        LOGE("CONFIG too large: %zu > %zu", config->size, sizeof(cached_config_));
         running_.store(false);
         pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
         video_tcp_.close_all();
         input_tcp_.close_all();
         return -1;
     }
+    std::memcpy(cached_config_, config->data, config->size);
+    cached_config_size_ = config->size;
     queue_.consume();
+    LOGI("Config cached: %zu bytes, waiting for output surface", cached_config_size_);
 
-    // Start decoder thread
-    if (pthread_create(&decoder_thread_, nullptr, decoder_thread, this) != 0) {
-        LOGE("Failed to create decoder thread");
-        running_.store(false);
-        decoder_thread_ = 0;
-        pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
-        video_tcp_.close_all();
-        input_tcp_.close_all();
-        return -1;
+    // If surface already available, start decoder now
+    if (output_surface) {
+        if (!decoder_.start(output_surface, cached_config_, cached_config_size_,
+                             encode_w_, encode_h_)) {
+            LOGE("Failed to start decoder");
+            running_.store(false);
+            pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
+            video_tcp_.close_all();
+            input_tcp_.close_all();
+            return -1;
+        }
+
+        // Start decoder thread
+        if (pthread_create(&decoder_thread_, nullptr, decoder_thread, this) != 0) {
+            LOGE("Failed to create decoder thread");
+            running_.store(false);
+            decoder_thread_ = 0;
+            pthread_join(epoll_thread_, nullptr); epoll_thread_ = 0;
+            video_tcp_.close_all();
+            input_tcp_.close_all();
+            return -1;
+        }
     }
 
-    LOGI("Car pipeline started: %d×%d, ports video:%d + input:%d",
-         encode_w, encode_h, video_port, input_port);
+    LOGI("Car pipeline started: %d×%d, ports video:%d + input:%d (decoder %s)",
+         encode_w_, encode_h_, video_port, input_port,
+         output_surface ? "started" : "deferred");
     return 0;
 }
 
@@ -136,6 +154,31 @@ void CarPipeline::stop() {
 }
 
 bool CarPipeline::set_surface(ANativeWindow* surface) {
+    if (!surface) return false;
+
+    // First surface — start decoder now with cached config
+    if (!decoder_.started()) {
+        if (cached_config_size_ == 0) {
+            LOGE("Cannot start decoder: no cached config");
+            return false;
+        }
+        if (!decoder_.start(surface, cached_config_, cached_config_size_,
+                             encode_w_, encode_h_)) {
+            LOGE("Failed to start decoder on delayed surface");
+            return false;
+        }
+        // Start decoder thread
+        if (pthread_create(&decoder_thread_, nullptr, decoder_thread, this) != 0) {
+            LOGE("Failed to create decoder thread (delayed)");
+            decoder_.stop();
+            decoder_thread_ = 0;
+            return false;
+        }
+        LOGI("Decoder started with delayed surface: %dx%d", encode_w_, encode_h_);
+        return true;
+    }
+
+    // Decoder already running — switch output surface
     return decoder_.set_output_surface(surface);
 }
 
@@ -224,11 +267,17 @@ void CarPipeline::epoll_loop() {
 
 void CarPipeline::decoder_loop() {
     while (running_.load()) {
+        // Wait for output surface before feeding frames
+        if (!decoder_.has_surface()) {
+            struct timespec ts = {0, 10'000'000}; // 10ms
+            nanosleep(&ts, nullptr);
+            continue;
+        }
+
         const FrameQueue::Slot* slot = queue_.peek();
         if (!slot) {
             struct timespec ts = {0, 2'000'000}; // 2ms
             nanosleep(&ts, nullptr);
-            // Also drain output periodically
             decoder_.drain_output();
             continue;
         }

@@ -456,6 +456,7 @@ class CarConnectionService : Service() {
                     checkAndAdvance()
                 } else {
                     carLogSend("Native car pipeline failed to start: $result — retrying", "E")
+                    NativeCarBridge.nativeStop() // release sockets before retry
                     delay(3000)
                     if (_state.value == State.CONNECTED || _state.value == State.CONNECTING) {
                         carLogSend("Retrying native pipeline...")

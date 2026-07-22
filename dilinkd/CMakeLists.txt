@@ -9,22 +9,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(dilinkd SHARED
     main.cpp
     pipeline/pipeline.cpp
-    pipeline/frame_pool.cpp
     encoder/amc_encoder.cpp
     encoder/bitrate_ctrl.cpp
     renderer/egl_core.cpp
     renderer/texture_blit.cpp
-    renderer/frame_diff.cpp
     network/tcp_stream.cpp
-    network/pacing.cpp
     input/touch_parser.cpp
     lifecycle/unix_socket.cpp
-    lifecycle/watchdog.cpp
     jni/bridge.cpp
-    jni/vd_create.cpp
-    jni/input_inject.cpp
-    jni/display_power.cpp
-    jni/shell_exec.cpp
     ../native-shared/protocol.cpp
 )
 

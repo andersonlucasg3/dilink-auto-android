@@ -68,6 +68,10 @@ private:
     int encode_w_ = 0;
     int encode_h_ = 0;
 
+    // Cached CONFIG frame for delayed decoder start (when surface arrives later)
+    uint8_t cached_config_[1024];
+    size_t  cached_config_size_ = 0;
+
     pthread_t epoll_thread_ = 0;
     pthread_t decoder_thread_ = 0;
 };

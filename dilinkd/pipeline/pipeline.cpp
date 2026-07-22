@@ -73,7 +73,6 @@ int Pipeline::run_loop(JNIEnv* env) {
     }
 
     LOGI("Pipeline waiting for car video connection...");
-    LOGI("Pipeline waiting for car video connection...");
     while (running_ && car_video_ == nullptr) {
         struct timespec ts = {0, 50'000'000};
         nanosleep(&ts, nullptr);
@@ -88,7 +87,6 @@ int Pipeline::run_loop(JNIEnv* env) {
     int64_t frame_count = 0;
     int64_t keyframe_count = 0;
     int64_t last_log_at = 0;
-    bool content_changed = true;
 
     while (running_) {
         int64_t wait_ns = next_frame_ns - now_ns();
@@ -107,11 +105,9 @@ int Pipeline::run_loop(JNIEnv* env) {
         // Update GL texture from SurfaceTexture (JNI up-call to Java)
         if (env) jni::update_tex_image(env);
 
-        if (content_changed) {
-            egl_.begin_frame();
-            blit_.render();
-            egl_.swap_buffers();
-        }
+        egl_.begin_frame();
+        blit_.render();
+        egl_.swap_buffers();
 
         while (true) {
             AMediaCodecBufferInfo info;
@@ -128,19 +124,20 @@ int Pipeline::run_loop(JNIEnv* env) {
 
                     if (car_video_ && car_video_->is_connected()) {
                         uint8_t frame_hdr[protocol::HEADER_SIZE];
-                        protocol::encode_frame(frame_hdr, protocol::CHANNEL_VIDEO,
+                        protocol::encode_frame_header(frame_hdr, protocol::CHANNEL_VIDEO,
                             is_config ? protocol::VIDEO_CONFIG : protocol::VIDEO_FRAME,
-                            nullptr, 0);
+                            static_cast<size_t>(info.size));
 
                         int64_t write_start_ns = now_ns();
                         bool ok = car_video_->write_all(frame_hdr, protocol::HEADER_SIZE);
-                        if (ok) ok = car_video_->write_all(buf, info.size);
+                        if (ok) ok = car_video_->write_all(buf, static_cast<size_t>(info.size));
 
                         if (ok) {
                             int64_t write_time_us = (now_ns() - write_start_ns) / 1000;
                             int new_br = bitrate_ctrl_.report_write_time(write_time_us);
-                            if (new_br != g_cfg.fps) { // cfg.fps unused here; bitrate changed
+                            if (new_br != prev_bitrate_) {
                                 encoder_.set_bitrate(new_br);
+                                prev_bitrate_ = new_br;
                             }
                             frame_count++;
                         } else {
@@ -151,8 +148,6 @@ int Pipeline::run_loop(JNIEnv* env) {
             }
             encoder_.release_output(idx, false);
         }
-
-        bitrate_ctrl_.report_write_time(0);
 
         if (frame_count - last_log_at >= 120) {
             last_log_at = frame_count;

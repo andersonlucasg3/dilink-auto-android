@@ -26,7 +26,7 @@ class VirtualDisplayClient(
 ) {
     @Volatile private var channel: SocketChannel? = null
     @Volatile private var reader: NioReader? = null
-    private val writeBuf = ByteBuffer.allocate(64)
+    private val writeBuf = ByteBuffer.allocate(300) // enough for launch app with package name + header
     private val writeLock = Any()
 
     @Volatile
@@ -213,6 +213,57 @@ class VirtualDisplayClient(
         }
     }
 
+    /** Send CMD_LAUNCH_APP to VD server to launch an app on the virtual display */
+    fun launchAppOnVd(packageName: String) {
+        val ch = channel ?: return
+        try {
+            val bytes = packageName.toByteArray(Charsets.UTF_8)
+            synchronized(writeLock) {
+                writeBuf.clear()
+                writeBuf.put(CMD_LAUNCH_APP.toByte())
+                writeBuf.putInt(bytes.size)
+                writeBuf.put(bytes)
+                writeBuf.flip()
+                FrameCodec.writeAll(ch, writeBuf)
+            }
+            FileLog.i(TAG, "Sent CMD_LAUNCH_APP: $packageName")
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Failed to send CMD_LAUNCH_APP: ${e.message}")
+        }
+    }
+
+    /** Send CMD_GO_HOME to VD server */
+    fun goHomeOnVd() {
+        val ch = channel ?: return
+        try {
+            synchronized(writeLock) {
+                writeBuf.clear()
+                writeBuf.put(CMD_GO_HOME.toByte())
+                writeBuf.flip()
+                FrameCodec.writeAll(ch, writeBuf)
+            }
+            FileLog.i(TAG, "Sent CMD_GO_HOME")
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Failed to send CMD_GO_HOME: ${e.message}")
+        }
+    }
+
+    /** Send CMD_GO_BACK to VD server */
+    fun goBackOnVd() {
+        val ch = channel ?: return
+        try {
+            synchronized(writeLock) {
+                writeBuf.clear()
+                writeBuf.put(CMD_GO_BACK.toByte())
+                writeBuf.flip()
+                FrameCodec.writeAll(ch, writeBuf)
+            }
+            FileLog.i(TAG, "Sent CMD_GO_BACK")
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Failed to send CMD_GO_BACK: ${e.message}")
+        }
+    }
+
     fun disconnect() {
         isConnected = false
         commandRelayJob?.cancel()
@@ -239,6 +290,9 @@ class VirtualDisplayClient(
         private const val MSG_SHORTCUTS_RESULT: Byte = 0x13
 
         private const val CMD_QUERY_SHORTCUTS = 0x25
+        private const val CMD_LAUNCH_APP = 0x30
+        private const val CMD_GO_HOME = 0x31
+        private const val CMD_GO_BACK = 0x32
         private const val CMD_STOP = 0xFF
     }
 }

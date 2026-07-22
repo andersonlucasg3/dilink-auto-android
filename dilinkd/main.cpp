@@ -33,6 +33,7 @@ struct DaemonConfig {
     char car_host[256] = "";
 };
 static DaemonConfig g_config;
+static int g_vd_display_id = -1;
 
 // ── Touch injection callback ──
 static void touch_inject_callback(int action, int x, int y,
@@ -81,14 +82,56 @@ static void* touch_reader_thread(void* arg) {
 
 static void* lifecycle_reader_thread(void* arg) {
     auto* lc = static_cast<LifecycleChannel*>(arg);
-    while (g_pipeline.is_running()) {
-        int cmd = lc->read_command(1000);
-        if (cmd == protocol::CMD_STOP) { LOGI("CMD_STOP from phone"); g_pipeline.stop(); break; }
-        if (cmd < 0 && !lc->is_connected()) {
-            LOGI("Lifecycle channel lost");
-            break;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (jni::g_jvm) {
+        if (jni::g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_EDETACHED) {
+            jni::g_jvm->AttachCurrentThread(&env, nullptr);
+            attached = true;
         }
     }
+
+    while (g_pipeline.is_running()) {
+        int cmd = lc->read_command(1000);
+        if (cmd < 0) {
+            if (!lc->is_connected()) { LOGI("Lifecycle channel lost"); break; }
+            continue;
+        }
+
+        if (cmd == protocol::CMD_STOP) {
+            LOGI("CMD_STOP from phone");
+            g_pipeline.stop();
+            break;
+        }
+
+        if (cmd == 0x30) { // CMD_LAUNCH_APP
+            uint8_t size_buf[4];
+            if (!lc->read_bytes(size_buf, 4, 2000)) { LOGE("Failed to read launch app payload size"); continue; }
+            uint32_t pkg_size = (static_cast<uint32_t>(size_buf[0]) << 24) |
+                                (static_cast<uint32_t>(size_buf[1]) << 16) |
+                                (static_cast<uint32_t>(size_buf[2]) << 8)  |
+                                static_cast<uint32_t>(size_buf[3]);
+            if (pkg_size > 256) { LOGE("Package name too long: %u", pkg_size); continue; }
+            char pkg[257];
+            if (!lc->read_bytes(reinterpret_cast<uint8_t*>(pkg), pkg_size, 2000)) { LOGE("Failed to read launch app package"); continue; }
+            pkg[pkg_size] = '\0';
+            LOGI("CMD_LAUNCH_APP: %s", pkg);
+            if (env && g_vd_display_id >= 0) jni::launch_app(env, g_vd_display_id, pkg);
+        } else if (cmd == 0x31) { // CMD_GO_HOME
+            LOGI("CMD_GO_HOME");
+            if (env && g_vd_display_id >= 0) {
+                jni::exec_shell(env, "am start --display " + std::to_string(g_vd_display_id) +
+                    " -a android.intent.action.MAIN -c android.intent.category.HOME");
+            }
+        } else if (cmd == 0x32) { // CMD_GO_BACK
+            LOGI("CMD_GO_BACK");
+            if (env && g_vd_display_id >= 0) {
+                jni::exec_shell(env, "input -d " + std::to_string(g_vd_display_id) + " keyevent 4");
+            }
+        }
+    }
+
+    if (attached) jni::g_jvm->DetachCurrentThread();
     return nullptr;
 }
 
@@ -149,6 +192,7 @@ Java_com_dilinkauto_vdserver_DaemonEntry_nativeRun(
         return -1;
     }
     LOGI("VirtualDisplay created: id=%d", display_id);
+    g_vd_display_id = display_id;
 
     // Turn off physical display, launch home, disable screen timeout
     jni::set_display_power(env, false);
@@ -175,6 +219,9 @@ Java_com_dilinkauto_vdserver_DaemonEntry_nativeRun(
     // ── Phase 4: Connect to car (reverse direction — daemon is TCP client, outbound passes firewall) ──
     if (g_config.car_host[0] == '\0') {
         LOGE("car_host not provided -- cannot connect to car");
+        g_pipeline.stop();
+        jni::set_display_power(env, true);
+        for (int i = 0; i < arg_count; ++i) free(argv[i]);
         return -1;
     }
 

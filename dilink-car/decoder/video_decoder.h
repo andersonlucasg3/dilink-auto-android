@@ -44,6 +44,8 @@ public:
     // Signal from another thread to shut down.
     void signal_stop() { running_.store(false); }
     bool is_running() const { return running_.load(); }
+    bool has_surface() const { return surface_ != nullptr; }
+    bool started() const { return started_; }
 
 private:
     AMediaCodec* codec_ = nullptr;
@@ -52,7 +54,7 @@ private:
     bool started_ = false;
 
     // Cached CONFIG for replay on codec reset
-    uint8_t config_data_[256];
+    uint8_t config_data_[1024];
     size_t  config_size_ = 0;
 };
 

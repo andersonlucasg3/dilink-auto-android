@@ -88,15 +88,13 @@ void VideoDecoder::feed_frame(const uint8_t* data, size_t size, bool is_keyframe
 
         AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(in_idx),
                                       0, size, 0, flags);
-    } else {
-        // Buffer too small — queue empty buffer to avoid starvation
-        AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(in_idx),
-                                      0, 0, 0, 0);
     }
+    // If buffer too small, drop frame — don't queue empty buffer (can signal EOS)
 }
 
 bool VideoDecoder::set_output_surface(ANativeWindow* new_surface) {
     if (!codec_ || !new_surface) return false;
+    if (surface_ == new_surface) return true;
 
     media_status_t status = AMediaCodec_setOutputSurface(codec_, new_surface);
     if (status != AMEDIA_OK) {

@@ -113,8 +113,18 @@ bool CarTcp::listen(int port) {
 }
 
 bool CarTcp::accept(int timeout_ms) {
-    (void)timeout_ms; // unused — blocking accept, daemon connects quickly
     if (server_fd_ < 0) return false;
+
+    // Wait for incoming connection with timeout
+    pollfd pfd;
+    pfd.fd = server_fd_;
+    pfd.events = POLLIN;
+    int pr = poll(&pfd, 1, timeout_ms);
+    if (pr <= 0) {
+        if (pr == 0) LOGE("accept() timeout after %dms", timeout_ms);
+        else LOGE("poll() failed: %s", strerror(errno));
+        return false;
+    }
 
     fd_ = ::accept4(server_fd_, nullptr, nullptr, SOCK_CLOEXEC);
     if (fd_ < 0) {

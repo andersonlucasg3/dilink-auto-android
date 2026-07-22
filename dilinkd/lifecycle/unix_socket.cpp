@@ -8,6 +8,7 @@
 #include <sys/poll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <ctime>
 
 #define LOG_TAG "dilinkd.Lifecycle"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -79,25 +80,19 @@ bool LifecycleChannel::connect(const char* host, int port) {
 bool LifecycleChannel::send(uint8_t msg_type, const uint8_t* payload, size_t payload_size) {
     if (fd_ < 0) return false;
 
-    uint8_t header[5];
-    header[0] = msg_type;
     if (payload && payload_size > 0) {
-        header[1] = static_cast<uint8_t>((payload_size >> 24) & 0xFF);
-        header[2] = static_cast<uint8_t>((payload_size >> 16) & 0xFF);
-        header[3] = static_cast<uint8_t>((payload_size >> 8) & 0xFF);
-        header[4] = static_cast<uint8_t>(payload_size & 0xFF);
-
+        uint8_t header = msg_type;
         struct iovec iov[2] = {
-            { header, 5 },
+            { &header, 1 },
             { const_cast<uint8_t*>(payload), payload_size }
         };
         struct msghdr msg{};
         msg.msg_iov = iov;
         msg.msg_iovlen = 2;
         ssize_t n = sendmsg(fd_, &msg, MSG_NOSIGNAL);
-        return n == static_cast<ssize_t>(5 + payload_size);
+        return n == static_cast<ssize_t>(1 + payload_size);
     } else {
-        ssize_t n = ::send(fd_, header, 1, MSG_NOSIGNAL);
+        ssize_t n = ::send(fd_, &msg_type, 1, MSG_NOSIGNAL);
         return n == 1;
     }
 }
@@ -116,6 +111,36 @@ int LifecycleChannel::read_command(int timeout_ms) {
     if (n <= 0) return -1;
 
     return static_cast<int>(cmd);
+}
+
+bool LifecycleChannel::read_bytes(uint8_t* buffer, size_t n, int timeout_ms) {
+    if (fd_ < 0) return false;
+    int64_t deadline_ns = 0;
+    if (timeout_ms > 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        deadline_ns = ts.tv_sec * 1'000'000'000L + ts.tv_nsec + timeout_ms * 1'000'000L;
+    }
+    size_t off = 0;
+    while (off < n) {
+        pollfd pfd;
+        pfd.fd = fd_;
+        pfd.events = POLLIN;
+        int pr = poll(&pfd, 1, 100);
+        if (pr < 0) return false;
+        if (pr == 0) {
+            if (timeout_ms > 0) {
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                if (ts.tv_sec * 1'000'000'000L + ts.tv_nsec >= deadline_ns) return false;
+            }
+            continue;
+        }
+        ssize_t r = recv(fd_, buffer + off, n - off, 0);
+        if (r <= 0) return false;
+        off += static_cast<size_t>(r);
+    }
+    return true;
 }
 
 void LifecycleChannel::close_channel() {

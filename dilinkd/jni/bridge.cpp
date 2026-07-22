@@ -15,7 +15,6 @@ JavaVM* g_jvm = nullptr;
 static jobject g_bridge_obj = nullptr;
 static jclass  g_bridge_class = nullptr;
 static jmethodID g_create_vd_method = nullptr;
-static jmethodID g_inject_input_method = nullptr;
 static jmethodID g_display_power_method = nullptr;
 static jmethodID g_exec_shell_method = nullptr;
 static jmethodID g_launch_app_method = nullptr;
@@ -34,8 +33,6 @@ bool init_bridge(JNIEnv* env, jobject bridge_obj) {
 
     g_create_vd_method = env->GetMethodID(g_bridge_class, "createVirtualDisplayFromTexture",
                                            "(IIII)I");
-    g_inject_input_method = env->GetMethodID(g_bridge_class, "injectMotionEvent",
-                                              "(IILjava/lang/String;)Z");
     g_display_power_method = env->GetMethodID(g_bridge_class, "setDisplayPower",
                                                "(Z)Z");
     g_exec_shell_method = env->GetMethodID(g_bridge_class, "execShell",
@@ -44,8 +41,8 @@ bool init_bridge(JNIEnv* env, jobject bridge_obj) {
                                             "(ILjava/lang/String;)Z");
     g_update_tex_method = env->GetMethodID(g_bridge_class, "updateTexImage", "()V");
 
-    if (!g_create_vd_method || !g_inject_input_method || !g_display_power_method ||
-        !g_exec_shell_method || !g_launch_app_method) {
+    if (!g_create_vd_method || !g_display_power_method ||
+        !g_exec_shell_method || !g_launch_app_method || !g_update_tex_method) {
         LOGE("Failed to find bridge methods");
         return false;
     }
@@ -67,8 +64,6 @@ int create_virtual_display(JNIEnv* env, int width, int height, int dpi,
     }
     return id;
 }
-
-// The inject_motion_event implementation is in input_inject.cpp
 
 bool set_display_power(JNIEnv* env, bool on) {
     if (!g_display_power_method || !g_bridge_obj) return false;

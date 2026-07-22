@@ -401,8 +401,17 @@ class ConnectionService : Service() {
                 FileLog.i(TAG, "Car requested shortcuts for: $pkg")
                 sendAppShortcuts(pkg)
             }
-            // LAUNCH_APP, GO_BACK, GO_HOME, APP_UNINSTALL, APP_INFO, APP_SHORTCUT_ACTION
-            // now go directly Car → VD via port 9639 Channel.CONTROL
+            ControlMsg.LAUNCH_APP -> {
+                val pkg = String(frame.payload, Charsets.UTF_8)
+                FileLog.i(TAG, "Launch app on VD: $pkg")
+                vdClient?.launchAppOnVd(pkg)
+            }
+            ControlMsg.GO_HOME -> {
+                vdClient?.goHomeOnVd()
+            }
+            ControlMsg.GO_BACK -> {
+                vdClient?.goBackOnVd()
+            }
         }
     }
 

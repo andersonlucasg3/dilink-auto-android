@@ -209,6 +209,10 @@ void EglCore::begin_frame() {
 }
 
 void EglCore::destroy() {
+    // Clean up GL resources first (need current context)
+    if (program_) { glDeleteProgram(program_); program_ = 0; }
+    if (input_tex_id_) { glDeleteTextures(1, &input_tex_id_); input_tex_id_ = 0; }
+
     if (vd_surface_) { ANativeWindow_release(vd_surface_); vd_surface_ = nullptr; }
     surface_texture_ = nullptr; // Java-owned, released by GC
 
@@ -220,8 +224,6 @@ void EglCore::destroy() {
         display_ = EGL_NO_DISPLAY;
     }
 
-    if (program_) { glDeleteProgram(program_); program_ = 0; }
-    if (input_tex_id_) { glDeleteTextures(1, &input_tex_id_); input_tex_id_ = 0; }
     initialized_ = false;
 }
 

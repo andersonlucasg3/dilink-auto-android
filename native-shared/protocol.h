@@ -72,6 +72,19 @@ struct TouchMoveBatch {
 size_t encode_frame(uint8_t* buffer, uint8_t channel, uint8_t msg_type,
                     const uint8_t* payload, size_t payload_size);
 size_t decode_frame(const uint8_t* buffer, size_t buffer_size, Frame& out);
+
+// Encode only the 6-byte frame header (no payload copy). Use when payload
+// is sent separately (e.g., encoder output buffer sent in a second write).
+inline void encode_frame_header(uint8_t* buffer, uint8_t channel, uint8_t msg_type,
+                                size_t payload_size) {
+    uint32_t frame_len = 2 + static_cast<uint32_t>(payload_size);
+    buffer[0] = static_cast<uint8_t>((frame_len >> 24) & 0xFF);
+    buffer[1] = static_cast<uint8_t>((frame_len >> 16) & 0xFF);
+    buffer[2] = static_cast<uint8_t>((frame_len >> 8) & 0xFF);
+    buffer[3] = static_cast<uint8_t>(frame_len & 0xFF);
+    buffer[4] = channel;
+    buffer[5] = msg_type;
+}
 bool decode_touch_event(const uint8_t* payload, size_t size, TouchEvent& out);
 bool decode_touch_move_batch(const uint8_t* payload, size_t size, TouchMoveBatch& out);
 

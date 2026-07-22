@@ -39,8 +39,8 @@ private:
     int display_w_ = 0;
     int display_h_ = 0;
 
-    // Pre-allocated send buffer: header + max payload (25B touch)
-    uint8_t buf_[6 + 25];
+    // Pre-allocated send buffer: header + max batch payload (1B count + 10 * 24B per pointer)
+    uint8_t buf_[6 + 1 + 10 * 24];
 };
 
 } // namespace car

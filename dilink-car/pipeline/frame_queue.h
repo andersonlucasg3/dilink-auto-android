@@ -52,34 +52,36 @@ public:
     // Frame data is valid until next call to consume().
     const Slot* peek() {
         if (count_.load() == 0) return nullptr;
-        Slot& slot = slots_[read_idx_];
+        Slot& slot = slots_[read_idx_.load(std::memory_order_relaxed)];
         if (!slot.ready) return nullptr;
         return &slot;
     }
 
     // Consumer: mark current frame as consumed.
     void consume() {
-        slots_[read_idx_].ready = false;
-        read_idx_ = (read_idx_ + 1) % SLOTS;
-        count_.fetch_sub(1);
+        size_t r = read_idx_.load(std::memory_order_relaxed);
+        slots_[r].ready = false;
+        read_idx_.store((r + 1) % SLOTS, std::memory_order_relaxed);
+        count_.fetch_sub(1, std::memory_order_relaxed);
     }
 
     // Consumer: consume without peeking (used internally).
     void pop_consume() {
-        if (count_.load() == 0) return;
-        slots_[read_idx_].ready = false;
-        read_idx_ = (read_idx_ + 1) % SLOTS;
-        count_.fetch_sub(1);
+        if (count_.load(std::memory_order_relaxed) == 0) return;
+        size_t r = read_idx_.load(std::memory_order_relaxed);
+        slots_[r].ready = false;
+        read_idx_.store((r + 1) % SLOTS, std::memory_order_relaxed);
+        count_.fetch_sub(1, std::memory_order_relaxed);
     }
 
-    size_t count() const { return count_.load(); }
-    bool empty() const { return count_.load() == 0; }
+    size_t count() const { return count_.load(std::memory_order_relaxed); }
+    bool empty() const { return count_.load(std::memory_order_relaxed) == 0; }
 
 private:
     Slot slots_[SLOTS];
     std::atomic<size_t> count_{0};
     size_t write_idx_ = 0;
-    size_t read_idx_ = 0;
+    std::atomic<size_t> read_idx_{0};
 };
 
 } // namespace car

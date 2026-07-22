@@ -23,13 +23,6 @@ bool init_bridge(JNIEnv* env, jobject bridge_obj);
 int create_virtual_display(JNIEnv* env, int width, int height, int dpi,
                             uint32_t tex_id);
 
-// Inject a MotionEvent via IInputManager.
-bool inject_motion_event(JNIEnv* env, int action, int display_id,
-                          int x, int y, int pointer_id, float pressure,
-                          int64_t down_time_ms, int pointer_count,
-                          const int* pointer_ids, const float* pointer_x,
-                          const float* pointer_y, const float* pointer_pressures);
-
 // Toggle physical display power.
 bool set_display_power(JNIEnv* env, bool on);
 

@@ -1,14 +1,12 @@
 #pragma once
 #include <cstdint>
+#include <atomic>
 #include <jni.h>
 #include "../encoder/amc_encoder.h"
 #include "../encoder/bitrate_ctrl.h"
 #include "../renderer/egl_core.h"
 #include "../renderer/texture_blit.h"
-#include "../renderer/frame_diff.h"
 #include "../network/tcp_stream.h"
-#include "../network/pacing.h"
-#include "frame_pool.h"
 
 namespace dilink {
 
@@ -72,16 +70,15 @@ private:
     BitrateController bitrate_ctrl_;
     EglCore egl_;
     TextureBlit blit_;
-    FrameDiff frame_diff_;
-    FramePool frame_pool_;
 
     // Car connections (set by main thread before pipeline starts)
     TcpStream* car_video_ = nullptr;
     TcpStream* car_input_ = nullptr;
 
     // Internal state
-    volatile bool running_ = true;
+    std::atomic<bool> running_{true};
     bool initialized_ = false;
+    int prev_bitrate_ = 0;
 };
 
 } // namespace dilink

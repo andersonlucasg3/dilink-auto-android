@@ -24,6 +24,9 @@ public:
     // Read one byte command (blocking with timeout). Returns -1 on error/timeout.
     int read_command(int timeout_ms);
 
+    // Read exactly n bytes with timeout. Returns false on error/timeout.
+    bool read_bytes(uint8_t* buffer, size_t n, int timeout_ms);
+
     // Check if connected.
     bool is_connected() const { return fd_ >= 0; }
 
