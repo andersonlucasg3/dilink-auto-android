@@ -36,15 +36,9 @@ object DaemonEntry {
             Looper.prepareMainLooper()
         }
 
-        if (args.firstOrNull() == "aa-bridge-poc") {
-            val code = AaBridgeClient.runPoc()
-            println("[Daemon] POC exit=$code")
-            return
-        }
-
-        if (args.firstOrNull() == "aa-sm-poc") {
-            val code = AaBridgeClient.runSmPoc()
-            println("[Daemon] SM POC exit=$code")
+        if (args.firstOrNull() == "aa-daemon") {
+            val code = AaDaemonMain.run()
+            println("[Daemon] AA daemon exit=$code")
             return
         }
 

@@ -14,10 +14,21 @@ class ClientApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        allowHiddenApiReflection()
         createNotificationChannels()
         UpdateManager.init(this)
         ShizukuManager.init(this)
         RootManager.init()
+    }
+
+    // The AA bridge reaches the daemon via ServiceManager.getService (@hide)
+    private fun allowHiddenApiReflection() {
+        try {
+            val vmRuntimeClass = Class.forName("dalvik.system.VMRuntime")
+            val runtime = vmRuntimeClass.getDeclaredMethod("getRuntime").invoke(null)
+            vmRuntimeClass.getDeclaredMethod("setHiddenApiExemptions", Array<String>::class.java)
+                .invoke(runtime, arrayOf("L"))
+        } catch (_: Exception) {}
     }
 
     private fun createNotificationChannels() {

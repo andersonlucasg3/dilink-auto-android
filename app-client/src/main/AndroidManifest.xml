@@ -119,11 +119,5 @@
             </intent-filter>
         </service>
 
-        <!-- Binder endpoint for the root daemon (AA mode bridge; uid-validated) -->
-        <provider
-            android:name=".auto.AaBridgeProvider"
-            android:authorities="com.dilinkauto.client.aabridge"
-            android:exported="true" />
-
     </application>
 </manifest>
