@@ -86,7 +86,7 @@ class CarConnectionService : Service() {
     private var connectionScope: Job? = null  // Parent job for all discovery/connect coroutines
     @Volatile private var vdServerStarted = false // VD server process launched
     @Volatile private var updatingFromPhone = false // Phone is pushing an update — don't reconnect
-    @Volatile private var shizukuMode = false  // Phone handles VD server via Shizuku
+    @Volatile private var shizukuMode = false  // Phone deploys daemon itself (root or Shizuku)
     @Volatile private var handshakeDone = false // Stop gateway retry after handshake completes
     @Volatile private var lastAdbHost: String? = null // Track which host TCP ADB connected to
     private var noAdbCount = 0 // Consecutive deploy failures due to no ADB — stops reconnect loop
@@ -302,7 +302,7 @@ class CarConnectionService : Service() {
 
             State.CONNECTING -> {
                 // VD server is deployed immediately after handshake (by car via ADB or
-                // by phone via Shizuku). wifiReady is set after video/input connections
+                // by phone via root/Shizuku). wifiReady is set after video/input connections
                 // are established following VD_PORTS_BOUND.
                 if (wifiReady && (usbReady || shizukuMode)) {
                     carLogSend("All connections ready — connected")
@@ -691,9 +691,11 @@ class CarConnectionService : Service() {
 
                 handshakeDone = true  // Stop WiFi gateway retry loop
                 wifiReady = true  // Control connection established via WiFi
-                if (response.connectionMethod == CONNECTION_METHOD_SHIZUKU) {
+                if (response.connectionMethod == CONNECTION_METHOD_SHIZUKU ||
+                    response.connectionMethod == CONNECTION_METHOD_ROOT) {
                     shizukuMode = true
-                    carLogSend("Shizuku mode — phone will deploy VD server, waiting for VD_PORTS_BOUND")
+                    val method = if (response.connectionMethod == CONNECTION_METHOD_ROOT) "Root" else "Shizuku"
+                    carLogSend("$method mode — phone will deploy VD server, waiting for VD_PORTS_BOUND")
                 } else {
                     // Car deploys VD server via ADB (USB or TCP).
                     // Deploy now if ADB is available; otherwise connectTcpAdb will retry.

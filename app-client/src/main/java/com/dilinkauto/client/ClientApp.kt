@@ -17,6 +17,7 @@ class ClientApp : Application() {
         createNotificationChannels()
         UpdateManager.init(this)
         ShizukuManager.init(this)
+        RootManager.init()
     }
 
     private fun createNotificationChannels() {

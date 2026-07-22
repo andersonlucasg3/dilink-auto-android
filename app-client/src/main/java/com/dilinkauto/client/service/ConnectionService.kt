@@ -20,8 +20,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.dilinkauto.client.ClientApp
 import com.dilinkauto.client.FileLog
+import com.dilinkauto.client.PrivilegeRouter
 import com.dilinkauto.client.R
-import com.dilinkauto.client.ShizukuManager
 import com.dilinkauto.client.display.VirtualDisplayClient
 import com.dilinkauto.protocol.*
 import dadb.AdbKeyPair
@@ -434,11 +434,10 @@ class ConnectionService : Service() {
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
             "vd-server.jar"
         ).absolutePath
-        // Use Shizuku when available — phone deploys daemon locally.
+        // Root (su) preferred, Shizuku fallback — phone deploys daemon locally.
         // Car waits for VD_PORTS_BOUND instead of deploying via ADB.
-        val shizukuAvailable = ShizukuManager.isAvailable
-        val connMethod = if (shizukuAvailable) CONNECTION_METHOD_SHIZUKU else CONNECTION_METHOD_USB_ADB
-        FileLog.i(TAG, "Handshake: connMethod=${if (shizukuAvailable) "SHIZUKU" else "USB_ADB"}")
+        val connMethod = PrivilegeRouter.connectionMethod
+        FileLog.i(TAG, "Handshake: connMethod=${PrivilegeRouter.displayName}")
         val resp = HandshakeResponse(
             accepted = true,
             deviceName = android.os.Build.MODEL,
@@ -497,10 +496,10 @@ class ConnectionService : Service() {
                     conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
                     FileLog.i(TAG, "Handshake response sent")
 
-                    // Deploy daemon via Shizuku while car waits for VD_PORTS_BOUND
-                    if (shizukuAvailable) {
-                        FileLog.i(TAG, "Deploying daemon via Shizuku...")
-                        startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
+                    // Deploy daemon locally (root/Shizuku) while car waits for VD_PORTS_BOUND
+                    if (PrivilegeRouter.isAvailable) {
+                        FileLog.i(TAG, "Deploying daemon via ${PrivilegeRouter.displayName}...")
+                        startVdServerLocally(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
                     }
                 } catch (e: Exception) {
                     FileLog.e(TAG, "Failed to send handshake response", e)
@@ -528,15 +527,16 @@ class ConnectionService : Service() {
     // ─── VD Server Connection ───
 
     /**
-     * Start the VD server process directly on the phone using Shizuku.
+     * Start the VD server process directly on the phone with elevated privileges
+     * (root via su, or shell via Shizuku — selected by PrivilegeRouter).
      *
-     * Launches the native daemon (dilinkd) via app_process with shell UID.
+     * Launches the native daemon (dilinkd) via app_process.
      * The daemon runs the full C++ pipeline: VD → EGL → AMediaCodec → TCP.
      * Car connects directly to daemon TCP ports (9638/9639) over WiFi.
      */
-    private fun startVdServerViaShizuku(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int) {
-        if (!ShizukuManager.isAvailable) {
-            FileLog.w(TAG, "Shizuku not available — cannot start VD server")
+    private fun startVdServerLocally(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int) {
+        if (!PrivilegeRouter.isAvailable) {
+            FileLog.w(TAG, "No privileged backend available — cannot start VD server")
             return
         }
         serviceScope.launch(Dispatchers.IO) {
@@ -550,34 +550,33 @@ class ConnectionService : Service() {
                 // Args: W H DPI PHONE_HOST EW EH FPS CAR_IP
                 val args = "$vdWidth $vdHeight $phoneDpi 127.0.0.1 $carWidth $carHeight $targetFps $carIp"
 
-                ShizukuManager.execAndWait("pkill -f DaemonEntry 2>/dev/null")
+                PrivilegeRouter.execAndWait("pkill -f DaemonEntry 2>/dev/null")
                 delay(200)
 
                 // Deploy .so to /data/local/tmp (executable; /sdcard is noexec)
-                // The .so is bundled in the APK assets; extract via Shizuku which has shell access.
+                // The .so is bundled in the APK assets; the privileged shell copies it out.
                 val cpuAbi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
                 val soAssetPath = "native/${cpuAbi}/libdilinkd.so"
                 val soTmp = "/data/local/tmp/libdilinkd.so"
-                // Read from APK assets via Shizuku: copy from app's internal storage if already extracted
+                // Write .so to app-private dir (we can write here), then privileged shell copies to /data/local/tmp
                 val appSoPath = "${filesDir.absolutePath}/libdilinkd.so"
                 try {
-                    // Write .so to app-private dir (we can write here), then Shizuku copies to /data/local/tmp
                     val soBytes = assets.open(soAssetPath).use { it.readBytes() }
                     java.io.File(appSoPath).writeBytes(soBytes)
-                    ShizukuManager.execAndWait("cp $appSoPath $soTmp && chmod 644 $soTmp")
+                    PrivilegeRouter.execAndWait("cp $appSoPath $soTmp && chmod 644 $soTmp")
                     FileLog.i(TAG, "Native .so deployed to $soTmp (${soBytes.size} bytes)")
                 } catch (e: Exception) {
-                    FileLog.w(TAG, "Failed to deploy .so via Shizuku: ${e.message}")
+                    FileLog.w(TAG, "Failed to deploy .so via privileged shell: ${e.message}")
                 }
 
                 // env sets vars before setsid; & backgrounds so shell exits quickly.
-                // Shizuku execAndWait reads shell's rapid exit, daemon survives via setsid.
+                // execAndWait reads shell's rapid exit, daemon survives via setsid.
                 val cmd = "setsid env LD_LIBRARY_PATH=/data/local/tmp " +
                         "CLASSPATH=$jarPath app_process / " +
                         "com.dilinkauto.vdserver.DaemonEntry $args" +
                         " >$logFile 2>&1 &"
-                ShizukuManager.execAndWait(cmd)
-                FileLog.i(TAG, "Native daemon started via Shizuku: ${vdWidth}x${vdHeight}")
+                PrivilegeRouter.execAndWait(cmd)
+                FileLog.i(TAG, "Native daemon started via ${PrivilegeRouter.displayName}: ${vdWidth}x${vdHeight}")
             } catch (e: Exception) {
                 FileLog.e(TAG, "Shizuku daemon start failed", e)
             }
@@ -1050,35 +1049,35 @@ class ConnectionService : Service() {
     }
 
     private suspend fun queryShortcuts(packageName: String): List<AppShortcut> {
-        FileLog.i(TAG, "Querying shortcuts for $packageName: shizuku=${ShizukuManager.isAvailable} vdClient=${vdClient != null} vdConnected=${vdClient?.isConnected}")
-        // True when Shizuku already proved cmd shortcut is unavailable on this device,
-        // so we can skip the redundant VD server attempt (both run the same command).
+        FileLog.i(TAG, "Querying shortcuts for $packageName: priv=${PrivilegeRouter.displayName} vdClient=${vdClient != null} vdConnected=${vdClient?.isConnected}")
+        // True when the privileged shell already proved cmd shortcut is unavailable on this
+        // device, so we can skip the redundant VD server attempt (both run the same command).
         var cmdShortcutUnavailable = false
-        // Try Shizuku shell first — has full access to shortcut data
-        if (ShizukuManager.isAvailable) {
+        // Try privileged shell first (root/Shizuku) — has full access to shortcut data
+        if (PrivilegeRouter.isAvailable) {
             try {
-                val output = ShizukuManager.execAndWait("cmd shortcut get-shortcuts --package $packageName")
+                val output = PrivilegeRouter.execAndWait("cmd shortcut get-shortcuts --package $packageName")
                 if (!output.isNullOrEmpty()) {
                     val parsed = parseCmdShortcutOutput(output, packageName)
                     if (parsed.isNotEmpty()) {
-                        FileLog.i(TAG, "Shizuku: ${parsed.size} shortcuts for $packageName")
+                        FileLog.i(TAG, "${PrivilegeRouter.displayName}: ${parsed.size} shortcuts for $packageName")
                         return parsed
                     }
-                    // cmd shortcut unavailable on this device — try dumpsys via Shizuku
+                    // cmd shortcut unavailable on this device — try dumpsys via privileged shell
                     cmdShortcutUnavailable = true
-                    FileLog.d(TAG, "Shizuku: cmd shortcut returned ${output.length} chars but parsed empty, trying dumpsys")
-                    val dumpOutput = ShizukuManager.execAndWait("dumpsys shortcut $packageName 2>&1")
+                    FileLog.d(TAG, "${PrivilegeRouter.displayName}: cmd shortcut returned ${output.length} chars but parsed empty, trying dumpsys")
+                    val dumpOutput = PrivilegeRouter.execAndWait("dumpsys shortcut $packageName 2>&1")
                     if (!dumpOutput.isNullOrBlank()) {
                         val dumpParsed = parseCmdShortcutOutput(dumpOutput, packageName)
                         if (dumpParsed.isNotEmpty()) {
-                            FileLog.i(TAG, "Shizuku dumpsys: ${dumpParsed.size} shortcuts for $packageName")
+                            FileLog.i(TAG, "${PrivilegeRouter.displayName} dumpsys: ${dumpParsed.size} shortcuts for $packageName")
                             return dumpParsed
                         }
                     }
-                    FileLog.i(TAG, "Shizuku: cmd shortcut unavailable, skipping VD server")
+                    FileLog.i(TAG, "${PrivilegeRouter.displayName}: cmd shortcut unavailable, skipping VD server")
                 }
             } catch (e: Exception) {
-                FileLog.w(TAG, "Shizuku shortcut query failed for $packageName: ${e.message}")
+                FileLog.w(TAG, "Privileged shortcut query failed for $packageName: ${e.message}")
             }
         }
         // Try VD server — skip if Shizuku already proved cmd shortcut is unavailable

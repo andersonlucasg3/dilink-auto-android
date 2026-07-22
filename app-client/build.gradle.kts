@@ -39,6 +39,21 @@ android {
         }
     }
 
+    // Privilege flavors share the same code for now (backend selected at runtime).
+    // The "root" flavor exists so later phases can strip Shizuku/sensitive
+    // permissions from its manifest — banking SDKs scan declared permissions.
+    flavorDimensions += "privilege"
+    productFlavors {
+        create("standard") {
+            dimension = "privilege"
+            buildConfigField("String", "PRIVILEGE_FLAVOR", "\"standard\"")
+        }
+        create("root") {
+            dimension = "privilege"
+            buildConfigField("String", "PRIVILEGE_FLAVOR", "\"root\"")
+        }
+    }
+
     // Apply release signing to both debug and release when env vars are available.
     // This ensures users can install any build over another without signature conflicts.
     signingConfigs.findByName("release")?.let { releaseConfig ->

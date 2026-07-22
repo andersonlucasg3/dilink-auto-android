@@ -7,8 +7,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.dilinkauto.client.FileLog
+import com.dilinkauto.client.PrivilegeRouter
 import com.dilinkauto.client.R
-import com.dilinkauto.client.ShizukuManager
 import dadb.AdbKeyPair
 import dadb.Dadb
 import kotlinx.coroutines.*
@@ -219,25 +219,25 @@ object UpdateManager {
 
         val version = latestRelease?.versionName ?: ""
 
-        if (ShizukuManager.isAvailable) {
-            // Silent install via Shizuku — no system confirmation dialog
+        if (PrivilegeRouter.isAvailable) {
+            // Silent install via privileged shell (root/Shizuku) — no system confirmation dialog
             _updateState.value = UpdateState.Installing(version)
             scope.launch(Dispatchers.IO) {
                 try {
-                    val result = ShizukuManager.execAndWait("pm install -r ${apkFile.absolutePath}")
+                    val result = PrivilegeRouter.execAndWait("pm install -r ${apkFile.absolutePath}")
                     if (result != null && result.contains("Success")) {
-                        FileLog.i(TAG, "Shizuku install succeeded: $result")
+                        FileLog.i(TAG, "${PrivilegeRouter.displayName} install succeeded: $result")
                         _updateState.value = UpdateState.Installed
                         downloadedFile?.delete()
                         downloadedFile = null
                         latestRelease = null
                     } else {
-                        val msg = result ?: "Shizuku command returned null"
-                        FileLog.w(TAG, "Shizuku install failed, trying dadb fallback: $msg")
+                        val msg = result ?: "Privileged command returned null"
+                        FileLog.w(TAG, "${PrivilegeRouter.displayName} install failed, trying dadb fallback: $msg")
                         tryDadbInstall(apkFile, version)
                     }
                 } catch (e: Exception) {
-                    FileLog.e(TAG, "Shizuku install error, trying dadb fallback", e)
+                    FileLog.e(TAG, "Privileged install error, trying dadb fallback", e)
                     tryDadbInstall(apkFile, version)
                 }
             }
