@@ -250,32 +250,9 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
         flat.contains(pkg)
     }
 
-    // Poll a specific permission directly from the system API (bypasses any caching)
-    fun pollPermission(stepIndex: Int) {
-        scope.launch {
-            for (i in 0..30) {
-                kotlinx.coroutines.delay(300)
-                val granted = when (stepIndex) {
-                    1 -> if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
-                    2 -> pm.isIgnoringBatteryOptimizations(pkg)
-                    3 -> {
-                        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-                        am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-                            .any { it.resolveInfo.serviceInfo.packageName == pkg }
-                    }
-                    4 -> {
-                        val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: ""
-                        flat.contains(pkg)
-                    }
-                    else -> true
-                }
-                if (granted) {
-                    refreshKey++
-                    break
-                }
-            }
-        }
-    }
+    // Root mode: su handles deploy/input — all-files, accessibility and
+    // notification prompts become unnecessary and are hidden from the flow.
+    val rootMode = RootManager.isAvailableFlow.collectAsState().value == true
 
     // Resolve strings outside remember to avoid crossinline restriction
     val welcomeTitle = stringResource(R.string.onboarding_welcome_title)
@@ -303,81 +280,107 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
     val doneAction = stringResource(R.string.onboarding_start)
     val grantLabel = stringResource(R.string.onboarding_grant)
 
-    val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications, refreshKey) {
-        listOf(
-            OnboardingStep(
+    val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications, rootMode, refreshKey) {
+        buildList {
+            add(OnboardingStep(
                 icon = Icons.Default.CarRepair,
                 title = welcomeTitle, description = welcomeDesc,
                 actionLabel = welcomeAction,
                 isGranted = { true }, onAction = {}
-            ),
-            OnboardingStep(
-                icon = Icons.Default.Folder,
-                title = filesTitle, description = filesDesc,
-                actionLabel = grantLabel,
-                isGranted = { hasAllFiles },
-                onAction = {
-                    if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
-                        context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            ))
+            if (!rootMode) {
+                add(OnboardingStep(
+                    icon = Icons.Default.Folder,
+                    title = filesTitle, description = filesDesc,
+                    actionLabel = grantLabel,
+                    isGranted = { hasAllFiles },
+                    onAction = {
+                        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+                            context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                        }
                     }
-                }
-            ),
-            OnboardingStep(
+                ))
+            }
+            add(OnboardingStep(
                 icon = Icons.Default.BatterySaver,
                 title = batteryTitle, description = batteryDesc,
                 actionLabel = grantLabel,
                 isGranted = { hasBattery },
                 onAction = {
                     if (!pm.isIgnoringBatteryOptimizations(pkg)) {
-                        try {
-                            context.startActivity(
-                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = android.net.Uri.parse("package:$pkg")
-                                }
-                            )
-                        } catch (_: Exception) {}
+                        if (PrivilegeRouter.isAvailable) {
+                            // Silent grant — root/shell hold DEVICE_POWER
+                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                PrivilegeRouter.execAndWait("dumpsys deviceidle whitelist +$pkg")
+                            }
+                        } else {
+                            try {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                        data = android.net.Uri.parse("package:$pkg")
+                                    }
+                                )
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
-            ),
-            OnboardingStep(
-                icon = Icons.Default.TouchApp,
-                title = accessibilityTitle, description = accessibilityDesc,
-                actionLabel = grantLabel,
-                isGranted = { hasAccessibility },
-                onAction = {
-                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                }
-            ),
-            OnboardingStep(
-                icon = Icons.Default.Notifications,
-                title = notificationTitle, description = notificationDesc,
-                actionLabel = grantLabel,
-                isGranted = { hasNotifications },
-                onAction = {
-                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                }
-            ),
-            OnboardingStep(
+            ))
+            if (!rootMode) {
+                add(OnboardingStep(
+                    icon = Icons.Default.TouchApp,
+                    title = accessibilityTitle, description = accessibilityDesc,
+                    actionLabel = grantLabel,
+                    isGranted = { hasAccessibility },
+                    onAction = {
+                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    }
+                ))
+                add(OnboardingStep(
+                    icon = Icons.Default.Notifications,
+                    title = notificationTitle, description = notificationDesc,
+                    actionLabel = grantLabel,
+                    isGranted = { hasNotifications },
+                    onAction = {
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    }
+                ))
+            }
+            add(OnboardingStep(
                 icon = Icons.Default.DirectionsCar,
                 title = carSetupTitle, description = carSetupDesc,
                 actionLabel = carSetupContinue,
                 isGranted = { true }, onAction = {},
                 prerequisites = listOf(carPrereqWifiAdb, carPrereqHotspot, carPrereqConnected, carPrereqInstalled)
-            ),
-            OnboardingStep(
+            ))
+            add(OnboardingStep(
                 icon = Icons.Default.CheckCircle,
                 title = doneTitle, description = doneDesc,
                 actionLabel = doneAction,
                 isGranted = { true }, onAction = {}
-            )
-        )
+            ))
+        }
+    }
+
+    // Poll the step's own grant check until it flips (covers grants that do
+    // not trigger ON_RESUME, like the battery optimization dialog)
+    fun pollPermission(stepIndex: Int) {
+        scope.launch {
+            for (i in 0..30) {
+                kotlinx.coroutines.delay(300)
+                if (steps.getOrNull(stepIndex)?.isGranted?.invoke() == true) {
+                    refreshKey++
+                    break
+                }
+            }
+        }
     }
 
     val step = steps[currentStep]
 
-    // Auto-advance if current permission is already granted (skip welcome and car setup steps)
+    // Auto-advance if current permission is already granted (steps with
+    // prerequisites, like car setup, always pause for display)
     LaunchedEffect(refreshKey, currentStep) {
-        if (currentStep > 0 && currentStep != 5 && currentStep < steps.lastIndex && step.isGranted()) {
+        if (currentStep > 0 && step.prerequisites.isEmpty() && currentStep < steps.lastIndex && step.isGranted()) {
             kotlinx.coroutines.delay(300)
             currentStep++
         }
@@ -989,17 +992,22 @@ fun SettingsScreen(
         ) {
             Spacer(Modifier.height(16.dp))
 
+        // Root mode: prompts that su makes unnecessary are hidden
+        val rootMode = RootManager.isAvailableFlow.collectAsState().value == true
+
         // Permissions
         Text(stringResource(R.string.settings_permissions), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
             modifier = Modifier.padding(bottom = 12.dp))
 
-        SetupItem(
-            icon = if (hasAllFiles) Icons.Default.CheckCircle else Icons.Default.Folder,
-            title = if (hasAllFiles) "${stringResource(R.string.perm_all_files)} ✓" else stringResource(R.string.perm_all_files),
-            description = if (hasAllFiles) stringResource(R.string.perm_granted) else stringResource(R.string.perm_all_files_granted),
-            onClick = onOpenAllFilesAccess
-        )
-        Spacer(Modifier.height(8.dp))
+        if (!rootMode) {
+            SetupItem(
+                icon = if (hasAllFiles) Icons.Default.CheckCircle else Icons.Default.Folder,
+                title = if (hasAllFiles) "${stringResource(R.string.perm_all_files)} ✓" else stringResource(R.string.perm_all_files),
+                description = if (hasAllFiles) stringResource(R.string.perm_granted) else stringResource(R.string.perm_all_files_granted),
+                onClick = onOpenAllFilesAccess
+            )
+            Spacer(Modifier.height(8.dp))
+        }
 
         SetupItem(
             icon = if (hasBattery) Icons.Default.CheckCircle else Icons.Default.BatterySaver,
@@ -1009,31 +1017,33 @@ fun SettingsScreen(
         )
         Spacer(Modifier.height(8.dp))
 
-        SetupItem(
-            icon = if (hasAccessibility) Icons.Default.CheckCircle else Icons.Default.TouchApp,
-            title = if (hasAccessibility) "${stringResource(R.string.perm_accessibility)} ✓" else stringResource(R.string.perm_accessibility),
-            description = if (hasAccessibility) stringResource(R.string.perm_granted) else stringResource(R.string.perm_accessibility_granted),
-            onClick = onOpenAccessibility
-        )
-        Spacer(Modifier.height(8.dp))
+        if (!rootMode) {
+            SetupItem(
+                icon = if (hasAccessibility) Icons.Default.CheckCircle else Icons.Default.TouchApp,
+                title = if (hasAccessibility) "${stringResource(R.string.perm_accessibility)} ✓" else stringResource(R.string.perm_accessibility),
+                description = if (hasAccessibility) stringResource(R.string.perm_granted) else stringResource(R.string.perm_accessibility_granted),
+                onClick = onOpenAccessibility
+            )
+            Spacer(Modifier.height(8.dp))
 
-        SetupItem(
-            icon = if (hasNotifications) Icons.Default.CheckCircle else Icons.Default.Notifications,
-            title = if (hasNotifications) "${stringResource(R.string.perm_notifications)} ✓" else stringResource(R.string.perm_notifications),
-            description = if (hasNotifications) stringResource(R.string.perm_granted) else stringResource(R.string.perm_notifications_granted),
-            onClick = onOpenNotificationAccess
-        )
+            SetupItem(
+                icon = if (hasNotifications) Icons.Default.CheckCircle else Icons.Default.Notifications,
+                title = if (hasNotifications) "${stringResource(R.string.perm_notifications)} ✓" else stringResource(R.string.perm_notifications),
+                description = if (hasNotifications) stringResource(R.string.perm_granted) else stringResource(R.string.perm_notifications_granted),
+                onClick = onOpenNotificationAccess
+            )
 
-        Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
-        SetupItem(
-            icon = Icons.Default.Usb,
-            title = stringResource(R.string.perm_usb_debugging),
-            description = stringResource(R.string.perm_usb_desc),
-            onClick = onOpenDeveloperOptions
-        )
+            SetupItem(
+                icon = Icons.Default.Usb,
+                title = stringResource(R.string.perm_usb_debugging),
+                description = stringResource(R.string.perm_usb_desc),
+                onClick = onOpenDeveloperOptions
+            )
 
-        Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
+        }
 
         // Shizuku
         val shizukuInstalled = remember(permissionsKey) { ShizukuManager.isInstalled }

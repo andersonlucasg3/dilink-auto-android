@@ -21,15 +21,21 @@ object DaemonDeployer {
     @Volatile
     private var assetsReady = false
 
-    /** Extract vd-server.jar + libdilinkd.so to /sdcard/DiLinkAuto (CRC-checked, idempotent). */
+    /**
+     * Extract vd-server.jar + libdilinkd.so to the app-private dir (no permission
+     * needed — privileged deploys stage from here) and, best-effort, to
+     * /sdcard/DiLinkAuto for the car ADB fallback path.
+     */
     fun ensureAssets(context: Context) {
+        extractAsset(context, "vd-server.jar", File(context.filesDir, "vd-server.jar"))
+        val abi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
+        extractAsset(context, "native/${abi}/libdilinkd.so", File(context.filesDir, "libdilinkd.so"))
+
+        // /sdcard staging is only used by the car ADB deploy fallback; without
+        // All Files access it simply fails and that path stays unavailable.
         val dir = File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
         dir.mkdirs()
         extractAsset(context, "vd-server.jar", File(dir, "vd-server.jar"))
-
-        // Native lib goes to sdcard for the car ADB deploy path; the privileged
-        // start below copies it to /data/local/tmp (sdcard is noexec).
-        val abi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
         try {
             extractAsset(context, "native/${abi}/libdilinkd.so", File(dir, "libdilinkd.so"))
         } catch (e: Exception) {
@@ -51,32 +57,28 @@ object DaemonDeployer {
         return try {
             ensureAssets(context)
 
-            val diLinkDir = File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
-            val jarPath = File(diLinkDir, "vd-server.jar").absolutePath
-            val logFile = "/sdcard/DiLinkAuto/vd-server.log"
+            // Stage entirely under /data/local/tmp: executable, no All Files
+            // access needed (app-private filesDir copied out via privileged shell)
+            val jarTmp = "/data/local/tmp/vd-server.jar"
+            val soTmp = "/data/local/tmp/libdilinkd.so"
+            val logFile = "/data/local/tmp/vd-server.log"
             // Args: W H DPI PHONE_HOST EW EH FPS CAR_IP
             val args = "$vdWidth $vdHeight $vdDpi 127.0.0.1 $encWidth $encHeight $fps $targetIp"
 
             PrivilegeRouter.execAndWait("pkill -f DaemonEntry 2>/dev/null")
             Thread.sleep(200)
 
-            val cpuAbi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: "arm64-v8a"
-            val soAssetPath = "native/${cpuAbi}/libdilinkd.so"
-            val soTmp = "/data/local/tmp/libdilinkd.so"
-            val appSoPath = "${context.filesDir.absolutePath}/libdilinkd.so"
-            try {
-                val soBytes = context.assets.open(soAssetPath).use { it.readBytes() }
-                File(appSoPath).writeBytes(soBytes)
-                PrivilegeRouter.execAndWait("cp $appSoPath $soTmp && chmod 644 $soTmp")
-                FileLog.i(TAG, "Native .so deployed to $soTmp (${soBytes.size} bytes)")
-            } catch (e: Exception) {
-                FileLog.w(TAG, "Failed to deploy .so via privileged shell: ${e.message}")
-            }
+            val files = context.filesDir.absolutePath
+            PrivilegeRouter.execAndWait(
+                "cp $files/vd-server.jar $jarTmp && chmod 644 $jarTmp && " +
+                "cp $files/libdilinkd.so $soTmp && chmod 644 $soTmp"
+            )
+            FileLog.i(TAG, "Daemon assets staged in /data/local/tmp")
 
             // env sets vars before setsid; & backgrounds so shell exits quickly.
             // execAndWait reads shell's rapid exit, daemon survives via setsid.
             val cmd = "setsid env LD_LIBRARY_PATH=/data/local/tmp " +
-                    "CLASSPATH=$jarPath app_process / " +
+                    "CLASSPATH=$jarTmp app_process / " +
                     "com.dilinkauto.vdserver.DaemonEntry $args" +
                     " >$logFile 2>&1 &"
             PrivilegeRouter.execAndWait(cmd)

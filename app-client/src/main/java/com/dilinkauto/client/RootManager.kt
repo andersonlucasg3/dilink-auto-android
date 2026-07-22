@@ -1,6 +1,8 @@
 package com.dilinkauto.client
 
 import android.util.Log
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
@@ -19,6 +21,10 @@ object RootManager {
     var isAvailable: Boolean = false
         private set
 
+    /** Observable probe result: null while probing, true/false once decided. */
+    private val _isAvailableFlow = MutableStateFlow<Boolean?>(null)
+    val isAvailableFlow: StateFlow<Boolean?> = _isAvailableFlow
+
     @Volatile
     private var checked = false
 
@@ -32,8 +38,10 @@ object RootManager {
         if (checked) return
         checked = true
         thread(name = "RootProbe") {
-            isAvailable = probeSu()
-            FileLog.i(TAG, "Root available: $isAvailable")
+            val result = probeSu()
+            isAvailable = result
+            _isAvailableFlow.value = result
+            FileLog.i(TAG, "Root available: $result")
         }
     }
 
