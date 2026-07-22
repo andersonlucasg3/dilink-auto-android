@@ -36,6 +36,18 @@ object DaemonEntry {
             Looper.prepareMainLooper()
         }
 
+        if (args.firstOrNull() == "aa-bridge-poc") {
+            val code = AaBridgeClient.runPoc()
+            println("[Daemon] POC exit=$code")
+            return
+        }
+
+        if (args.firstOrNull() == "aa-sm-poc") {
+            val code = AaBridgeClient.runSmPoc()
+            println("[Daemon] SM POC exit=$code")
+            return
+        }
+
         val bridge = NativeBridge()
         val result = nativeRun(args, bridge)
         if (result != 0) {
