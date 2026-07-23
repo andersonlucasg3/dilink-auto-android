@@ -110,18 +110,27 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 - **cmd.exe quoting**: pipes/aspas dentro de `adb shell "..."` quebram — usar greps simples (termo único, sem aspas internas) ou filtrar local com findstr. NUNCA usar `| more`.
 - Android Auto **não funciona sem ToS/first-run**, e `untrusted_app` não acha serviços custom — as duas armadilhas que mais custaram tempo.
 
-## 6. Estado exato AGORA (para retomar) — ATUALIZADO 2026-07-23 (2ª vez)
+## 6. Estado exato AGORA (para retomar) — ATUALIZADO 2026-07-23 (3ª vez: investigação AA)
 
-**Cadeia do bridge VALIDADA no emulador `bridgetest`** (screenshots `bridge_test_3.png` = grid do launcher no VD, `bridge_test_4.png` = app Messages aberto no VD via tap injetado). **No físico (HyperOS) o announce era skipado — causa raiz achada e corrigida (commit `71728b9`), verificação PENDENTE** (celular desconectou no meio do teste):
+**Problema em aberto: DiLink NÃO aparece no Android Auto** (nem carro BYD, nem lista "Personalizar tela inicial" no telefone). Bridge app↔daemon validado na HyperOS, mas gearhead nunca escaneou o app.
 
-1. `broadcastIntent` do daemon funcionava na HyperOS (sem SecurityException), mas os broadcasts **nunca chegavam ao receiver** — `dumpsys activity broadcasts` mostrou: `SKIPPED ... reason: skipped by policy at enqueue: Skipping delivery to com.dilinkauto.client due to required appop COARSE_LOCATION`.
-2. Causa: o mapeamento de args por tipo zerava TODOS os params int — inclusive `appOp` (int imediatamente antes do `Bundle options`). **OP_COARSE_LOCATION = 0**, então o daemon exigia appop de localização sem querer. Android 15+/HyperOS enforçam delivery gating de broadcast (o dumpsys mostra `broadcast.deliveryGroupPolicy` — feature nova); API 34 do emulador não enforça.
-3. Fix: int seguido de param `Bundle` → `-1` (OP_NONE). `appops set` no receiver NÃO cola (app não declara a permissão) — o fix é no sender mesmo.
-4. `am broadcast` do adb (uid 0) era DELIVERED — serviu de A/B para isolar que o canal existe e o receiver funciona.
+**Verificado OK (não re-checar):** declaração manifest (service exportado + NAVIGATION + automotive_app_desc `template` + minCarApiLevel=2), `createHostValidator()=ALLOW_ALL_HOSTS_VALIDATOR`, dev mode AA ON, unknown sources ON, app fora de stopped state, gearhead force-stopped (re-scan não listou).
 
-**Teste do físico — estado exato**: jar COM fix foi pushado para `/data/local/tmp/vd-server.jar`, mas o daemon não chegou a ser reiniciado com ele. **APK root-debug NOVO (com o jar corrigido embutido) foi rebuildado** — precisa ser instalado no celular, porque o `DaemonDeployer` re-copia o jar dos assets do APK (sobrescreveria o jar manual pelo antigo). **Retomada: install APK novo → grant do app no KernelSU (está NEGADO — `su probe failed: Permission denied`) → abrir Bridge Test → daemon sobe sozinho via app.**
+**Investigação web (fontes: AA-Tweaker/shmykelsa GitHub, AA-Phenotype-Patcher/Eselter, XDA):**
+- AA moderno esconde apps sideload por **fonte de instalação** + validação via Play API (`AppValidation__*` phenotype flags no gearhead).
+- **JÁ APLICADO**: app reinstalado com `pm install -t -i com.android.vending -r` → `installerPackageName=com.android.vending` confirmado no dumpsys. Sozinho NÃO bastou (carservicedata.db segue sem menção ao dilink após restart do gearhead — mas scan real pode exigir sessão de projeção).
+- **PENDENTE — flags do AA-Tweaker** (fonte: MainActivity.java do repo, método "custom apps"): gearhead → `AppValidation__should_bypass_validation=1`, `AppValidation__allowed_package_list=""`, `AppValidation__blocked_packages_by_installer=""`, `AppValidation__play_install_api=0`, `AppValidation__swallow_play_api_exception=1`, `AppValidation__swallow_play_api_exception_return_value=1`, `CarProjectionValidator__filter_disabled_packages_in_ispackageallowed_method=0`, `UnknownSources__allow_full_screen_apps=1`; gms.car → `app_white_list="com.dilinkauto.client"`, `car_connect_broadcast_whitelist="com.dilinkauto.client"`, `should_bypass_validation=1`.
+- **OBSTÁCULO**: schema do phenotype.db mudou (2018: `Flags`/`FlagOverrides` camelCase → hoje: `flag_overrides`(override_id, config_package_id, config_package_name, account_id, active, name, value, type, source), tabela VAZIA, semântica de type/source não verificada). Broadcast oficial `com.google.android.gms.phenotype.FLAG_OVERRIDE` testado (shell, type string, sem pacote explícito) — silencioso, nenhuma row inserida. **Próximo passo**: retentar como ROOT com tipos numéricos (1=bool,4=string) e pacote explícito `com.google.android.gms` no final do comando; se inserir row, aprendo type/source e aplico o resto via SQL direto. Fallback: app AA-AIO-Tweaker.
+- phenotype.db local: `config_packages` tem `com.google.android.gms.car` (id=230) mas **sem params**; nenhuma flag "white" em nenhum blob — flags de whitelist não estão cached localmente (podem nem existir mais; overrides podem criar a chave mesmo assim).
+- ADB WiFi: `192.168.1.11:5555` (cai durante uso — reconectar com `adb connect`).
+
+**Cadeia do bridge VALIDADA no emulador `bridgetest`** e **announce validado na HyperOS** (após fix appOp, commit `71728b9`). Jar+APK root-debug com todos os fixes instalados no físico.
 
 **Descobertas da sessão (não re-debugar):**
+
+**Cadeia do bridge VALIDADA no emulador `bridgetest`** (screenshots `bridge_test_3.png` = grid do launcher no VD, `bridge_test_4.png` = app Messages aberto no VD via tap injetado) e **announce validado na HyperOS** (após fix appOp). Detalhes do bug appOp nos bullets abaixo.
+
+**Descobertas técnicas:**
 - **`pkill -f app_process` via `adb shell "..."` mata o próprio shell** (a cmdline do `sh -c` contém o padrão) — tudo após o pkill na mesma linha NÃO executa. Usar `pkill -x app_process` ou chamada separada. Foi a causa do log fantasma "published".
 - **`putExtra(String, IBinder)` e `getIBinderExtra` são @hide** (verificado via javap no android.jar): daemon usa reflection (shell não sofre hidden-API enforcement); app lê `intent.extras?.get(EXTRA_BINDER) as? IBinder` (API pública, deprecation warning apenas).
 - **Intent HOME genérico no VD é sequestrado pelo launcher stock singleTask** do display 0 ("delivered to currently running top-most instance") — derruba o host app para background. Solução: sempre componente explícito no VD (`am start --display N -n pkg/.DiLinkLauncher`).
@@ -136,9 +145,9 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 
 **Fase 3 (parcial)**: `DiLinkLauncher` mínimo implementado e validado (grid Compose de apps launchable, tap → `daemon.launchApp`). Falta: back-stack vazia → volta ao launcher; polish do grid.
 
-**Emulador `bridgetest`**: bootado com `-no-snapshot-save -no-snapshot-load`, `adb root` ativo, jar e APK standard-debug frescos, daemon rodando (VD id=3). Retomar: rebuild → push jar → install → `pkill -x app_process` → start daemon → `am start .../.debug.BridgeTestActivity`.
+**Emulador `bridgetest`**: fechado. Retomar: boot `-no-snapshot-save -no-snapshot-load` → `adb root` → rebuild → push jar → install bridge-debug → `pkill -x app_process` → start daemon → `am start .../.debug.BridgeTestActivity`.
 
-**Telefone físico**: conectado (popsicle); KernelSU, AA dev mode, unknown sources OK. DHU segue quebrado (AA 17.1 × DHU 2.0). **Bridge nunca testado no físico** — broadcastIntent via `su shell` na HyperOS é o risco aberto (ver seção 9).
+**Telefone físico**: ADB WiFi em `192.168.1.11:5555` (cai — reconectar com `adb connect`). KernelSU OK (Shell grant; app grant PENDENTE após reinstall). AA dev mode + unknown sources OK. **App reinstalado com installer=com.android.vending (spoof)**. DHU segue quebrado (AA 17.1 × DHU 2.0). **App NÃO aparece no AA — ver topo desta seção.**
 
 **PC (dev)**: JDK 21 em `~/.jdks/jdk-21.0.11+10` pinado em `~/.gradle/gradle.properties` (org.gradle.java.home). SDK em `%LOCALAPPDATA%\Android\Sdk` (platform-tools, android-34, build-tools 34.0.0, cmake 3.22.1, ndk 29.0.13846066, cmdline-tools, emulator, system-image, extras;google;auto). `local.properties` no repo aponta p/ ele. JDK 25 do sistema QUEBRA o build (Kotlin 1.9.22). Microsoft JDK 21 corrompido (sem bin). Sem Android Studio.
 
