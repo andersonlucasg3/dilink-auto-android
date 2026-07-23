@@ -24,7 +24,12 @@ object DaemonEntry {
             try {
                 System.loadLibrary("dilinkd")
             } catch (e2: UnsatisfiedLinkError) {
-                System.load("/sdcard/DiLinkAuto/libdilinkd.so")
+                try {
+                    System.load("/sdcard/DiLinkAuto/libdilinkd.so")
+                } catch (e3: UnsatisfiedLinkError) {
+                    // Non-fatal: aa-daemon is pure Kotlin and needs no native lib
+                    System.err.println("[Daemon] libdilinkd.so not found — native streaming unavailable")
+                }
             }
         }
     }

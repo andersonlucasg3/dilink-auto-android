@@ -55,6 +55,13 @@
             android:taskAffinity="com.dilinkauto.vd.home"
             android:theme="@android:style/Theme.Black.NoTitleBar" />
 
+        <!-- AA VD home screen: started by the daemon via explicit component.
+             No HOME category — never selectable as the system home. -->
+        <activity
+            android:name=".launcher.DiLinkLauncher"
+            android:exported="false"
+            android:theme="@android:style/Theme.Black.NoTitleBar" />
+
         <service
             android:name=".service.ConnectionService"
             android:foregroundServiceType="connectedDevice"
@@ -118,6 +125,15 @@
                 <category android:name="androidx.car.app.category.NAVIGATION" />
             </intent-filter>
         </service>
+
+        <!-- Receives the daemon's IAaDaemon binder via explicit broadcast -->
+        <receiver
+            android:name=".auto.AaDaemonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.dilinkauto.client.AA_DAEMON" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>
