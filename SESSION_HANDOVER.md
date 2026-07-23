@@ -110,13 +110,16 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 - **cmd.exe quoting**: pipes/aspas dentro de `adb shell "..."` quebram — usar greps simples (termo único, sem aspas internas) ou filtrar local com findstr. NUNCA usar `| more`.
 - Android Auto **não funciona sem ToS/first-run**, e `untrusted_app` não acha serviços custom — as duas armadilhas que mais custaram tempo.
 
-## 6. Estado exato AGORA (para retomar) — ATUALIZADO 2026-07-23
+## 6. Estado exato AGORA (para retomar) — ATUALIZADO 2026-07-23 (2ª vez)
 
-**Cadeia do bridge VALIDADA no emulador `bridgetest`** (screenshots `bridge_test_3.png` = grid do launcher no VD, `bridge_test_4.png` = app Messages aberto no VD via tap injetado):
-1. Daemon (root via adb) anuncia → app recebe broadcast → registra callback → bridge up
-2. `setSurface` com a Surface do SurfaceView → VD criado (DisplayManagerGlobal reflection FALHA na API 34 — assinatura mudou; **fallback DisplayManager funciona com os mesmos flags 0x6c49**)
-3. Daemon lança `DiLinkLauncher` por **componente explícito** no VD → grid de apps renderiza no SurfaceView
-4. Tap no SurfaceView → `daemon.touch` → `injectMotionEvent` no VD → launcher abre o app no VD
+**Cadeia do bridge VALIDADA no emulador `bridgetest`** (screenshots `bridge_test_3.png` = grid do launcher no VD, `bridge_test_4.png` = app Messages aberto no VD via tap injetado). **No físico (HyperOS) o announce era skipado — causa raiz achada e corrigida (commit `71728b9`), verificação PENDENTE** (celular desconectou no meio do teste):
+
+1. `broadcastIntent` do daemon funcionava na HyperOS (sem SecurityException), mas os broadcasts **nunca chegavam ao receiver** — `dumpsys activity broadcasts` mostrou: `SKIPPED ... reason: skipped by policy at enqueue: Skipping delivery to com.dilinkauto.client due to required appop COARSE_LOCATION`.
+2. Causa: o mapeamento de args por tipo zerava TODOS os params int — inclusive `appOp` (int imediatamente antes do `Bundle options`). **OP_COARSE_LOCATION = 0**, então o daemon exigia appop de localização sem querer. Android 15+/HyperOS enforçam delivery gating de broadcast (o dumpsys mostra `broadcast.deliveryGroupPolicy` — feature nova); API 34 do emulador não enforça.
+3. Fix: int seguido de param `Bundle` → `-1` (OP_NONE). `appops set` no receiver NÃO cola (app não declara a permissão) — o fix é no sender mesmo.
+4. `am broadcast` do adb (uid 0) era DELIVERED — serviu de A/B para isolar que o canal existe e o receiver funciona.
+
+**Teste do físico — estado exato**: jar COM fix foi pushado para `/data/local/tmp/vd-server.jar`, mas o daemon não chegou a ser reiniciado com ele. **APK root-debug NOVO (com o jar corrigido embutido) foi rebuildado** — precisa ser instalado no celular, porque o `DaemonDeployer` re-copia o jar dos assets do APK (sobrescreveria o jar manual pelo antigo). **Retomada: install APK novo → grant do app no KernelSU (está NEGADO — `su probe failed: Permission denied`) → abrir Bridge Test → daemon sobe sozinho via app.**
 
 **Descobertas da sessão (não re-debugar):**
 - **`pkill -f app_process` via `adb shell "..."` mata o próprio shell** (a cmdline do `sh -c` contém o padrão) — tudo após o pkill na mesma linha NÃO executa. Usar `pkill -x app_process` ou chamada separada. Foi a causa do log fantasma "published".
@@ -124,6 +127,8 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 - **Intent HOME genérico no VD é sequestrado pelo launcher stock singleTask** do display 0 ("delivered to currently running top-most instance") — derruba o host app para background. Solução: sempre componente explícito no VD (`am start --display N -n pkg/.DiLinkLauncher`).
 - O fix "DaemonEntry não-fatal" citado na versão anterior deste handover **nunca tinha sido aplicado** — aplicado nesta sessão (3º fallback do System.load com catch).
 - `-no-snapshot-save` NÃO limpa o userdata do AVD — jar/APK/logs sobrevivem a reboots. Para boot limpo: `-no-snapshot-load`.
+- **Android 15+/HyperOS enforçam delivery gating de broadcast por appOp** — mapear `appOp` errado (0 = OP_COARSE_LOCATION) faz o announce sumir silenciosamente (SKIPPED at enqueue, visível só via `dumpsys activity broadcasts`). Fix no commit `71728b9`.
+- **KernelSU: grant do app NÃO persiste** entre reinstalls (ou nunca existiu para a assinatura debug) — verificar/grantar no KernelSU manager após cada install.
 
 **Compilação**: `:app-client:assembleStandardDebug` + `:app-client:assembleRootDebug` — **AMBOS PASSAM**. `buildVdServer` roda via preBuild e refresca `app-client/src/main/assets/vd-server.jar`.
 
