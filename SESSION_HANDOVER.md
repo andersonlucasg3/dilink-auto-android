@@ -129,6 +129,8 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 - `-no-snapshot-save` NÃO limpa o userdata do AVD — jar/APK/logs sobrevivem a reboots. Para boot limpo: `-no-snapshot-load`.
 - **Android 15+/HyperOS enforçam delivery gating de broadcast por appOp** — mapear `appOp` errado (0 = OP_COARSE_LOCATION) faz o announce sumir silenciosamente (SKIPPED at enqueue, visível só via `dumpsys activity broadcasts`). Fix no commit `71728b9`.
 - **KernelSU: grant do app NÃO persiste** entre reinstalls (ou nunca existiu para a assinatura debug) — verificar/grantar no KernelSU manager após cada install.
+- **Flavor `bridge`** (commit `c306e16`): o harness Bridge Test saiu do source set `debug` e virou flavor próprio na dimensão `privilege` (standard/root/bridge). Motivo: todo debug build tinha 2 ícones no drawer ("DiLink" + "Bridge Test") e desinstalar "Bridge Test" removia o app inteiro. Para testes de harness: `assembleBridgeDebug`; standard/root têm 1 ícone só. `app-client/src/debug/` não existe mais — harness em `src/bridge/`.
+- **Bridge NA HYPEROS VALIDADO** (23/07): após o fix do appOp, announce entregue e `app callback registered — bridge up` no físico. Restante do fluxo no físico (VD/touch) roda o mesmo código validado no emulador.
 
 **Compilação**: `:app-client:assembleStandardDebug` + `:app-client:assembleRootDebug` — **AMBOS PASSAM**. `buildVdServer` roda via preBuild e refresca `app-client/src/main/assets/vd-server.jar`.
 
