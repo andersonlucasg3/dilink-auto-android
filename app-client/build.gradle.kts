@@ -52,6 +52,10 @@ android {
             dimension = "privilege"
             buildConfigField("String", "PRIVILEGE_FLAVOR", "\"root\"")
         }
+        create("bridge") {
+            dimension = "privilege"
+            buildConfigField("String", "PRIVILEGE_FLAVOR", "\"bridge\"")
+        }
     }
 
     // Apply release signing to both debug and release when env vars are available.
