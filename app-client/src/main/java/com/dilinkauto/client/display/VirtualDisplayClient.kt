@@ -53,15 +53,22 @@ class VirtualDisplayClient(
      * Opens the ServerSocket immediately (synchronous, instant).
      * Call this BEFORE deploying the VD server so the socket is ready
      * when the VD server connects back.
+     * Never throws: a busy port (zombie instance) must not crash the process —
+     * the accept loop retries startListening each iteration.
      */
     fun startListening(port: Int = SERVER_PORT) {
-        try { serverChannel?.close() } catch (_: Exception) {}
-        val ch = ServerSocketChannel.open()
-        ch.configureBlocking(false)
-        ch.socket().reuseAddress = true
-        ch.socket().bind(InetSocketAddress("0.0.0.0", port))
-        serverChannel = ch
-        FileLog.i(TAG, "Listening for VD server lifecycle on 0.0.0.0:$port")
+        try {
+            try { serverChannel?.close() } catch (_: Exception) {}
+            val ch = ServerSocketChannel.open()
+            ch.configureBlocking(false)
+            ch.socket().reuseAddress = true
+            ch.socket().bind(InetSocketAddress("0.0.0.0", port))
+            serverChannel = ch
+            FileLog.i(TAG, "Listening for VD server lifecycle on 0.0.0.0:$port")
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Lifecycle bind on :$port failed — will retry: ${e.message}")
+            serverChannel = null
+        }
     }
 
     /**
