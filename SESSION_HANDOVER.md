@@ -30,7 +30,7 @@
 
 ## 3. Estado do Git (feature/ndk-migration)
 
-Working tree: **SUJA** (mudanças não commitadas da sessão de hoje — ver seção 6, inclui 1 erro de compilação pendente).
+Working tree: **LIMPA** (commit `9bce045`). Detalhe do que o commit inclui, para referência:
 
 | Hash | Conteúdo |
 |---|---|
@@ -41,9 +41,11 @@ Working tree: **SUJA** (mudanças não commitadas da sessão de hoje — ver se�
 | `9f0021d` | POC bridge: bindService falha, ContentProvider.call falha, **ServiceManager.addService funciona (root e shell)** |
 | `9e5b9e4` | **Bridge direta (Fase 2)**: AIDL `IAaDaemon`/`IAaAppCallback`; `AaDaemonMain`/`AaDaemonBridge` (daemon AA **puro Kotlin**); `AaDaemonClient` (getService+retry); hidden API via `setHiddenApiExemptions`; removidos clientes TCP do MVP |
 | `720334d` | Fix crash loop: `VirtualDisplayClient.startListening` não lança mais exceção com porta 19647 ocupada (zumbi) |
-| **uncommitted** | Transporte final por **broadcast** + harness + fix DaemonEntry (seção 6) |
+| `9bce045` | **Bridge por broadcast + DiLinkLauncher — cadeia validada no emulador** (transporte, harness, DaemonEntry não-fatal, launcher no VD por componente explícito) |
 
-**Não commitado (working tree atual):**
+**Working tree: LIMPA** (exceto screenshots `bridge_test_*.png`, artefatos de teste não versionados).
+
+**Conteúdo do commit `9bce045` (referência):**
 - `vd-server/.../DaemonEntry.kt` — init block do `.so` tornado **não-fatal** (aa-daemon é Kotlin puro e não precisa da lib). **SEM esse fix o daemon morre se libdilinkd.so não existir no path.**
 - `protocol/.../AaBridge.kt` (NOVO) — constantes do bridge (ACTION_ANNOUNCE, EXTRA_BINDER, EXTRA_TOKEN, TOKEN_FILE, APP_PACKAGE, RECEIVER_FQCN)
 - `vd-server/.../AaDaemonBridge.kt` — **reescrito**: `announce()` via `IActivityManager.broadcastIntent` (reflection por nome + args por tipo, userId=-2), token anti-spoof UUID→`/data/local/tmp/dilink.aa.token` (chmod 600). `publish()` removido.
@@ -52,7 +54,7 @@ Working tree: **SUJA** (mudanças não commitadas da sessão de hoje — ver se�
 - `app-client/.../auto/AaDaemonClient.kt` — **reescrito**: latch (CountDownLatch) em vez de getService; `onDaemonBinder(binder)` → `registerAppCallback`.
 - `app-client/src/main/AndroidManifest.xml` — receiver `.auto.AaDaemonReceiver` exported + intent-filter `com.dilinkauto.client.AA_DAEMON`.
 - `app-client/src/debug/AndroidManifest.xml` + `src/debug/java/.../debug/BridgeTestActivity.kt` (NOVOS) — **harness de teste** (source set debug): SurfaceView que vira host do VD; status TextView; onTouch→daemon.touch; hooks `AaDaemonClient.onDisplayReady/onError`.
-- **ERRO DE COMPILAÇÃO PENDENTE**: `AaDaemonBridge.kt:51` — "None of the following functions can be called with the arguments supplied" na linha do `putExtra(AaBridge.EXTRA_BINDER, this@AaDaemonBridge)`. **Fix provável**: cast explícito `putExtra(AaBridge.EXTRA_BINDER, this@AaDaemonBridge as android.os.IBinder)` (ou `val self: IBinder = this` antes do apply).
+- ~~ERRO DE COMPILAÇÃO PENDENTE~~ — resolvido em 23/07: `putExtra(String, IBinder)` é @hide → reflection no daemon, `Bundle.get` no app (ver seção 6).
 
 ## 4. Arquitetura final do Modo AA
 
