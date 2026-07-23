@@ -66,7 +66,10 @@ class AaDaemonBridge : IAaDaemon.Stub() {
         args[1] = intent
         for (i in 2 until broadcast.parameterCount) {
             args[i] = when (broadcast.parameterTypes[i]) {
-                Int::class.javaPrimitiveType -> 0
+                // int followed by Bundle is appOp — must be OP_NONE (-1); 0 is
+                // OP_COARSE_LOCATION, which Android 15+ enforces on delivery
+                Int::class.javaPrimitiveType ->
+                    if (broadcast.parameterTypes.getOrNull(i + 1) == android.os.Bundle::class.java) -1 else 0
                 Boolean::class.javaPrimitiveType -> false
                 else -> null
             }
