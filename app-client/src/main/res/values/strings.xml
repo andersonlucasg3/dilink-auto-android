@@ -214,6 +214,8 @@
     <!-- Android Auto mode -->
     <string name="aa_exit">Exit</string>
     <string name="aa_back">Back</string>
+    <string name="aa_home">Home</string>
+    <string name="aa_open_mirror">Open mirror</string>
 
     <!-- Update Manager Errors -->
     <string name="update_no_release">No release found</string>

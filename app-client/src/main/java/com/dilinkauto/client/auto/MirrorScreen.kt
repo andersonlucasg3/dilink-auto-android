@@ -45,6 +45,12 @@ class MirrorScreen(
             )
             .addAction(
                 Action.Builder()
+                    .setTitle(carContext.getString(R.string.aa_home))
+                    .setOnClickListener { screenManager.push(DiLinkHomeScreen(carContext)) }
+                    .build()
+            )
+            .addAction(
+                Action.Builder()
                     .setTitle(carContext.getString(R.string.aa_exit))
                     .setOnClickListener { finish() }
                     .build()
