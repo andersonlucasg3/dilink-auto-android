@@ -1,7 +1,7 @@
-# DiLink-Auto — Session Handover (2026-07-24, ~00:30)
+# DiLink-Auto — Session Handover (2026-07-24, ~13:45)
 
 > Estado completo do projeto. Escrito para continuação em nova sessão. Branch: `feature/ndk-migration`.
-> **Resumo**: retry do DHU com relógio corrigido FALHOU — relógios de PC e telefone conferem (2026-07-24 00:06 -03), mas o SSL falha nos DOIS sentidos: DHU diz "certificate has expired" (cert do telefone) e o telefone mostra **Erro de comunicação 14** ("software do seu carro reprovado nas verificações de segurança — verifique data/hora do carro"), ou seja, o telefone rejeita o **cert do DHU**. Suspeita principal: o cert embutido do DHU 2.0 (build 2022-03-30, única versão no sdkmanager) **expirou em tempo real** — o DHU nunca funcionou neste setup, então não há prova de que já tenha sido válido.
+> **Resumo**: sessão no Termux (no próprio telefone). (1) Trabalho deixado por engano na `develop` resolvido: era versão antiga do app AA (pacote `car/`, PaneTemplate) — ficou em stash; a única ideia aproveitada virou `DiLinkHomeScreen` diagnóstico nesta branch. (2) **Build nativo funciona no Termux** — SDK/NDK x86_64 substituídos por wrappers aarch64 do Termux, scriptado em `scripts/termux-ndk-setup.sh`; APKs completos (com `libdilinkd.so`/`libdilink-car.so` nas 3 ABIs) gerados no aparelho. (3) App root-debug instalado (md5 verificado), KSU grant re-feito e **verificado com o uid real do app** (`su` → uid 0). (4) DiLink continua **não listado** no AA (tela de personalizar); captura de logcat naquela tela NÃO mostrou validação ao vivo — a lista não roda o validador em tempo real; o motivo da rejeição só aparece numa sessão real (carro/DHU). AA foi re-atualizado pelo Play para 17.3. Próximo passo: teste no carro BYD.
 
 ---
 
@@ -29,7 +29,14 @@
 
 ## 3. Estado do Git (feature/ndk-migration)
 
-Working tree: **com alterações não-commitadas** (24/07, sessão Termux): port do `DiLinkHomeScreen` + `scripts/termux-ndk-setup.sh` (ver abaixo). Detalhe do que o commit `9bce045` inclui, para referência:
+Working tree: **LIMPA** em 24/07 ~13:45 (commit `docs: handover` desta sessão). Commits novos desta sessão:
+
+| Hash | Conteúdo |
+|---|---|
+| `e5f71f5` | `auto/DiLinkHomeScreen.kt` (PaneTemplate diagnóstico) + ação "Home" no strip do MirrorScreen + strings `aa_home`/`aa_open_mirror` |
+| `9d3f042` | `scripts/termux-ndk-setup.sh` + handover (build nativo no Termux) |
+
+Detalhe do que o commit `9bce045` inclui, para referência:
 
 **Build nativo NO TERMUX — RESOLVIDO (24/07):** o SDK/NDK oficial só traz ferramentas de host x86_64, que não rodam no Termux (aarch64). Solução aplicada e **scriptada em `scripts/termux-ndk-setup.sh`** (re-rodar se NDK/build-tools forem reinstalados):
 - `build-tools/34.0.0/aidl` e `zipalign` → binários aarch64 do Termux (`pkg install aidl zipalign`); originais em `*.x86_64.bak`.
@@ -44,7 +51,7 @@ Working tree: **com alterações não-commitadas** (24/07, sessão Termux): port
 **Trabalho encontrado na branch errada (develop) — resolvido em 24/07:**
 - Um agente anterior implementou um MVP antigo do app AA na `develop` (pacote `car/`: `DiLinkCarAppService`/`DiLinkSession`/`DiLinkHomeScreen` com PaneTemplate, category POI, minCarApiLevel=1, rows abrindo `MainActivity`/`ConnectionService`). Estava só na working tree da develop — salvo em **stash** ("WIP automotive car feature (antes do checkout ndk-migration)"), **não dar drop** (referência histórica).
 - Era versão superada do que já existe aqui (pacote `auto/`, NavigationTemplate, category NAVIGATION, minCarApiLevel=2). **Única peça aproveitada**: a ideia do PaneTemplate como diagnóstico.
-- **Port aplicado nesta branch (não commitado)**: `auto/DiLinkHomeScreen.kt` (NOVO) — PaneTemplate mínimo ("Open mirror"→push `MirrorScreen`, "Exit"→finish). `MirrorScreen` ganhou ação **"Home"** no ActionStrip (3ª ação — seguro: `ACTIONS_CONSTRAINTS_NAVIGATION` permite até 4, verificado no bytecode da lib car-app 1.4.0). Strings novas `aa_home`/`aa_open_mirror` só em `values/strings.xml` (mesmo padrão de `aa_back`/`aa_exit`).
+- **Port aplicado (commit `e5f71f5`)**: `auto/DiLinkHomeScreen.kt` (NOVO) — PaneTemplate mínimo ("Open mirror"→push `MirrorScreen`, "Exit"→finish). `MirrorScreen` ganhou ação **"Home"** no ActionStrip (3ª ação — seguro: `ACTIONS_CONSTRAINTS_NAVIGATION` permite até 4, verificado no bytecode da lib car-app 1.4.0). Strings novas `aa_home`/`aa_open_mirror` só em `values/strings.xml` (mesmo padrão de `aa_back`/`aa_exit`).
 - **Uso no carro**: se o host BYD renderizar a Home (Pane) mas não o mirror (NavigationTemplate), o problema é o template; se nenhum renderizar, é validação de fonte de instalação (ver 6.5).
 
 
@@ -158,14 +165,18 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 
 O retry com relógio corrigido era a ação pendente — executada, resultado acima.
 
-### 6.2 Estado do telefone (popsicle, USB estável / WiFi ADB porta aleatória)
+### 6.2 Estado do telefone (popsicle — sessão toda via Termux no próprio aparelho) — ATUALIZADO 24/07 13:45
 
-- **Android Auto: DOWNGRADED para 12.9.643804** (de 17.3.662814). Backup do 17.3 em `aa_17.3_backup/` (base + 3 splits; restaurar com `pm install` dos 4 ou deixar o Play atualizar de volta). **Play Store vai tentar re-atualizar o AA** — desligar auto-update do AA no Play.
-- **Phenotype**: 17 overrides ativos no `flag_overrides` do GMS (lista exata abaixo em 6.4), verificados pós-reboot. DB pré-edit de backup: `phenotype3.db` (raiz do repo).
-- **DiLink app**: root-debug instalado, `installerPackageName=com.android.vending` (spoof), **SU grantado no KernelSU**, app aberto ao menos 1x (fora de stopped state).
-- **Boot logging ativo**: `/data/adb/service.d/99-dilinklog.sh` (KernelSU service.d) → grava `/sdcard/dilink_boot.log` (rotação 4×16MB) em TODO boot. Para capturar sessão do carro: só ir e depois `adb pull /sdcard/dilink_boot.log` (ou `.1/.2/.3` se rotacionou).
-- **Reboot misterioso 19:55**: celular reiniciou 5min após o 1º teste do carro (init matando process groups no fim do `dilink_car.log`). Não explicado — possivelmente relacionado à dessincronia do relógio. Ficar atento se repetir.
-- **Head unit server**: componente `com.google.android.projection.gearhead/.companion.DeveloperHeadUnitNetworkService`; porta 5277; `adb forward tcp:5277 tcp:5277` antes do DHU.
+- **Android Auto: re-atualizado pelo Play para 17.3.662814** (o downgrade p/ 12.9 foi desfeito — confirmado: a vigilância do auto-update era justificada). Para o carro não importa (12.9 era só p/ DHU). Backup em `aa_17.3_backup/` segue lá.
+- **Phenotype**: flags **intactas** pós-reboot e pós-update (verificado 24/07 com sqlite3 do Termux — `sqlite3` NÃO existe no PATH do root shell; usar `/data/data/com.termux/files/usr/bin/sqlite3`).
+- **DiLink app**: root-debug **v0.19.0-dev-1 (build do Termux, com libdilinkd.so)** instalado com `pm install -t -i com.android.vending -r` — md5 do base.apk instalado confere com `app-client-root-debug.apk`. Spoof preservado. **KSU grant re-feito pelo usuário e VERIFICADO**: simulação com o uid real do app (`setpriv --reuid=10346 ... su -c 'id -u'` → `0`). Confirmação objetiva: `strings /data/adb/ksu/.allowlist | grep dilink` → presente.
+- **ATENÇÃO — grant KSU não sobrevive a reinstall** (de novo!): o usuário achou que o app instalado era "a versão errada" porque o app estava sem root — era só o grant perdido no reinstall de 24/07. Se o app parecer "sem root", checar o allowlist ANTES de duvidar do build.
+- **Flavors standard/root são idênticos em runtime** (backend escolhido em runtime pelo PrivilegeRouter; o flavor root existe p/ futuro manifest limpo — Fase 4). Não existe "versão errada" entre eles hoje.
+- **Boot logging ativo**: `/data/adb/service.d/99-dilinklog.sh` → `/sdcard/dilink_boot.log` (rotação 4×16MB).
+- **Reboot misterioso 19:55**: não repetiu nesta sessão.
+- **Head unit server**: componente `com.google.android.projection.gearhead/.companion.DeveloperHeadUnitNetworkService`; porta 5277.
+- **Termux no aparelho = ambiente de dev completo** (24/07): build completo (incl. nativo), install via `su -c 'pm install ...'`, logcat via `su -c 'logcat ...'`. Git identity configurada no repo (local). **NÃO mexer na UI via monkey/am start — pedir ao usuário.**
+- **Mistério em aberto**: `/data/user/0/com.google.android.projection.gearhead` **não existe** (ls como root via KSU) embora `pm dump` aponte esse dataDir — impossível ler `app_notifier.xml`/prefs do gearhead. Causa desconhecida (namespace de mount do KSU su? FBE? dir só existe enquanto o processo vive?). Investigar quando retomar a investigação de listing.
 
 ### 6.3 DHU — mapa completo das falhas (não re-debugar)
 
@@ -194,6 +205,8 @@ Procedimento usado (seguro, repetível): force-stop gms → pull `phenotype.db` 
 - Emulador API 34 tem phenotype **schema antigo** (`Flags`/`FlagOverrides` camelCase, 80k flags reais) — incluindo `app_white_list` real, `app_black_list` (carstream/youtubeauto banidos!), `AppValidation__dhu_bypass_validation=1`, `FrameworkCarProjectionValidatorFlags__use_package_manager_api_for_installed_by_play_check=1` (o check que o spoof vending atende). Telefone tem schema novo e config packages **sem params baixados** (overrides criam as chaves do zero — teoria OK per AA-Visibility-Enabler, mas NÃO confirmado que gearhead honra flag_overrides na 17.3/12.9).
 - O broadcast `com.google.android.gms.phenotype.FLAG_OVERRIDE` **não funciona** (testado root/userdebug, vários formatos — nunca insere row).
 - AA-AIO-Tweaker/AA-Tweaker (comunidade) usam SQL de schema antigo → quebrariam neste GMS 2026; AA-Visibility-Enabler é a referência do schema novo.
+- **NOVO (24/07): a tela "Personalizar apps" do AA NÃO roda o validador ao vivo** — captura de logcat completa enquanto o usuário abria a tela: zero entradas do validador sobre dilink (só ruído de launcher/recents). Ou seja, a lista é populada de estado prévio do gearhead (apps "observados"/validados em sessões), e a flag `log_reason_apps_not_allowed_all_apps` só produzirá logs numa **sessão real** (carro/DHU). Não repetir essa captura — não dá o motivo da rejeição.
+- **NOVO (24/07): dataDir do gearhead inacessível** — `/data/user/0/com.google.android.projection.gearhead` não existe para o root via KSU su (ver 6.2). Sem acesso ao `app_notifier.xml` no momento.
 
 ### 6.6 Estado do bridge (já validado — não re-testar)
 
@@ -248,16 +261,15 @@ Procedimento usado (seguro, repetível): force-stop gms → pull `phenotype.db` 
 
 </details>
 
-## 7. Próximos passos (ordem exata) — ATUALIZADO 2026-07-24
+## 7. Próximos passos (ordem exata) — ATUALIZADO 2026-07-24 13:45
 
-1. **Decidir o caminho do DHU** (opções em 6.1): terminar `grab_cert.py` para confirmar qual cert expirou (telefone, DHU, ou ambos), ou **pular o DHU e ir direto ao carro BYD** (erro 14 é específico do DHU; o carro não depende dele). Recomendação técnica: carro primeiro — é o objetivo real; DHU é só ferramenta de dev.
-2. **Se testar no carro**: AA 12.9 + flags + spoof + SU já no telefone. Boot logging armado — se falhar, `adb pull /sdcard/dilink_boot.log` e analisar. **Critério de sucesso**: DiLink aparece no launcher do AA do carro.
-3. **Se DiLink não aparecer (carro ou DHU)**: ler logcat da sessão (a flag `log_reason_apps_not_allowed_all_apps` loga o motivo da rejeição). Com a razão exata, decidir: mais flags vs LSPosed hook vs AAWireless.
-4. **Vigilância**: (a) Play Store re-atualizando o AA → desligar auto-update do AA; (b) reboot espontâneo de 19:55 (23/07) — se repetir, capturar ramoops/last_kmsg (`/sys/fs/pstore` via root); (c) relógio dessincronizando de novo (na sessão de 24/07 ambos os relógios estavam certos).
-5. **Fase 3 (continuação)**: back-stack vazia no VD → volta ao DiLinkLauncher; polish do grid.
-6. **Fase 4**: slim root flavor (manifest limpo p/ banco) + remover app-server, dilink-car, ConnectionService, TCP flows (pivô 100% AA). Não esquecer CI workflows. CMake/.so sai do caminho crítico do build.
-7. **Fase 5**: polish — dpi dinâmico, gestures (onScroll/onFling → drag via injectMotionEvent MOVE), coolwalk dock, docs.
-8. **Restaurar AA 17.3** (quando quiser voltar): `pm install` dos 4 APKs em `aa_17.3_backup/` ou deixar o Play atualizar.
+1. **Testar no carro BYD** (decisão tomada: DHU abandonado por ora — cert expirado nos dois sentidos, ver 6.1/6.3). Tudo pronto no telefone: app root-debug c/ `.so`, spoof, flags, **KSU grant verificado**, boot logging armado. **Critério de sucesso**: DiLink aparece no launcher do AA do carro; mirror renderiza; touch injeta. Se o mirror falhar mas a tela "Home" (PaneTemplate, nova no strip) renderizar → problema é o NavigationTemplate; se nem a Home → validação.
+2. **Se DiLink não aparecer no carro**: puxar `/sdcard/dilink_boot.log` + `client.log` — a flag `log_reason_apps_not_allowed_all_apps` loga o motivo da rejeição **durante a sessão** (única fonte — a tela de personalizar NÃO roda validação, ver 6.5). Com a razão exata, decidir: mais flags vs LSPosed hook vs AAWireless.
+3. **Vigilância**: (a) **Play já re-atualizou o AA p/ 17.3** — desligar auto-update do AA no Play se o downgrade for necessário de novo (DHU); (b) reboot espontâneo de 19:55 (23/07) — não repetiu em 24/07; (c) KSU grant do app — re-checar após qualquer reinstall (`strings /data/adb/ksu/.allowlist | grep dilink`).
+4. **Fase 3 (continuação)**: back-stack vazia no VD → volta ao DiLinkLauncher; polish do grid.
+5. **Fase 4**: slim root flavor (manifest limpo p/ banco) + remover app-server, dilink-car, ConnectionService, TCP flows (pivô 100% AA). Não esquecer CI workflows. ~~CMake/.so sai do caminho crítico do build~~ — build nativo funciona no Termux (`scripts/termux-ndk-setup.sh`), mas continua fora do CI.
+6. **Fase 5**: polish — dpi dinâmico, gestures (onScroll/onFling → drag via injectMotionEvent MOVE), coolwalk dock, docs.
+7. **DHU (suspenso)**: se um dia voltar — opções em 6.1 (grab_cert.py, cert do DHU 2022 provavelmente expirado em tempo real; DHU 2.0 é a única versão no sdkmanager).
 
 ## 8. Comandos úteis
 
