@@ -1,8 +1,8 @@
-# DiLink-Auto — Session Handover (2026-07-23, atualizado)
+# DiLink-Auto — Session Handover (2026-07-23, final do dia)
 
 > Estado completo do projeto ao fim da sessão de 2026-07-23.
 > Escrito para continuação em nova sessão. Branch: `feature/ndk-migration`.
-> **UPDATE 23/07: cadeia do bridge VALIDADA ponta a ponta no emulador** — VD renderiza dentro de Surface do app e touch injection funciona (ver seção 6).
+> **Resumo do dia**: bridge app↔daemon validado ponta a ponta (emulador + HyperOS); batalha restante = **DiLink não aparece no Android Auto**. AA foi downgradado 17.3→12.9 e o DHU chegou ao SSL pela 1ª vez (falha: cert expirado por **relógio do celular dessincronizado** — corrigido, retry pendente).
 
 ---
 
@@ -41,9 +41,16 @@ Working tree: **LIMPA** (commit `9bce045`). Detalhe do que o commit inclui, para
 | `9f0021d` | POC bridge: bindService falha, ContentProvider.call falha, **ServiceManager.addService funciona (root e shell)** |
 | `9e5b9e4` | **Bridge direta (Fase 2)**: AIDL `IAaDaemon`/`IAaAppCallback`; `AaDaemonMain`/`AaDaemonBridge` (daemon AA **puro Kotlin**); `AaDaemonClient` (getService+retry); hidden API via `setHiddenApiExemptions`; removidos clientes TCP do MVP |
 | `720334d` | Fix crash loop: `VirtualDisplayClient.startListening` não lança mais exceção com porta 19647 ocupada (zumbi) |
-| `9bce045` | **Bridge por broadcast + DiLinkLauncher — cadeia validada no emulador** (transporte, harness, DaemonEntry não-fatal, launcher no VD por componente explícito) |
+| `9bce045` | Bridge por broadcast + DiLinkLauncher — cadeia validada no emulador (transporte, harness, DaemonEntry não-fatal, launcher no VD por componente explícito) |
+| `90680b1` | docs: handover update |
+| `71728b9` | Fix announce skipado na HyperOS — appOp=0 (OP_COARSE_LOCATION) no broadcastIntent; Android 15+ enforça delivery gating |
+| `ae9c7f4` | docs: handover appOp |
+| `c306e16` | Flavor `bridge` — harness sai do source set debug; standard/root voltam a 1 ícone |
+| `58f3dcd` | docs: handover bridge flavor |
+| `864cc21` | docs: handover investigação AA (spoof installer) |
+| `c3a4c92` | docs: handover phenotype flags aplicadas |
 
-**Working tree: LIMPA** (exceto screenshots `bridge_test_*.png`, artefatos de teste não versionados).
+**Working tree: LIMPA.** Artefatos NÃO versionados na raiz (deixar fora do git): `aa_12.9.apk` (AA 12.9.643804, 60MB, MD5 2b9313e67a181fc7a3b6e3edab5e97ea), `aa_17.3_backup/` (base+3 splits do AA 17.3.662814, p/ restaurar), `phenotype*.db`, `pw.db`, `verify.db`, `post_reboot.db`, `csd.db` (cópias do GMS/gearhead), `dilink_car.log` (68MB), `bridge_test_*.png`, `phone_now*.png`.
 
 **Conteúdo do commit `9bce045` (referência):**
 - `vd-server/.../DaemonEntry.kt` — init block do `.so` tornado **não-fatal** (aa-daemon é Kotlin puro e não precisa da lib). **SEM esse fix o daemon morre se libdilinkd.so não existir no path.**
@@ -110,7 +117,66 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 - **cmd.exe quoting**: pipes/aspas dentro de `adb shell "..."` quebram — usar greps simples (termo único, sem aspas internas) ou filtrar local com findstr. NUNCA usar `| more`.
 - Android Auto **não funciona sem ToS/first-run**, e `untrusted_app` não acha serviços custom — as duas armadilhas que mais custaram tempo.
 
-## 6. Estado exato AGORA (para retomar) — ATUALIZADO 2026-07-23 (3ª vez: investigação AA)
+## 6. Estado exato AGORA (para retomar) — FINAL 2026-07-23
+
+### 6.1 ONDE PARAMOS (ler primeiro)
+
+**Última ação**: DHU rodou contra o AA 12.9 com o head unit server oficial e chegou MAIS LONGE que nunca: protocolo 1.7 negociado, **SSL handshake completado**, falha final = `Verify returned: certificate has expired` → `Unrecoverable error -24`. Causa identificada pelo usuário: **o relógio do celular estava dessincronizado** (motivo desconhecido — investigar se foi reboot 19:55 ou outro evento). Relógio já corrigido pelo usuário.
+
+**PRÓXIMA AÇÃO IMEDIATA (1 comando + 1 launch)**:
+```
+adb -d shell "am stopservice -n com.google.android.projection.gearhead/.companion.DeveloperHeadUnitNetworkService"
+adb -d shell "am start-foreground-service -n com.google.android.projection.gearhead/.companion.DeveloperHeadUnitNetworkService"
+# (ou pedir o toggle oficial de novo: AA → ⋮ → Developer settings → head unit server)
+tail -f /dev/null | "/c/Users/anderson/AppData/Local/Android/Sdk/extras/google/auto/desktop-head-unit.exe"
+```
+Reiniciar o serviço força o cert a ser regerado com o relógio certo. Se o DHU subir a UI do AA → verificar se **DiLink aparece na lista**. Telefone precisa estar **desbloqueado e com tela ligada** (o DHU mostra "waiting for phone" até a projeção engatar).
+
+### 6.2 Estado do telefone (popsicle, USB estável / WiFi ADB porta aleatória)
+
+- **Android Auto: DOWNGRADED para 12.9.643804** (de 17.3.662814). Backup do 17.3 em `aa_17.3_backup/` (base + 3 splits; restaurar com `pm install` dos 4 ou deixar o Play atualizar de volta). **Play Store vai tentar re-atualizar o AA** — desligar auto-update do AA no Play.
+- **Phenotype**: 17 overrides ativos no `flag_overrides` do GMS (lista exata abaixo em 6.4), verificados pós-reboot. DB pré-edit de backup: `phenotype3.db` (raiz do repo).
+- **DiLink app**: root-debug instalado, `installerPackageName=com.android.vending` (spoof), **SU grantado no KernelSU**, app aberto ao menos 1x (fora de stopped state).
+- **Boot logging ativo**: `/data/adb/service.d/99-dilinklog.sh` (KernelSU service.d) → grava `/sdcard/dilink_boot.log` (rotação 4×16MB) em TODO boot. Para capturar sessão do carro: só ir e depois `adb pull /sdcard/dilink_boot.log` (ou `.1/.2/.3` se rotacionou).
+- **Reboot misterioso 19:55**: celular reiniciou 5min após o 1º teste do carro (init matando process groups no fim do `dilink_car.log`). Não explicado — possivelmente relacionado à dessincronia do relógio. Ficar atento se repetir.
+- **Head unit server**: componente `com.google.android.projection.gearhead/.companion.DeveloperHeadUnitNetworkService`; porta 5277; `adb forward tcp:5277 tcp:5277` antes do DHU.
+
+### 6.3 DHU — mapa completo das falhas (não re-debugar)
+
+1. **DHU sai instantaneamente sem log** → causa: stdin EOF no console interativo dele. Rodar SEMPRE com `tail -f /dev/null | desktop-head-unit.exe`. Com stdin preso ele fica vivo e mostra "waiting for phone" / a UI.
+2. **AA 17.x**: sessão nem inicia (protocolo). Resolvido com downgrade p/ 12.9.
+3. **Start manual do serviço** (`am start-foreground-service`) aceita TCP mas nunca engata a sessão (zero GH.* no logcat). **O toggle oficial em AA → Developer settings é o caminho que funciona** — foi com ele que o DHU avançou ao SSL.
+4. **certificate has expired** = relógio do celular errado (o DHU valida o cert do head unit server contra o relógio do PC; o gearhead gera o cert com o relógio do telefone). Corrigido pelo usuário; retry pendente (6.1).
+5. Telefone bloqueado/tela apagada = projeção não inicia ("waiting for phone" eterno).
+
+### 6.4 As 17 phenotype flags aplicadas (referência exata)
+
+Semântica (fonte: `jcrutch-design/AA-Visibility-Enabler` PhenotypePatcher.kt): `INSERT INTO flag_overrides (config_package_id, config_package_name=NULL, account_id=0, active=1, name, value, type, source=0)` + DELETE do override ativo anterior + staging em `flag_overrides_to_commit`. type: bool-false=0("0"), bool-true=1("1"), string=4. IDs no telefone: gearhead=654, gms.car=230.
+
+- gearhead (654): `AppValidation__should_bypass_validation=1`, `AppValidation__dhu_bypass_validation=1`, `AppValidation__play_install_api=0`, `AppValidation__swallow_play_api_exception=1`, `AppValidation__swallow_play_api_exception_return_value=1`, `AppValidation__allowed_package_list=""`, `AppValidation__blocked_packages_by_installer=""`, `CarProjectionValidator__filter_disabled_packages_in_ispackageallowed_method=0`, `UnknownSources__allow_full_screen_apps=1`, `CradleFeature__all_app_launcher_enabled=1`, `CradleFeature__allow_video_apps=1`, `WirelessProjection__enabled=1`, `WirelessProjection__enabled_for_projection=1`
+- gms.car (230): `app_white_list=com.dilinkauto.client`, `car_connect_broadcast_whitelist=com.dilinkauto.client`, `should_bypass_validation=1`, `FrameworkCarProjectionValidatorFlags__log_reason_apps_not_allowed_all_apps=1` (diagnóstico — validador loga motivo de rejeição de apps no logcat durante sessão)
+
+Procedimento usado (seguro, repetível): force-stop gms → pull `phenotype.db` → edit python sqlite3 → push → `chown u0_a142:u0_a142`, `chmod 660`, `restorecon` → force-stop gearhead. **GMS wipe/update desfaz — re-aplicar.**
+
+### 6.5 Fatos verificados sobre o problema "DiLink não aparece no AA"
+
+- Declaração correta: service exportado + categoria NAVIGATION + `automotive_app_desc` (`template`) + `minCarApiLevel=2` + `ALLOW_ALL_HOSTS_VALIDATOR`. Dev mode ON, unknown sources ON (sobreviveram ao downgrade — prefs em `action_developer_settings.xml`).
+- `cmd package query-services -a androidx.car.app.CarAppService` (shell) **encontra** `com.dilinkauto.client` (junto com tuya, waze, morphe YT music, gearhead, gsa).
+- **Apps de terceiros CarAppService aparecem no carro**: Tuya Smart (`SceneManualCarAppService`) está no launcher do AA do usuário (`LAUNCHER_APP_POSITIONS.xml`) — prova que o setup aceita terceiros; o gate é específico contra sideload.
+- `app_notifier.xml` (gearhead) lista "observed_apps": whatsapp, gsa, sygic, maps, morphe YT, gearhead, tuya, here — **sem dilink** (gearhead nunca nos "observou").
+- Emulador API 34 tem phenotype **schema antigo** (`Flags`/`FlagOverrides` camelCase, 80k flags reais) — incluindo `app_white_list` real, `app_black_list` (carstream/youtubeauto banidos!), `AppValidation__dhu_bypass_validation=1`, `FrameworkCarProjectionValidatorFlags__use_package_manager_api_for_installed_by_play_check=1` (o check que o spoof vending atende). Telefone tem schema novo e config packages **sem params baixados** (overrides criam as chaves do zero — teoria OK per AA-Visibility-Enabler, mas NÃO confirmado que gearhead honra flag_overrides na 17.3/12.9).
+- O broadcast `com.google.android.gms.phenotype.FLAG_OVERRIDE` **não funciona** (testado root/userdebug, vários formatos — nunca insere row).
+- AA-AIO-Tweaker/AA-Tweaker (comunidade) usam SQL de schema antigo → quebrariam neste GMS 2026; AA-Visibility-Enabler é a referência do schema novo.
+
+### 6.6 Estado do bridge (já validado — não re-testar)
+
+- Cadeia completa OK no emulador `bridgetest` (screenshots `bridge_test_3/4.png`): announce → callback → setSurface → VD na SurfaceView → DiLinkLauncher grid → tap injeta e abre app no VD.
+- HyperOS: após fix appOp (`71728b9`), announce entregue, `app callback registered — bridge up`. VD/touch no físico = mesmo código do emulador.
+- KernelSU grant do app: **feito** (daemon sobe sozinho no carro).
+
+---
+
+<details><summary><b>Histórico da seção 6 (investigação AA — superseded por 6.1–6.6)</b></summary>
 
 **Problema em aberto: DiLink NÃO aparece no Android Auto** (nem carro BYD, nem lista "Personalizar tela inicial" no telefone). Bridge app↔daemon validado na HyperOS, mas gearhead nunca escaneou o app.
 
@@ -153,14 +219,18 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 
 **PC (dev)**: JDK 21 em `~/.jdks/jdk-21.0.11+10` pinado em `~/.gradle/gradle.properties` (org.gradle.java.home). SDK em `%LOCALAPPDATA%\Android\Sdk` (platform-tools, android-34, build-tools 34.0.0, cmake 3.22.1, ndk 29.0.13846066, cmdline-tools, emulator, system-image, extras;google;auto). `local.properties` no repo aponta p/ ele. JDK 25 do sistema QUEBRA o build (Kotlin 1.9.22). Microsoft JDK 21 corrompido (sem bin). Sem Android Studio.
 
-## 7. Próximos passos (ordem exata) — ATUALIZADO 2026-07-23
+</details>
 
-1. ~~Fix compilação~~ / ~~teste do bridge no emulador~~ — **FEITO e validado**.
-2. **Validar no físico**: broadcastIntent de shell via `su shell` na HyperOS (sepolicy pode morder — observar avc). Se negar: daemon como root anuncia, ou fallback provider-bootstrap.
-3. **Fase 3 (continuação)**: back-stack vazia no VD → volta ao DiLinkLauncher; wire do `MirrorScreen` (AA) para o mesmo fluxo do BridgeTest (surface do SurfaceCallback → daemon); polish do grid.
-4. **Fase 4**: slim root flavor (MainActivity mínima, manifests por flavor, build por variante) + **remover app-server, dilink-car, ConnectionService, TCP flows** (pivô 100% AA). Não esquecer CI workflows.
-5. **Fase 5**: polish — dpi dinâmico, gestures (onScroll/onFling → drag via injectMotionEvent MOVE — primitivo já existe), coolwalk dock, docs.
-6. **AA no carro real** (BYD): validar sessão AA real (o DHU 2022 × AA 17.1 pode ser o único problema de emulação).
+## 7. Próximos passos (ordem exata) — FINAL 2026-07-23
+
+1. **DHU retry com relógio corrigido** (comandos em 6.1): restart do head unit server → DHU com stdin preso → telefone desbloqueado. **Critério de sucesso**: UI do AA sobe no DHU e DiLink aparece na lista. Se aparecer: abrir → MirrorScreen sobe daemon (SU já grantado) → grid no DHU.
+2. **Se DiLink não aparecer no DHU**: ler logcat ao vivo da sessão (a flag `log_reason_apps_not_allowed_all_apps` loga o motivo da rejeição). Com a razão exata, decidir: mais flags vs LSPosed hook vs AAWireless.
+3. **Se aparecer no DHU → teste do carro BYD** (mesma config: AA 12.9 + flags + spoof + SU). Boot logging já armado — se falhar, `adb pull /sdcard/dilink_boot.log` e analisar.
+4. **Vigilância**: (a) Play Store re-atualizando o AA → desligar auto-update do AA; (b) reboot espontâneo de 19:55 — se repetir, capturar ramoops/last_kmsg (`/sys/fs/pstore` via root); (c) relógio dessincronizando de novo.
+5. **Fase 3 (continuação)**: back-stack vazia no VD → volta ao DiLinkLauncher; polish do grid.
+6. **Fase 4**: slim root flavor (manifest limpo p/ banco) + remover app-server, dilink-car, ConnectionService, TCP flows (pivô 100% AA). Não esquecer CI workflows. CMake/.so sai do caminho crítico do build.
+7. **Fase 5**: polish — dpi dinâmico, gestures (onScroll/onFling → drag via injectMotionEvent MOVE), coolwalk dock, docs.
+8. **Restaurar AA 17.3** (quando quiser voltar): `pm install` dos 4 APKs em `aa_17.3_backup/` ou deixar o Play atualizar.
 
 ## 8. Comandos úteis
 
