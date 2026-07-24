@@ -29,7 +29,24 @@
 
 ## 3. Estado do Git (feature/ndk-migration)
 
-Working tree: **LIMPA** (commit `9bce045`). Detalhe do que o commit inclui, para referência:
+Working tree: **com alterações não-commitadas** (24/07, sessão Termux): port do `DiLinkHomeScreen` + `scripts/termux-ndk-setup.sh` (ver abaixo). Detalhe do que o commit `9bce045` inclui, para referência:
+
+**Build nativo NO TERMUX — RESOLVIDO (24/07):** o SDK/NDK oficial só traz ferramentas de host x86_64, que não rodam no Termux (aarch64). Solução aplicada e **scriptada em `scripts/termux-ndk-setup.sh`** (re-rodar se NDK/build-tools forem reinstalados):
+- `build-tools/34.0.0/aidl` e `zipalign` → binários aarch64 do Termux (`pkg install aidl zipalign`); originais em `*.x86_64.bak`.
+- `cmake/3.22.1/bin/cmake` e `ninja` → symlinks do Termux.
+- `~/.gradle/gradle.properties`: `android.aapt2FromMavenOverride=$PREFIX/bin/aapt2`.
+- NDK: 10 binários de host (`clang-21`, `lld`, `llvm-ar`, `llvm-objcopy`, etc.) → symlinks para os do Termux; scripts `aarch64-linux-androidNN-clang++` do NDK funcionam sem alteração.
+- NDK `android-legacy.toolchain.cmake`: host `Android` (Termux) adicionado ao caso `Linux` (senão `ANDROID_HOST_TAG` fica vazio → `prebuilt/bin/clang++` inexistente).
+- NDK sysroot: criado `libc++_shared.a` (arquivo REAL, linker script `GROUP ( libc++_static.a libc++abi.a )`) em cada `usr/lib/<abi>/` — o clang do Termux traduz `-static-libstdc++` para `-Bstatic -lc++_shared`, que não existe no NDK. **CUIDADO: nunca escrever esse arquivo através de symlink — destruiu o `libc++_static.a` uma vez (lld crasha com GROUP auto-referente) e exigiu reinstall do NDK.**
+- Verificado: `assembleStandardDebug` + `assembleRootDebug` **completos no aparelho**, com `libdilinkd.so` e `libdilink-car.so` para arm64-v8a, armeabi-v7a e x86_64 (cross via Termux clang).
+
+
+**Trabalho encontrado na branch errada (develop) — resolvido em 24/07:**
+- Um agente anterior implementou um MVP antigo do app AA na `develop` (pacote `car/`: `DiLinkCarAppService`/`DiLinkSession`/`DiLinkHomeScreen` com PaneTemplate, category POI, minCarApiLevel=1, rows abrindo `MainActivity`/`ConnectionService`). Estava só na working tree da develop — salvo em **stash** ("WIP automotive car feature (antes do checkout ndk-migration)"), **não dar drop** (referência histórica).
+- Era versão superada do que já existe aqui (pacote `auto/`, NavigationTemplate, category NAVIGATION, minCarApiLevel=2). **Única peça aproveitada**: a ideia do PaneTemplate como diagnóstico.
+- **Port aplicado nesta branch (não commitado)**: `auto/DiLinkHomeScreen.kt` (NOVO) — PaneTemplate mínimo ("Open mirror"→push `MirrorScreen`, "Exit"→finish). `MirrorScreen` ganhou ação **"Home"** no ActionStrip (3ª ação — seguro: `ACTIONS_CONSTRAINTS_NAVIGATION` permite até 4, verificado no bytecode da lib car-app 1.4.0). Strings novas `aa_home`/`aa_open_mirror` só em `values/strings.xml` (mesmo padrão de `aa_back`/`aa_exit`).
+- **Uso no carro**: se o host BYD renderizar a Home (Pane) mas não o mirror (NavigationTemplate), o problema é o template; se nenhum renderizar, é validação de fonte de instalação (ver 6.5).
+
 
 | Hash | Conteúdo |
 |---|---|
