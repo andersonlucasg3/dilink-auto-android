@@ -1,8 +1,7 @@
-# DiLink-Auto — Session Handover (2026-07-23, final do dia)
+# DiLink-Auto — Session Handover (2026-07-24, ~00:30)
 
-> Estado completo do projeto ao fim da sessão de 2026-07-23.
-> Escrito para continuação em nova sessão. Branch: `feature/ndk-migration`.
-> **Resumo do dia**: bridge app↔daemon validado ponta a ponta (emulador + HyperOS); batalha restante = **DiLink não aparece no Android Auto**. AA foi downgradado 17.3→12.9 e o DHU chegou ao SSL pela 1ª vez (falha: cert expirado por **relógio do celular dessincronizado** — corrigido, retry pendente).
+> Estado completo do projeto. Escrito para continuação em nova sessão. Branch: `feature/ndk-migration`.
+> **Resumo**: retry do DHU com relógio corrigido FALHOU — relógios de PC e telefone conferem (2026-07-24 00:06 -03), mas o SSL falha nos DOIS sentidos: DHU diz "certificate has expired" (cert do telefone) e o telefone mostra **Erro de comunicação 14** ("software do seu carro reprovado nas verificações de segurança — verifique data/hora do carro"), ou seja, o telefone rejeita o **cert do DHU**. Suspeita principal: o cert embutido do DHU 2.0 (build 2022-03-30, única versão no sdkmanager) **expirou em tempo real** — o DHU nunca funcionou neste setup, então não há prova de que já tenha sido válido.
 
 ---
 
@@ -50,7 +49,7 @@ Working tree: **LIMPA** (commit `9bce045`). Detalhe do que o commit inclui, para
 | `864cc21` | docs: handover investigação AA (spoof installer) |
 | `c3a4c92` | docs: handover phenotype flags aplicadas |
 
-**Working tree: LIMPA.** Artefatos NÃO versionados na raiz (deixar fora do git): `aa_12.9.apk` (AA 12.9.643804, 60MB, MD5 2b9313e67a181fc7a3b6e3edab5e97ea), `aa_17.3_backup/` (base+3 splits do AA 17.3.662814, p/ restaurar), `phenotype*.db`, `pw.db`, `verify.db`, `post_reboot.db`, `csd.db` (cópias do GMS/gearhead), `dilink_car.log` (68MB), `bridge_test_*.png`, `phone_now*.png`.
+**Working tree: LIMPA.** Artefatos NÃO versionados na raiz (deixar fora do git): `aa_12.9.apk` (AA 12.9.643804, 60MB, MD5 2b9313e67a181fc7a3b6e3edab5e97ea), `aa_17.3_backup/` (base+3 splits do AA 17.3.662814, p/ restaurar), `phenotype*.db`, `pw.db`, `verify.db`, `post_reboot.db`, `csd.db` (cópias do GMS/gearhead), `dilink_car.log` (68MB), `dhu_session.log` (logcat UTF-16 da sessão DHU de 24/07), `grab_cert.py` (captura de cert TLS do head unit server — em andamento, ver 6.1), `bridge_test_*.png`, `phone_now*.png`.
 
 **Conteúdo do commit `9bce045` (referência):**
 - `vd-server/.../DaemonEntry.kt` — init block do `.so` tornado **não-fatal** (aa-daemon é Kotlin puro e não precisa da lib). **SEM esse fix o daemon morre se libdilinkd.so não existir no path.**
@@ -119,18 +118,28 @@ AA host (Google) ──bind──► DilinkCarAppService  ◄── AA stock (na
 
 ## 6. Estado exato AGORA (para retomar) — FINAL 2026-07-23
 
-### 6.1 ONDE PARAMOS (ler primeiro)
+### 6.1 ONDE PARAMOS (ler primeiro) — ATUALIZADO 2026-07-24 00:30
 
-**Última ação**: DHU rodou contra o AA 12.9 com o head unit server oficial e chegou MAIS LONGE que nunca: protocolo 1.7 negociado, **SSL handshake completado**, falha final = `Verify returned: certificate has expired` → `Unrecoverable error -24`. Causa identificada pelo usuário: **o relógio do celular estava dessincronizado** (motivo desconhecido — investigar se foi reboot 19:55 ou outro evento). Relógio já corrigido pelo usuário.
+**Última ação**: retry do DHU (sequência exata de 6.1 anterior: stop/start do `DeveloperHeadUnitNetworkService` + `adb forward tcp:5277` + DHU com stdin preso). Resultado: **protocolo 1.7 negociado, SSL completado, e falha de cert nos DOIS lados**:
 
-**PRÓXIMA AÇÃO IMEDIATA (1 comando + 1 launch)**:
-```
-adb -d shell "am stopservice -n com.google.android.projection.gearhead/.companion.DeveloperHeadUnitNetworkService"
-adb -d shell "am start-foreground-service -n com.google.android.projection.gearhead/.companion.DeveloperHeadUnitNetworkService"
-# (ou pedir o toggle oficial de novo: AA → ⋮ → Developer settings → head unit server)
-tail -f /dev/null | "/c/Users/anderson/AppData/Local/Android/Sdk/extras/google/auto/desktop-head-unit.exe"
-```
-Reiniciar o serviço força o cert a ser regerado com o relógio certo. Se o DHU subir a UI do AA → verificar se **DiLink aparece na lista**. Telefone precisa estar **desbloqueado e com tela ligada** (o DHU mostra "waiting for phone" até a projeção engatar).
+- DHU (PC): `Verify returned: certificate has expired` → `Unrecoverable error -24` (o DHU rejeita o cert do telefone).
+- Telefone: tela vermelha **"Erro de comunicação 14 — O software do seu carro foi reprovado nas verificações de segurança do Android Auto. Verifique se a data e a hora do carro estão configuradas corretamente"** (o telefone rejeita o cert do DHU).
+- **Relógios verificados iguais**: PC e telefone ambos `2026-07-24 00:06 -03`. A hipótese "relógio do telefone" está morta.
+- `am force-stop` do gearhead + restart do serviço **NÃO** regera o cert do telefone (2ª tentativa idêntica).
+- Nenhum arquivo de cert no data do gearhead (`find` por cert/key/pem/p12/keystore = vazio) e nenhuma entrada no Android Keystore para o uid 10118 — local de armazenamento do cert do telefone **desconhecido**.
+- sdkmanager só oferece DHU **2.0** (build 2022-03-30-438482292) — não existe versão mais nova no canal. Se o cert embutido do DHU expirou em tempo real, o DHU está permanentemente quebrado via canal oficial.
+
+**Investigação em andamento (parada a pedido do usuário)**: script `grab_cert.py` (raiz do repo, NÃO commitar) fala o version exchange do AAP na porta 5277 (confirmado: envia VERSION_REQUEST 1.7, recebe `000300080002000100070000` = VERSION_RESPONSE 1.7) e tenta o TLS handshake para capturar o cert do telefone e ler as datas reais — handshake do Python deu timeout; estava para testar com `TLS1.2` + cipher `ECDHE-RSA-AES128-GCM-SHA256` (edit já aplicado ao script, não executado). Objetivo: confirmar se o cert do telefone está expirado (gerado no período de relógio errado e cacheado) e, depois, capturar o cert do DHU (client cert) para confirmar a expiração dele.
+
+**PRÓXIMAS AÇÕES possíveis (decidir com o usuário)**:
+1. Terminar o `grab_cert.py` (fix handshake) → datas exatas do cert do telefone. Se expirado: achar onde gearhead cacheia o cert e forçar regen (candidatos: `pm clear` do gearhead — perde dev mode/unknown sources prefs e teria que reativar; ou achar o arquivo).
+2. Capturar/verificar o cert do DHU (cliente TLS) — se expirado (provável, build 2022), o DHU oficial está morto. Alternativas: head unit open-source (openauto/aasdk-based), ou...
+3. **Pular o DHU e testar no carro BYD real** — o carro tem cert próprio (válido, presumivelmente); o erro 14 é específico do DHU. Boot logging já está armado (`/sdcard/dilink_boot.log`). AA 12.9 + phenotype flags + spoof já estão no telefone.
+4. Teste cruzado rápido: rolar o relógio do PC para trás (ex.: 2022) e rodar o DHU — se passar do erro 14, confirma cert do DHU expirado (mas o DHU validando o cert do telefone com relógio de 2022 pode falhar por "not yet valid" — resultado ambíguo).
+
+### 6.1a Estado anterior (superseded)
+
+O retry com relógio corrigido era a ação pendente — executada, resultado acima.
 
 ### 6.2 Estado do telefone (popsicle, USB estável / WiFi ADB porta aleatória)
 
@@ -145,9 +154,10 @@ Reiniciar o serviço força o cert a ser regerado com o relógio certo. Se o DHU
 
 1. **DHU sai instantaneamente sem log** → causa: stdin EOF no console interativo dele. Rodar SEMPRE com `tail -f /dev/null | desktop-head-unit.exe`. Com stdin preso ele fica vivo e mostra "waiting for phone" / a UI.
 2. **AA 17.x**: sessão nem inicia (protocolo). Resolvido com downgrade p/ 12.9.
-3. **Start manual do serviço** (`am start-foreground-service`) aceita TCP mas nunca engata a sessão (zero GH.* no logcat). **O toggle oficial em AA → Developer settings é o caminho que funciona** — foi com ele que o DHU avançou ao SSL.
-4. **certificate has expired** = relógio do celular errado (o DHU valida o cert do head unit server contra o relógio do PC; o gearhead gera o cert com o relógio do telefone). Corrigido pelo usuário; retry pendente (6.1).
+3. **Start manual do serviço** (`am start-foreground-service`): ATUALIZADO 24/07 — com AA 12.9 o start manual **chega ao SSL** (duas vezes, falhando só no cert). A observação antiga ("nunca engata, zero GH.* no logcat") era da era AA 17.x.
+4. **certificate has expired (DHU) + Erro 14 (telefone)** = falha de cert nos dois sentidos com relógios corretos (24/07). Hipótese viva: cert embutido do DHU 2.0 (2022) expirado + cert do telefone possivelmente cacheado do período de relógio errado. Ver 6.1.
 5. Telefone bloqueado/tela apagada = projeção não inicia ("waiting for phone" eterno).
+6. **Head unit server wedgeia após a rejeição erro 14** (24/07): continua aceitando TCP mas não responde nem o version exchange (DHU trava em ">"). Fix: `am stopservice` + `am start-foreground-service` de novo — volta a responder (confirmado via netstat LISTEN + version exchange por script).
 
 ### 6.4 As 17 phenotype flags aplicadas (referência exata)
 
@@ -221,12 +231,12 @@ Procedimento usado (seguro, repetível): force-stop gms → pull `phenotype.db` 
 
 </details>
 
-## 7. Próximos passos (ordem exata) — FINAL 2026-07-23
+## 7. Próximos passos (ordem exata) — ATUALIZADO 2026-07-24
 
-1. **DHU retry com relógio corrigido** (comandos em 6.1): restart do head unit server → DHU com stdin preso → telefone desbloqueado. **Critério de sucesso**: UI do AA sobe no DHU e DiLink aparece na lista. Se aparecer: abrir → MirrorScreen sobe daemon (SU já grantado) → grid no DHU.
-2. **Se DiLink não aparecer no DHU**: ler logcat ao vivo da sessão (a flag `log_reason_apps_not_allowed_all_apps` loga o motivo da rejeição). Com a razão exata, decidir: mais flags vs LSPosed hook vs AAWireless.
-3. **Se aparecer no DHU → teste do carro BYD** (mesma config: AA 12.9 + flags + spoof + SU). Boot logging já armado — se falhar, `adb pull /sdcard/dilink_boot.log` e analisar.
-4. **Vigilância**: (a) Play Store re-atualizando o AA → desligar auto-update do AA; (b) reboot espontâneo de 19:55 — se repetir, capturar ramoops/last_kmsg (`/sys/fs/pstore` via root); (c) relógio dessincronizando de novo.
+1. **Decidir o caminho do DHU** (opções em 6.1): terminar `grab_cert.py` para confirmar qual cert expirou (telefone, DHU, ou ambos), ou **pular o DHU e ir direto ao carro BYD** (erro 14 é específico do DHU; o carro não depende dele). Recomendação técnica: carro primeiro — é o objetivo real; DHU é só ferramenta de dev.
+2. **Se testar no carro**: AA 12.9 + flags + spoof + SU já no telefone. Boot logging armado — se falhar, `adb pull /sdcard/dilink_boot.log` e analisar. **Critério de sucesso**: DiLink aparece no launcher do AA do carro.
+3. **Se DiLink não aparecer (carro ou DHU)**: ler logcat da sessão (a flag `log_reason_apps_not_allowed_all_apps` loga o motivo da rejeição). Com a razão exata, decidir: mais flags vs LSPosed hook vs AAWireless.
+4. **Vigilância**: (a) Play Store re-atualizando o AA → desligar auto-update do AA; (b) reboot espontâneo de 19:55 (23/07) — se repetir, capturar ramoops/last_kmsg (`/sys/fs/pstore` via root); (c) relógio dessincronizando de novo (na sessão de 24/07 ambos os relógios estavam certos).
 5. **Fase 3 (continuação)**: back-stack vazia no VD → volta ao DiLinkLauncher; polish do grid.
 6. **Fase 4**: slim root flavor (manifest limpo p/ banco) + remover app-server, dilink-car, ConnectionService, TCP flows (pivô 100% AA). Não esquecer CI workflows. CMake/.so sai do caminho crítico do build.
 7. **Fase 5**: polish — dpi dinâmico, gestures (onScroll/onFling → drag via injectMotionEvent MOVE), coolwalk dock, docs.
