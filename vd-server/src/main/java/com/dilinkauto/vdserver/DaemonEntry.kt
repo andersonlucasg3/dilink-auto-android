@@ -47,6 +47,12 @@ object DaemonEntry {
             return
         }
 
+        if (args.firstOrNull() == "input-injector") {
+            val code = InputInjectorMain.run()
+            println("[Daemon] input injector exit=$code")
+            return
+        }
+
         val bridge = NativeBridge()
         val result = nativeRun(args, bridge)
         if (result != 0) {

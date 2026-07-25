@@ -3,6 +3,7 @@ package com.dilinkauto.client.debug
 import android.app.Activity
 import android.os.Bundle
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -29,6 +30,7 @@ class BridgeTestActivity : Activity(), SurfaceHolder.Callback, View.OnTouchListe
     private lateinit var statusView: TextView
     @Volatile private var surfaceW = 0
     @Volatile private var surfaceH = 0
+    @Volatile private var currentSurface: Surface? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,12 +50,28 @@ class BridgeTestActivity : Activity(), SurfaceHolder.Callback, View.OnTouchListe
 
         AaDaemonClient.onDisplayReady = { id -> status("VD ready: displayId=$id") }
         AaDaemonClient.onError = { msg -> status("Daemon error: $msg") }
+        // Daemon restarted (or re-announced after churn) — re-push the surface
+        AaDaemonClient.onDaemonConnected = { pushSurface() }
+    }
+
+    private fun pushSurface() {
+        val s = currentSurface ?: return
+        val w = surfaceW
+        val h = surfaceH
+        if (w <= 0 || h <= 0) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                status("Pushing surface to daemon...")
+                AaDaemonClient.daemon?.setSurface(s, w, h, resources.displayMetrics.densityDpi)
+            } catch (_: Exception) {}
+        }
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         val frame = holder.surfaceFrame
         surfaceW = frame.width()
         surfaceH = frame.height()
+        currentSurface = holder.surface
         status("Surface ${surfaceW}x${surfaceH} — starting daemon...")
         scope.launch(Dispatchers.IO) {
             // Privileged launch works on the rooted phone; on emulator/backend-less
@@ -75,6 +93,8 @@ class BridgeTestActivity : Activity(), SurfaceHolder.Callback, View.OnTouchListe
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        FileLog.i(TAG, "Surface destroyed")
+        currentSurface = null
         try { AaDaemonClient.daemon?.surfaceDestroyed() } catch (_: Exception) {}
         AaDaemonClient.reset()
     }
@@ -93,6 +113,12 @@ class BridgeTestActivity : Activity(), SurfaceHolder.Callback, View.OnTouchListe
 
     private fun sendTouch(action: Int, xn: Float, yn: Float) {
         try { AaDaemonClient.daemon?.touch(action, xn, yn) } catch (_: Exception) {}
+    }
+
+    // Forward the host Back button to the VD (exercises goBack + empty-stack relaunch)
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        try { AaDaemonClient.daemon?.goBack() } catch (_: Exception) {}
     }
 
     private fun status(msg: String) {

@@ -5,6 +5,9 @@ import android.service.notification.StatusBarNotification
 import com.dilinkauto.client.ClientApp
 import com.dilinkauto.protocol.DataMsg
 import com.dilinkauto.protocol.NotificationData
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * Listens for phone notifications and forwards them to the car display.
@@ -17,6 +20,37 @@ class NotificationService : NotificationListenerService() {
     companion object {
         var instance: NotificationService? = null
             private set
+
+        private val _notificationsFlow = MutableStateFlow<List<NotificationData>>(emptyList())
+
+        /** Active notifications, for same-process consumers (VD launcher panel). */
+        val notificationsFlow: StateFlow<List<NotificationData>> = _notificationsFlow
+
+        private fun addToFlow(notification: NotificationData) {
+            _notificationsFlow.update { list ->
+                list.filterNot {
+                    it.packageName == notification.packageName && it.id == notification.id
+                } + notification
+            }
+        }
+
+        private fun removeFromFlow(packageName: String, id: Int) {
+            _notificationsFlow.update { list ->
+                list.filterNot { it.packageName == packageName && it.id == id }
+            }
+        }
+
+        /** Dismiss a notification, falling back to the flow when no service is running. */
+        fun clearNotification(packageName: String, id: Int) {
+            instance?.cancelNotification(packageName, id)
+            removeFromFlow(packageName, id)
+        }
+
+        /** Dismiss all notifications, falling back to the flow when no service is running. */
+        fun clearAllNotifications() {
+            instance?.cancelAll()
+            _notificationsFlow.value = emptyList()
+        }
     }
 
     override fun onCreate() {
@@ -30,8 +64,6 @@ class NotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        val connection = ConnectionService.activeConnection ?: return
-
         val extras = sbn.notification.extras
         val title = extras.getCharSequence("android.title")?.toString() ?: ""
         val text = extras.getCharSequence("android.text")?.toString() ?: ""
@@ -59,6 +91,11 @@ class NotificationService : NotificationListenerService() {
             iconPng = ClientApp.loadIconPng(packageManager, sbn.packageName, 96)
         )
 
+        // Same-process consumers (VD launcher panel)
+        addToFlow(notification)
+
+        // TCP forwarding to the car display
+        val connection = ConnectionService.activeConnection ?: return
         try {
             connection.sendData(DataMsg.NOTIFICATION_POST, notification.encode())
         } catch (_: Exception) {
@@ -67,6 +104,10 @@ class NotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        // Same-process consumers (VD launcher panel)
+        removeFromFlow(sbn.packageName, sbn.id)
+
+        // TCP forwarding to the car display
         val connection = ConnectionService.activeConnection ?: return
 
         val notification = NotificationData(

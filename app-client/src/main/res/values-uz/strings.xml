@@ -213,4 +213,18 @@
     <string name="update_file_not_found">Yangilash fayli topilmadi</string>
     <string name="update_installer_error">O\'rnatuvchini ochib bo\'lmadi: %s</string>
     <string name="update_rate_limit">GitHub so\'rov chegarasiga yetildi. Keyinroq urinib ko\'ring.</string>
+
+    <!-- VD Launcher -->
+    <string name="search_hint">Ilovalarni qidirish…</string>
+    <string name="nav_alerts">Ogohlantirishlar</string>
+    <string name="nav_home">Bosh sahifa</string>
+    <string name="nav_back">Orqaga</string>
+    <string name="recent_app_fallback">Ilova</string>
+    <string name="no_notifications">Bildirishnomalar yo\'q</string>
+    <string name="notifications_count">Bildirishnomalar (%d)</string>
+    <string name="clear_all">Hammasini Tozalash</string>
+    <string name="clear_notification">Bildirishnomani tozalash</string>
+    <string name="landscape_app_note">Ilovalar o\'z yo\'nalishini o\'zi boshqaradi. Faqat portret ilovalar chiziqlar bilan ko\'rsatilishi mumkin.</string>
+    <string name="action_uninstall">Olib tashlash</string>
+    <string name="action_app_info">Ilova ma\'lumoti</string>
 </resources>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Root flavor: Android-Auto-only build. The legacy car flow (TCP relay to
+     the head unit, car-APK deploy, accessibility input injection, notification
+     forwarding) is obsolete here, and its permissions/services are red flags
+     for banking SDKs — strip them via manifest merger removals. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- All-files access: only used by the legacy /sdcard daemon staging path -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:node="remove" />
+    <!-- Root flavor never uses Shizuku (su only) -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23"
+        tools:node="remove" />
+
+    <application>
+        <!-- Legacy car flow: TCP listeners (9637/9638/9639), VD deploy to car,
+             car auto-update -->
+        <service android:name=".service.ConnectionService"
+            tools:node="remove" />
+        <!-- Accessibility input injection — bank red flag -->
+        <service android:name=".service.InputInjectionService"
+            tools:node="remove" />
+        <!-- Notification listener — bank red flag; AA UI shows no notifications -->
+        <service android:name=".service.NotificationService"
+            tools:node="remove" />
+    </application>
+</manifest>

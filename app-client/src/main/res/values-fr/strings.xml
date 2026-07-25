@@ -213,4 +213,18 @@
     <string name="update_file_not_found">Fichier de mise à jour introuvable</string>
     <string name="update_installer_error">Impossible d\'ouvrir l\'installateur : %s</string>
     <string name="update_rate_limit">Limite de taux GitHub atteinte. Réessayez plus tard.</string>
+
+    <!-- VD Launcher -->
+    <string name="search_hint">Rechercher des applis…</string>
+    <string name="nav_alerts">Alertes</string>
+    <string name="nav_home">Maison</string>
+    <string name="nav_back">Retour</string>
+    <string name="recent_app_fallback">Appli</string>
+    <string name="no_notifications">Aucune notification</string>
+    <string name="notifications_count">Notifications (%d)</string>
+    <string name="clear_all">Tout Effacer</string>
+    <string name="clear_notification">Effacer la notification</string>
+    <string name="landscape_app_note">Les applis contrôlent leur propre orientation. Les applis en mode portrait uniquement peuvent apparaître avec des bandes.</string>
+    <string name="action_uninstall">Désinstaller</string>
+    <string name="action_app_info">Infos de l\'appli</string>
 </resources>

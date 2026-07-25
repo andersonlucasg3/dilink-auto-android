@@ -64,7 +64,8 @@ class MainActivity : ComponentActivity() {
         // Auto-start the service when the app is opened (e.g. by the car via USB ADB).
         // Only if onboarding is done and the service isn't already running — calling
         // startForegroundService on an already-running service is harmless but noisy.
-        if (onboardingCompleted && ConnectionService.serviceState.value == ConnectionService.State.IDLE) {
+        // AA_ONLY builds have no ConnectionService (stripped from the manifest).
+        if (!BuildConfig.AA_ONLY && onboardingCompleted && ConnectionService.serviceState.value == ConnectionService.State.IDLE) {
             startConnectionService()
         }
 
@@ -217,7 +218,7 @@ private data class OnboardingStep(
 )
 
 @Composable
-fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, installStatus: String) {
+fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, installStatus: String, aaOnly: Boolean = BuildConfig.AA_ONLY) {
     val context = LocalContext.current
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     val pkg = context.packageName
@@ -280,7 +281,7 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
     val doneAction = stringResource(R.string.onboarding_start)
     val grantLabel = stringResource(R.string.onboarding_grant)
 
-    val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications, rootMode, refreshKey) {
+    val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications, rootMode, aaOnly, refreshKey) {
         buildList {
             add(OnboardingStep(
                 icon = Icons.Default.CarRepair,
@@ -345,13 +346,16 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                     }
                 ))
             }
-            add(OnboardingStep(
-                icon = Icons.Default.DirectionsCar,
-                title = carSetupTitle, description = carSetupDesc,
-                actionLabel = carSetupContinue,
-                isGranted = { true }, onAction = {},
-                prerequisites = listOf(carPrereqWifiAdb, carPrereqHotspot, carPrereqConnected, carPrereqInstalled)
-            ))
+            // Car-APK setup step: legacy car flow — AA_ONLY builds never install on the car
+            if (!aaOnly) {
+                add(OnboardingStep(
+                    icon = Icons.Default.DirectionsCar,
+                    title = carSetupTitle, description = carSetupDesc,
+                    actionLabel = carSetupContinue,
+                    isGranted = { true }, onAction = {},
+                    prerequisites = listOf(carPrereqWifiAdb, carPrereqHotspot, carPrereqConnected, carPrereqInstalled)
+                ))
+            }
             add(OnboardingStep(
                 icon = Icons.Default.CheckCircle,
                 title = doneTitle, description = doneDesc,
@@ -456,7 +460,8 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
         }
 
         // Car setup step: prerequisites + install button + skip
-        if (currentStep == 5) {
+        // (index 5 only exists when the car step is present — never in AA_ONLY builds)
+        if (currentStep == 5 && !aaOnly) {
             Spacer(Modifier.height(16.dp))
 
             // Prerequisite items
@@ -681,7 +686,8 @@ fun MainScreen(
     onOpenSettings: () -> Unit,
     onShareLogs: () -> Unit,
     onDownloadUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit
+    onInstallUpdate: () -> Unit,
+    aaOnly: Boolean = BuildConfig.AA_ONLY
 ) {
     val serviceState by ConnectionService.serviceState.collectAsState()
     val installStatus by ConnectionService.installStatusFlow.collectAsState()
@@ -754,8 +760,10 @@ fun MainScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        // Service status
-        StatusCard(serviceState)
+        // Service status (legacy car flow — no ConnectionService in AA_ONLY builds)
+        if (!aaOnly) {
+            StatusCard(serviceState)
+        }
 
         // Update available notification
         if (updateState is UpdateState.Available && !updateDismissed) {
@@ -853,29 +861,32 @@ fun MainScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Start/Stop
-        Button(
-            onClick = { if (isRunning) onStopService() else onStartService() },
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isRunning) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
+        // Start/Stop + Install on Car: legacy car flow — hidden in AA_ONLY builds
+        if (!aaOnly) {
+            // Start/Stop
+            Button(
+                onClick = { if (isRunning) onStopService() else onStartService() },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isRunning) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (isRunning) stringResource(R.string.stop_service) else stringResource(R.string.start_service), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Install on Car (unified: button + status)
+            CarInstallCard(
+                installStatus = installStatus,
+                onInstallOnCar = onInstallOnCar
             )
-        ) {
-            Icon(if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(if (isRunning) stringResource(R.string.stop_service) else stringResource(R.string.start_service), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+
+            Spacer(Modifier.height(24.dp))
         }
-
-        Spacer(Modifier.height(24.dp))
-
-        // Install on Car (unified: button + status)
-        CarInstallCard(
-            installStatus = installStatus,
-            onInstallOnCar = onInstallOnCar
-        )
-
-        Spacer(Modifier.height(24.dp))
 
         // Support / Donations
         DonationCard()

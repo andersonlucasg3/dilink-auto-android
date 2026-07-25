@@ -215,4 +215,18 @@
     <string name="update_file_not_found">Arquivo de atualização não encontrado</string>
     <string name="update_installer_error">Não foi possível abrir o instalador: %s</string>
     <string name="update_rate_limit">Limite de taxa do GitHub atingido. Tente novamente mais tarde.</string>
+
+    <!-- VD Launcher -->
+    <string name="search_hint">Buscar apps…</string>
+    <string name="nav_alerts">Alertas</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_back">Voltar</string>
+    <string name="recent_app_fallback">App</string>
+    <string name="no_notifications">Sem notificações</string>
+    <string name="notifications_count">Notificações (%d)</string>
+    <string name="clear_all">Limpar Tudo</string>
+    <string name="clear_notification">Limpar notificação</string>
+    <string name="landscape_app_note">Os apps controlam sua própria orientação. Apps só retrato podem aparecer com faixas.</string>
+    <string name="action_uninstall">Desinstalar</string>
+    <string name="action_app_info">Info do app</string>
 </resources>

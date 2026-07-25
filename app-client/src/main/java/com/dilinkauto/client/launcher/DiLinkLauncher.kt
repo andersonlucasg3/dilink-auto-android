@@ -4,109 +4,123 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
-import com.dilinkauto.client.DiLinkAutoTheme
+import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.auto.AaDaemonClient
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.dilinkauto.client.auto.AaUiState
+import com.dilinkauto.client.launcher.nav.RecentAppsState
+import com.dilinkauto.client.launcher.screen.AppGrid
+import com.dilinkauto.client.launcher.screen.NotificationContent
+import com.dilinkauto.client.launcher.theme.CarTheme
+import com.dilinkauto.client.service.NotificationService
 
 /**
- * Home screen of the AA virtual display (seed of "Fase 3"). The daemon starts
- * it by explicit component on the VD — the stock launcher is singleTask on
- * display 0, so a generic HOME intent would background the host app.
+ * Home screen of the AA virtual display. The daemon starts it by explicit
+ * component on the VD — the stock launcher is singleTask on display 0, so a
+ * generic HOME intent would background the host app.
+ *
+ * Car-style UI: persistent left nav bar (clock, notifications, recent apps,
+ * Home, Back) + app grid with search, plus a notifications panel. All data is
+ * local (same process): apps from PackageManager, notifications from
+ * [NotificationService.notificationsFlow], nav actions via [AaDaemonClient].
  *
  * Only ever runs on the virtual display: no top bar, no navigation chrome.
  */
 class DiLinkLauncher : ComponentActivity() {
 
+    private var screen by mutableStateOf(Screen.HOME)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            DiLinkAutoTheme {
-                LauncherGrid()
+            CarTheme {
+                LauncherHome(
+                    screen = screen,
+                    onScreenChange = { screen = it },
+                    onLaunchApp = ::launchApp
+                )
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        screen = Screen.HOME
+    }
+
+    /**
+     * Launch inside the car UI viewport via the daemon (shell): freeform
+     * window snapped to the content area (right of the 76dp nav bar).
+     * App-side ActivityOptions would trip MIUI's wakepath confirmation —
+     * the daemon path (shell am) is trusted and doesn't prompt.
+     */
+    private fun launchApp(packageName: String) {
+        try { AaDaemonClient.daemon?.launchApp(packageName) } catch (_: Exception) {}
+    }
 }
 
-private data class LaunchableApp(
-    val packageName: String,
-    val label: String,
-    val icon: ImageBitmap
-)
+private enum class Screen { HOME, NOTIFICATIONS }
 
 @Composable
-private fun LauncherGrid() {
+private fun LauncherHome(
+    screen: Screen,
+    onScreenChange: (Screen) -> Unit,
+    onLaunchApp: (String) -> Unit
+) {
     val context = LocalContext.current
-    val apps by produceState(initialValue = emptyList<LaunchableApp>()) {
-        value = withContext(Dispatchers.IO) {
-            val pm = context.packageManager
-            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            pm.queryIntentActivities(intent, 0)
-                .filter { it.activityInfo.packageName != context.packageName }
-                .map {
-                    LaunchableApp(
-                        packageName = it.activityInfo.packageName,
-                        label = it.loadLabel(pm).toString(),
-                        icon = it.loadIcon(pm).toBitmap().asImageBitmap()
-                    )
-                }
-                .sortedBy { it.label.lowercase() }
+    val recentAppsState = remember { RecentAppsState(context.applicationContext) }
+
+    val apps by produceState(initialValue = emptyList<LauncherApp>()) {
+        value = loadLaunchableApps(context)
+    }
+
+    LaunchedEffect(apps) {
+        if (apps.isNotEmpty()) {
+            recentAppsState.pruneUnavailable(apps.map { it.packageName }.toSet())
         }
     }
 
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 96.dp),
+    val notifications by NotificationService.notificationsFlow.collectAsState()
+
+    val launchAndTrack: (String) -> Unit = { pkg ->
+        recentAppsState.onAppLaunched(pkg)
+        onLaunchApp(pkg)
+    }
+
+    // The rail is transient (swipe-in handle) — the launcher uses full width.
+    Row(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D1117))
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        items(apps) { app ->
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable {
-                    try { AaDaemonClient.daemon?.launchApp(app.packageName) } catch (_: Exception) {}
-                }
-            ) {
-                Image(app.icon, contentDescription = app.label, modifier = Modifier.size(48.dp))
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    app.label,
-                    fontSize = 12.sp,
-                    color = Color.White,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+        Box(modifier = Modifier.weight(1f)) {
+            when (screen) {
+                Screen.HOME -> AppGrid(
+                    apps = apps,
+                    onAppClick = launchAndTrack,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Screen.NOTIFICATIONS -> NotificationContent(
+                    notifications = notifications,
+                    onAppLaunch = launchAndTrack,
+                    onDismiss = { n -> NotificationService.clearNotification(n.packageName, n.id) },
+                    onClearAll = { NotificationService.clearAllNotifications() }
                 )
             }
         }

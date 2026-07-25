@@ -7,6 +7,7 @@
             android:name=".debug.BridgeTestActivity"
             android:exported="true"
             android:label="Bridge Test"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
             android:theme="@style/Theme.DiLinkAuto">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

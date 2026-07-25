@@ -17,6 +17,13 @@
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Android Auto: required for SurfaceCallback (VD rendering on host surface) -->
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
+    <!-- Android Auto: required to send NavigationTemplate to the host -->
+    <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
+    <!-- Nav rail overlay on the virtual display (granted via root appops) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- Shizuku: elevated shell access without ADB -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
@@ -56,10 +63,13 @@
             android:theme="@android:style/Theme.Black.NoTitleBar" />
 
         <!-- AA VD home screen: started by the daemon via explicit component.
-             No HOME category — never selectable as the system home. -->
+             No HOME category — never selectable as the system home.
+             exported=true: the daemon runs as SHELL (uid 2000), which cannot
+             start non-exported activities of another uid (root could — that's
+             why this only ever worked on the emulator). -->
         <activity
             android:name=".launcher.DiLinkLauncher"
-            android:exported="false"
+            android:exported="true"
             android:theme="@android:style/Theme.Black.NoTitleBar" />
 
         <service
@@ -134,6 +144,11 @@
                 <action android:name="com.dilinkauto.client.AA_DAEMON" />
             </intent-filter>
         </receiver>
+
+        <!-- Persistent nav rail overlay on the AA virtual display -->
+        <service
+            android:name=".launcher.navrail.NavRailService"
+            android:exported="false" />
 
     </application>
 </manifest>

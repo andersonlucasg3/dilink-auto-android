@@ -213,4 +213,18 @@
     <string name="update_file_not_found">Файл обновления не найден</string>
     <string name="update_installer_error">Не удалось открыть установщик: %s</string>
     <string name="update_rate_limit">Достигнут лимит запросов GitHub. Попробуйте позже.</string>
+
+    <!-- VD Launcher -->
+    <string name="search_hint">Поиск приложений…</string>
+    <string name="nav_alerts">Оповещения</string>
+    <string name="nav_home">Домой</string>
+    <string name="nav_back">Назад</string>
+    <string name="recent_app_fallback">Приложение</string>
+    <string name="no_notifications">Нет уведомлений</string>
+    <string name="notifications_count">Уведомления (%d)</string>
+    <string name="clear_all">Очистить Все</string>
+    <string name="clear_notification">Очистить уведомление</string>
+    <string name="landscape_app_note">Приложения сами управляют ориентацией. Приложения только с портретным режимом могут отображаться с полосами.</string>
+    <string name="action_uninstall">Удалить</string>
+    <string name="action_app_info">Сведения</string>
 </resources>

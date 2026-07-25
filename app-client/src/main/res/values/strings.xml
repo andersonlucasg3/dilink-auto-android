@@ -226,4 +226,18 @@
     <string name="update_file_not_found">Update file not found</string>
     <string name="update_installer_error">Could not open installer: %s</string>
     <string name="update_rate_limit">GitHub rate limit reached. Try again later.</string>
+
+    <!-- VD Launcher -->
+    <string name="search_hint">Search apps…</string>
+    <string name="nav_alerts">Alerts</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_back">Back</string>
+    <string name="recent_app_fallback">App</string>
+    <string name="no_notifications">No notifications</string>
+    <string name="notifications_count">Notifications (%d)</string>
+    <string name="clear_all">Clear All</string>
+    <string name="clear_notification">Clear notification</string>
+    <string name="landscape_app_note">Apps control their own orientation. Portrait-only apps may appear letterboxed.</string>
+    <string name="action_uninstall">Uninstall</string>
+    <string name="action_app_info">App info</string>
 </resources>

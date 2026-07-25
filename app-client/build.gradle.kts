@@ -47,14 +47,19 @@ android {
         create("standard") {
             dimension = "privilege"
             buildConfigField("String", "PRIVILEGE_FLAVOR", "\"standard\"")
+            buildConfigField("boolean", "AA_ONLY", "false")
         }
         create("root") {
             dimension = "privilege"
             buildConfigField("String", "PRIVILEGE_FLAVOR", "\"root\"")
+            // Android-Auto-only build: no car flow (TCP relay, car-APK install,
+            // accessibility/notification injection) — gated at runtime via this flag.
+            buildConfigField("boolean", "AA_ONLY", "true")
         }
         create("bridge") {
             dimension = "privilege"
             buildConfigField("String", "PRIVILEGE_FLAVOR", "\"bridge\"")
+            buildConfigField("boolean", "AA_ONLY", "false")
         }
     }
 
@@ -63,6 +68,14 @@ android {
     signingConfigs.findByName("release")?.let { releaseConfig ->
         buildTypes.getByName("release").signingConfig = releaseConfig
         buildTypes.getByName("debug").signingConfig = releaseConfig
+    }
+
+    // Car-flow build outputs (embedded car APK, native daemon libs) are generated
+    // into a build dir attached ONLY to the flavors that still ship them — the
+    // root flavor is Android-Auto-only and must never package these artifacts.
+    sourceSets {
+        getByName("standard") { assets.srcDir("build/generated/server-assets") }
+        getByName("bridge") { assets.srcDir("build/generated/server-assets") }
     }
 
     buildFeatures {
@@ -109,20 +122,18 @@ dependencies {
     implementation("androidx.car.app:app:1.4.0")
 }
 
-// Build the VD server JAR and native .so, copy to assets before the client APK is assembled.
+// Build the VD server JAR and copy it to assets before the client APK is assembled.
 // vd-server is a proper Gradle module — compilation handled by AGP/Kotlin.
-// This task runs d8 + jar packaging and collects native .so from the cxx build dir.
+// This task runs d8 + jar packaging. Needed by ALL flavors (the AA daemon runs
+// vd-server.jar via app_process). The native .so copy lives in copyNativeLibs.
 tasks.register("buildVdServer") {
-    dependsOn(":vd-server:bundleLibRuntimeToJarDebug",
-              ":vd-server:externalNativeBuildDebug")
+    dependsOn(":vd-server:bundleLibRuntimeToJarDebug")
 
     val vdBuildDir = file("${rootDir}/vd-server/build/tmp/vds-d8")
     val vdClassesJar = file("${rootDir}/vd-server/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
     val protocolJar = file("${rootDir}/protocol/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
     val d8Jar = file("${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/lib/d8.jar")
     val assetsDir = file("src/main/assets")
-    // AGP places CMake .so output under cxx/Debug/<hash>/obj/<abi>/
-    val cxxObjBase = file("${rootDir}/vd-server/build/intermediates/cxx/Debug")
 
     // Kotlin stdlib + coroutines (needed at runtime by vd-server via app_process)
     val kotlinLibs = project.configurations.detachedConfiguration(
@@ -176,32 +187,45 @@ tasks.register("buildVdServer") {
         assetsDir.mkdirs()
         jarFile.copyTo(file("${assetsDir}/vd-server.jar"), overwrite = true)
         println("VD server JAR built: ${jarFile.length()} bytes -> assets")
+    }
+}
 
-        // Collect native .so files from AGP's cxx build output.
-        // AGP outputs to: cxx/Debug/<hash>/obj/<abi>/libdilinkd.so
-        // Walk the cxx dir tree to find them regardless of hash.
-        val cxxDir = cxxObjBase
-        if (cxxDir.exists()) {
-            fileTree(cxxDir).matching {
+// Copy the native daemon .so from AGP's cxx build output into the car-flow
+// assets dir (build/generated/server-assets — only in the standard/bridge
+// sourceSets). The root flavor's AA daemon is pure Kotlin and skips this.
+tasks.register("copyNativeLibs") {
+    dependsOn(":vd-server:externalNativeBuildDebug")
+
+    val assetsDir = file("build/generated/server-assets")
+    // AGP places CMake .so output under cxx/Debug/<hash>/obj/<abi>/
+    val cxxObjBase = file("${rootDir}/vd-server/build/intermediates/cxx/Debug")
+
+    outputs.upToDateWhen { false }
+
+    doLast {
+        // Walk the cxx dir tree to find the .so files regardless of hash.
+        if (cxxObjBase.exists()) {
+            fileTree(cxxObjBase).matching {
                 include("**/obj/*/libdilinkd.so")
             }.forEach { soFile ->
                 val abi = soFile.parentFile.name
                 val destDir = file("${assetsDir}/native/${abi}")
                 destDir.mkdirs()
                 soFile.copyTo(file("${destDir}/libdilinkd.so"), overwrite = true)
-                println("Native lib ${abi}: ${soFile.length()} bytes -> assets/native/${abi}/")
+                println("Native lib ${abi}: ${soFile.length()} bytes -> ${destDir}")
             }
         } else {
-            println("WARNING: cxx build dir not found: ${cxxDir.absolutePath}")
+            println("WARNING: cxx build dir not found: ${cxxObjBase.absolutePath}")
         }
     }
 }
 
-// Embed the car (server) APK in client assets so the phone can auto-install it on the car
+// Embed the car (server) APK in client assets so the phone can auto-install it
+// on the car. Standard/bridge only — the root flavor has no car flow.
 tasks.register("embedServerApk") {
     dependsOn(":app-server:assembleDebug")
     val serverApk = file("${rootDir}/app-server/build/outputs/apk/debug/app-server-debug.apk")
-    val assetsDir = file("src/main/assets")
+    val assetsDir = file("build/generated/server-assets")
 
     outputs.upToDateWhen { false }
 
@@ -217,6 +241,13 @@ tasks.register("embedServerApk") {
     }
 }
 
-tasks.named("preBuild") {
-    dependsOn("buildVdServer", "embedServerApk")
+// Wire asset-producing tasks per variant: every flavor needs vd-server.jar,
+// but the root flavor is Android-Auto-only — no embedded car APK, no native
+// daemon libs, and no :app-server/:vd-server native build forced on it.
+android.applicationVariants.all {
+    val variantPreBuild = tasks.named("pre${name.replaceFirstChar(Char::uppercaseChar)}Build")
+    variantPreBuild.configure { dependsOn("buildVdServer") }
+    if (flavorName != "root") {
+        variantPreBuild.configure { dependsOn("embedServerApk", "copyNativeLibs") }
+    }
 }

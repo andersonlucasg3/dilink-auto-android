@@ -26,6 +26,9 @@ object AaDaemonClient {
     var onDisplayReady: ((Int) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
+    /** Invoked whenever a (new) daemon binder connects — re-push state here. */
+    var onDaemonConnected: (() -> Unit)? = null
+
     @Volatile
     private var daemonLatch = CountDownLatch(1)
 
@@ -48,10 +51,18 @@ object AaDaemonClient {
             FileLog.w(TAG, "asInterface failed on announced binder")
             return
         }
+        // The daemon re-broadcasts until registration lands — duplicate
+        // announces carry the SAME binder. Only treat a NEW binder as a
+        // (re)connect; re-pushing the surface on duplicates kills the
+        // SurfaceView's buffer queue (producer already connected).
+        val isNewDaemon = daemon?.asBinder() != binder
         daemon = d
         d.registerAppCallback(appCallback)
         daemonLatch.countDown()
-        FileLog.i(TAG, "Connected to daemon bridge")
+        FileLog.i(TAG, "Connected to daemon bridge (new=$isNewDaemon)")
+        if (isNewDaemon) {
+            try { onDaemonConnected?.invoke() } catch (_: Exception) {}
+        }
     }
 
     /** Blocking — call from an IO dispatcher. Waits for the daemon's announce. */

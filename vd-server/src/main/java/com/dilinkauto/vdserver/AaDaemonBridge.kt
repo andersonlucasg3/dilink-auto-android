@@ -24,6 +24,7 @@ class AaDaemonBridge : IAaDaemon.Stub() {
     @Volatile private var vdWidth = 0
     @Volatile private var vdHeight = 0
     @Volatile private var appCallback: IAaAppCallback? = null
+    private val reannouncePending = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /**
      * Broadcast the daemon binder to the app until it registers its callback
@@ -103,6 +104,8 @@ class AaDaemonBridge : IAaDaemon.Stub() {
         displayId = id
         vdWidth = width
         vdHeight = height
+        // Force landscape inside the VD: portrait-only apps can't rotate it
+        nb.execShell("wm set-ignore-orientation-request -d $id true")
         nb.execShell("am start --display $id -n ${AaBridge.APP_PACKAGE}/${AaBridge.LAUNCHER_FQCN}")
         System.err.println("[AaDaemon] VD ready: id=$id")
         appCallback?.onDisplayReady(id)
@@ -111,6 +114,19 @@ class AaDaemonBridge : IAaDaemon.Stub() {
     override fun surfaceDestroyed() {
         System.err.println("[AaDaemon] surfaceDestroyed")
         displayId = -1
+        nb.releaseVirtualDisplay()
+        // The app resets its client when the surface goes away — re-announce so
+        // a recreated surface (rotation, host reconnect) can re-attach
+        if (reannouncePending.compareAndSet(false, true)) {
+            Thread({
+                try {
+                    Thread.sleep(500)
+                    appCallback = null
+                    announce()
+                } catch (_: Exception) {}
+                reannouncePending.set(false)
+            }, "AaReannounce").start()
+        }
     }
 
     override fun touch(action: Int, xNorm: Float, yNorm: Float) {
@@ -118,13 +134,51 @@ class AaDaemonBridge : IAaDaemon.Stub() {
         if (id < 0 || vdWidth <= 0 || vdHeight <= 0) return
         val x = (xNorm.coerceIn(0f, 1f) * vdWidth).toInt()
         val y = (yNorm.coerceIn(0f, 1f) * vdHeight).toInt()
-        nb.injectMotionEvent(id, action, "0,0,$x,$y,1.0")
+        System.err.println("[AaDaemon] touch action=$action x=$x y=$y display=$id")
+        val ok = nb.injectMotionEvent(id, action, "0,0,$x,$y,1.0")
+        if (!ok && action == 0) {
+            // HyperOS: shell injection blocked — root tap covers DOWN+UP at once
+            nb.injectTapViaRoot(id, x, y)
+        }
+        // An in-app back/gesture can empty the VD stack without goBack —
+        // re-check after the interaction settles (debounced)
+        if (action == 2) scheduleStackCheck(1500)
     }
 
     override fun goBack() {
         val id = displayId
         if (id < 0) return
-        nb.execShell("input -d $id keyevent 4")
+        System.err.println("[AaDaemon] goBack on display $id")
+        if (nb.shellInjectionBlocked) {
+            nb.injectKeyViaRoot(id, 4)
+        } else {
+            nb.execShell("input -d $id keyevent 4")
+        }
+        scheduleStackCheck(300)
+    }
+
+    // Debounced empty-stack watcher: any path that can empty the VD back-stack
+    // (strip back, in-app back via touch) schedules a check. Only the latest
+    // request runs; activity teardown takes ~1s, so it polls briefly.
+    @Volatile private var stackCheckSeq = 0
+
+    private fun scheduleStackCheck(delayMs: Long) {
+        val seq = ++stackCheckSeq
+        Thread({
+            try {
+                Thread.sleep(delayMs)
+                repeat(6) {
+                    val id = displayId
+                    if (id < 0 || seq != stackCheckSeq) return@Thread
+                    if (nb.isDisplayStackEmpty(id)) {
+                        System.err.println("[AaDaemon] VD stack empty — relaunching launcher")
+                        nb.execShell("am start --display $id -n ${AaBridge.APP_PACKAGE}/${AaBridge.LAUNCHER_FQCN}")
+                        return@Thread
+                    }
+                    Thread.sleep(300)
+                }
+            } catch (_: Exception) {}
+        }, "AaStackCheck").start()
     }
 
     override fun goHome() {
@@ -136,6 +190,7 @@ class AaDaemonBridge : IAaDaemon.Stub() {
     override fun launchApp(packageName: String) {
         val id = displayId
         if (id < 0) return
+        System.err.println("[AaDaemon] launchApp $packageName on display $id")
         nb.launchApp(id, packageName)
     }
 

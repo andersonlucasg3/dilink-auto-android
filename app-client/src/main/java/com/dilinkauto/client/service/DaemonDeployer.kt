@@ -1,6 +1,7 @@
 package com.dilinkauto.client.service
 
 import android.content.Context
+import com.dilinkauto.client.BuildConfig
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.PrivilegeRouter
 import com.dilinkauto.client.RootManager
@@ -35,13 +36,17 @@ object DaemonDeployer {
 
         // /sdcard staging is only used by the car ADB deploy fallback; without
         // All Files access it simply fails and that path stays unavailable.
-        val dir = File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
-        dir.mkdirs()
-        extractAsset(context, "vd-server.jar", File(dir, "vd-server.jar"))
-        try {
-            extractAsset(context, "native/${abi}/libdilinkd.so", File(dir, "libdilinkd.so"))
-        } catch (e: Exception) {
-            FileLog.w(TAG, "Native lib not bundled for $abi: ${e.message}")
+        // AA_ONLY builds have no car flow (and no MANAGE_EXTERNAL_STORAGE), so
+        // skip the EACCES-prone external storage extraction entirely.
+        if (!BuildConfig.AA_ONLY) {
+            val dir = File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
+            dir.mkdirs()
+            extractAsset(context, "vd-server.jar", File(dir, "vd-server.jar"))
+            try {
+                extractAsset(context, "native/${abi}/libdilinkd.so", File(dir, "libdilinkd.so"))
+            } catch (e: Exception) {
+                FileLog.w(TAG, "Native lib not bundled for $abi: ${e.message}")
+            }
         }
         assetsReady = true
     }
@@ -105,6 +110,15 @@ object DaemonDeployer {
         if (!PrivilegeRouter.isAvailable) {
             FileLog.w(TAG, "No privileged backend available — cannot start AA daemon")
             return false
+        }
+        // A healthy daemon must not be restarted: pkilling it mid-session
+        // DeadObjectExceptions every connected client and starts a crash
+        // loop (app FATAL → linkToDeath → VD teardown).
+        com.dilinkauto.client.auto.AaDaemonClient.daemon?.asBinder()?.let {
+            if (it.isBinderAlive) {
+                FileLog.i(TAG, "AA daemon already alive — not restarting")
+                return true
+            }
         }
         return try {
             ensureAssets(context)

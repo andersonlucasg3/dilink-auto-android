@@ -13,6 +13,11 @@ object AaDaemonMain {
 
     @JvmStatic
     fun run(): Int {
+        // FakeContext builds an ActivityThread, whose Handler needs a Looper
+        // on the *initializing* thread. Force class-init here on the main
+        // thread — binder threads (e.g. setSurface callers) have no Looper
+        // and would kill the clinit with ExceptionInInitializerError.
+        FakeContext.get()
         val bridge = AaDaemonBridge()
         // Main joins the binder pool immediately so the app's registerAppCallback
         // lands while announce() retries in parallel

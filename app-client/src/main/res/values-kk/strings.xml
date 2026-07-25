@@ -213,4 +213,18 @@
     <string name="update_file_not_found">Жаңарту файлы табылмады</string>
     <string name="update_installer_error">Орнатушыны ашу мүмкін болмады: %s</string>
     <string name="update_rate_limit">GitHub сұрау лимитіне жетті. Кейінірек әрекеттеніңіз.</string>
+
+    <!-- VD Launcher -->
+    <string name="search_hint">Қолданбаларды іздеу…</string>
+    <string name="nav_alerts">Ескертулер</string>
+    <string name="nav_home">Басты бет</string>
+    <string name="nav_back">Артқа</string>
+    <string name="recent_app_fallback">Қолданба</string>
+    <string name="no_notifications">Хабарландырулар жоқ</string>
+    <string name="notifications_count">Хабарландырулар (%d)</string>
+    <string name="clear_all">Барлығын Тазалау</string>
+    <string name="clear_notification">Хабарландыруды тазалау</string>
+    <string name="landscape_app_note">Қолданбалар өз бағдарын өздері басқарады. Тек портреттік қолданбалар жолақтармен көрсетілуі мүмкін.</string>
+    <string name="action_uninstall">Жою</string>
+    <string name="action_app_info">Қолданба туралы ақпарат</string>
 </resources>

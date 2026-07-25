@@ -213,4 +213,18 @@
     <string name="update_file_not_found">Файл абнаўлення не знойдзены</string>
     <string name="update_installer_error">Не ўдалося адкрыць усталёўшчык: %s</string>
     <string name="update_rate_limit">Дасягнуты ліміт запытаў GitHub. Паспрабуйце пазней.</string>
+
+    <!-- VD Launcher -->
+    <string name="search_hint">Пошук праграм…</string>
+    <string name="nav_alerts">Апавяшчэнні</string>
+    <string name="nav_home">Дадому</string>
+    <string name="nav_back">Назад</string>
+    <string name="recent_app_fallback">Праграма</string>
+    <string name="no_notifications">Няма апавяшчэнняў</string>
+    <string name="notifications_count">Апавяшчэнні (%d)</string>
+    <string name="clear_all">Ачысціць Усё</string>
+    <string name="clear_notification">Ачысціць апавяшчэнне</string>
+    <string name="landscape_app_note">Праграмы самі кіруюць арыентацыяй. Праграмы толькі з партрэтным рэжымам могуць адлюстроўвацца з палосамі.</string>
+    <string name="action_uninstall">Выдаліць</string>
+    <string name="action_app_info">Звесткі</string>
 </resources>

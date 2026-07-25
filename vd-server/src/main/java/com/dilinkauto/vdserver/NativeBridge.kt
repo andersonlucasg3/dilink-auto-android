@@ -33,6 +33,7 @@ class NativeBridge {
     private var persistentShell: Process? = null
     private var shellOutput: java.io.OutputStream? = null
     private var surfaceTexture: android.graphics.SurfaceTexture? = null
+    private var activeVd: VirtualDisplay? = null
 
     init {
         initInputManager()
@@ -67,8 +68,14 @@ class NativeBridge {
      * @return display ID, or -1 on failure
      */
     fun createVirtualDisplay(width: Int, height: Int, dpi: Int, surface: Surface): Int {
+        releaseVirtualDisplay()
+        lastVdWidth = width
+        lastVdHeight = height
         val name = "DiLinkAutoVD"
-        val flags = 0x6c49 // TRUSTED + OWN_DISPLAY_GROUP + OWN_FOCUS + PUBLIC + OWN_CONTENT_ONLY
+        // TRUSTED + OWN_DISPLAY_GROUP + PUBLIC + OWN_CONTENT_ONLY (no OWN_FOCUS:
+        // when an app launches, the VD's display group takes focus and the
+        // gearhead ghost display stops producing frames — stream starves)
+        val flags = 0x6849
 
         // Try DisplayManagerGlobal first (more reliable on newer Android)
         try {
@@ -116,6 +123,7 @@ class NativeBridge {
 
             if (vd != null) {
                 val id = try { vd.display.displayId } catch (_: Exception) { findDisplayId(name) }
+                activeVd = vd
                 println("[NativeBridge] VD created via DisplayManagerGlobal: id=$id ${width}x${height}@${dpi}dpi")
                 try { setDisplayImePolicy(id) } catch (_: Exception) {}
                 try { execShell("settings put global force_resizable_activities 1") } catch (_: Exception) {}
@@ -142,6 +150,7 @@ class NativeBridge {
 
             val vd = dm.createVirtualDisplay(name, width, height, dpi, surface, dmFlags)
             val id = try { vd.display.displayId } catch (_: Exception) { findDisplayId(name) }
+            activeVd = vd
             println("[NativeBridge] VD created via DisplayManager: id=$id ${width}x${height}@${dpi}dpi")
             try { setDisplayImePolicy(id) } catch (_: Exception) {}
             return id
@@ -150,6 +159,17 @@ class NativeBridge {
         }
 
         return -1
+    }
+
+    /** Release the current VirtualDisplay, if any (idempotent). */
+    fun releaseVirtualDisplay() {
+        try {
+            activeVd?.release()
+            if (activeVd != null) println("[NativeBridge] VD released")
+        } catch (_: Exception) {}
+        activeVd = null
+        lastVdWidth = 0
+        lastVdHeight = 0
     }
 
     private fun findDisplayId(name: String): Int {
@@ -203,6 +223,10 @@ class NativeBridge {
      * @param actionDesc Format: "action,pointerId,x,y,pressure,displayId"
      *        action: 0=DOWN, 1=MOVE, 2=UP
      */
+    /** Set when shell-uid injection is denied (HyperOS) — use root CLI paths. */
+    @Volatile var shellInjectionBlocked = false
+        private set
+
     fun injectMotionEvent(displayId: Int, action: Int, desc: String): Boolean {
         if (inputManager == null || injectInputEventMethod == null) {
             // Fallback: shell-based tap
@@ -242,7 +266,102 @@ class NativeBridge {
             injectInputEventMethod!!.invoke(inputManager, ev, 0)
             ev.recycle()
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // HyperOS blocks shell input injection into virtual displays
+            // (INJECT_EVENTS denied even for uid 2000) — caller falls back
+            // to root CLI injection.
+            shellInjectionBlocked = true
+            System.err.println("[NativeBridge] injectMotionEvent failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Inject a two-pointer (pinch) event step.
+     *
+     * @param phase 0=DOWN, 1=MOVE, 2=UP. Pointer ids are fixed to 0 and 1.
+     *   Android requires ACTION_DOWN before ACTION_POINTER_DOWN, so DOWN emits
+     *   two events (DOWN for pointer 0, then POINTER_DOWN for pointer 1);
+     *   UP mirrors that (POINTER_UP for pointer 1, then UP for pointer 0).
+     */
+    fun injectTwoPointerEvent(displayId: Int, phase: Int,
+                              x1: Float, y1: Float,
+                              x2: Float, y2: Float): Boolean {
+        if (inputManager == null || injectInputEventMethod == null) {
+            System.err.println("[NativeBridge] injectTwoPointerEvent: no InputManager")
+            return false
+        }
+        return try {
+            val now = SystemClock.uptimeMillis()
+            val props = arrayOf(
+                MotionEvent.PointerProperties().apply {
+                    id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER
+                },
+                MotionEvent.PointerProperties().apply {
+                    id = 1; toolType = MotionEvent.TOOL_TYPE_FINGER
+                }
+            )
+            val coords = arrayOf(
+                MotionEvent.PointerCoords().apply {
+                    x = x1; y = y1; pressure = 1f; size = 1f
+                },
+                MotionEvent.PointerCoords().apply {
+                    x = x2; y = y2; pressure = 1f; size = 1f
+                }
+            )
+            when (phase) {
+                0 -> {
+                    inject(displayId, now, MotionEvent.ACTION_DOWN, 1, props, coords)
+                    inject(displayId, now, MotionEvent.ACTION_POINTER_DOWN or
+                        (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, props, coords)
+                }
+                2 -> {
+                    inject(displayId, now, MotionEvent.ACTION_POINTER_UP or
+                        (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, props, coords)
+                    inject(displayId, now, MotionEvent.ACTION_UP, 1, props, coords)
+                }
+                else -> inject(displayId, now, MotionEvent.ACTION_MOVE, 2, props, coords)
+            }
+            true
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] injectTwoPointerEvent failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun inject(displayId: Int, downTime: Long, action: Int, count: Int,
+                       props: Array<MotionEvent.PointerProperties>,
+                       coords: Array<MotionEvent.PointerCoords>) {
+        val ev = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action,
+            count, props, coords, 0, 0, 1f, 1f, 0, 0,
+            InputDevice.SOURCE_TOUCHSCREEN, 0)
+        setDisplayIdMethod?.invoke(ev, displayId)
+        injectInputEventMethod!!.invoke(inputManager, ev, 0)
+        ev.recycle()
+    }
+
+    /**
+     * Tap via root `input` CLI. Needed on HyperOS, where shell cannot inject
+     * into virtual displays (root bypasses the INJECT_EVENTS check). A tap
+     * already includes DOWN+UP, so callers must only invoke this once per click.
+     */
+    fun injectTapViaRoot(displayId: Int, x: Int, y: Int): Boolean {
+        return try {
+            execShell("su -c 'input -d $displayId tap $x $y'")
+            true
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] injectTapViaRoot failed: ${e.message}")
+            false
+        }
+    }
+
+    /** Key event via root `input` CLI — same HyperOS block as [injectTapViaRoot]. */
+    fun injectKeyViaRoot(displayId: Int, keyCode: Int): Boolean {
+        return try {
+            execShell("su -c 'input -d $displayId keyevent $keyCode'")
+            true
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] injectKeyViaRoot failed: ${e.message}")
             false
         }
     }
@@ -312,7 +431,8 @@ class NativeBridge {
                 it.write("$cmd\n".toByteArray())
                 it.flush()
             }
-            if (cmd.startsWith("pm ") || cmd.startsWith("cmd ")) {
+            if (cmd.startsWith("pm ") || cmd.startsWith("cmd ") ||
+                cmd.startsWith("dumpsys ") || cmd.startsWith("am task ")) {
                 // For commands where we want output, use a separate process
                 val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
                 val out = p.inputStream.bufferedReader().readText()
@@ -322,7 +442,33 @@ class NativeBridge {
         } catch (_: Exception) { null }
     }
 
-    /** Launch an app on the virtual display */
+    /** Run a command in a separate process and capture stdout. */
+    fun execShellOutput(cmd: String): String? {
+        return try {
+            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+            val out = p.inputStream.bufferedReader().readText()
+            p.waitFor()
+            out
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * True if the display has no visible activity task (empty back-stack).
+     * Finished root tasks can linger as `visible=false` shells after the last
+     * activity exits, so emptiness = no task with visible=true.
+     */
+    fun isDisplayStackEmpty(displayId: Int): Boolean {
+        val dumpsys = execShellOutput("dumpsys activity activities 2>/dev/null") ?: return false
+        val marker = "Display #$displayId "
+        val start = dumpsys.indexOf(marker)
+        if (start < 0) return true
+        val next = dumpsys.indexOf("Display #", start + marker.length)
+        val section = if (next >= 0) dumpsys.substring(start, next) else dumpsys.substring(start)
+        return section.lines().none { it.contains("Task{") && it.contains("visible=true") }
+    }
+
+    /** Launch an app fullscreen on the virtual display. The nav rail is a
+     *  transient swipe-in overlay — no freeform, no per-app padding. */
     fun launchApp(displayId: Int, packageName: String): Boolean {
         return try {
             val component = execShell(
@@ -330,15 +476,28 @@ class NativeBridge {
                 "-a android.intent.action.MAIN " +
                 "-c android.intent.category.LAUNCHER $packageName 2>/dev/null | tail -1")
                 ?.trim()
-
-            if (!component.isNullOrEmpty()) {
-                execShell("am start --display $displayId -n $component")
-            } else {
-                execShell("am start --display $displayId " +
-                    "-a android.intent.action.MAIN " +
-                    "-c android.intent.category.LAUNCHER $packageName")
+            if (component.isNullOrEmpty()) {
+                System.err.println("[NativeBridge] launchApp $packageName: no component")
+                return false
             }
+            // Force landscape: app-compat override makes the app follow the
+            // display's orientation (VD is landscape) regardless of its
+            // requested orientation — same mechanism Screen Orientation
+            // Control uses. MIUI's size-compat ignores the AOSP display flag.
+            execShell("am compat enable OVERRIDE_ANY_ORIENTATION_TO_USER $packageName")
+
+            // --activity-multiple-task: force a NEW task on the VD. Without it,
+            // apps that already have a task on the physical display (singleTask
+            // or plain recents) resume THERE instead of opening on the VD.
+            val out = execShell("am start --display $displayId --activity-multiple-task -n $component")
+            System.err.println("[NativeBridge] launchApp $packageName fullscreen on display $displayId: $out")
             true
-        } catch (_: Exception) { false }
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] launchApp $packageName failed: ${e.message}")
+            false
+        }
     }
+
+    @Volatile private var lastVdWidth = 0
+    @Volatile private var lastVdHeight = 0
 }
