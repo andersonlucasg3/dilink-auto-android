@@ -1,7 +1,8 @@
-# DiLink-Auto — Session Handover (2026-07-24, ~13:45)
+# DiLink-Auto — Session Handover (2026-07-25, ~13:00, sessão 4 no PC)
 
 > Estado completo do projeto. Escrito para continuação em nova sessão. Branch: `feature/ndk-migration`.
-> **Resumo**: sessão no Termux (no próprio telefone). (1) Trabalho deixado por engano na `develop` resolvido: era versão antiga do app AA (pacote `car/`, PaneTemplate) — ficou em stash; a única ideia aproveitada virou `DiLinkHomeScreen` diagnóstico nesta branch. (2) **Build nativo funciona no Termux** — SDK/NDK x86_64 substituídos por wrappers aarch64 do Termux, scriptado em `scripts/termux-ndk-setup.sh`; APKs completos (com `libdilinkd.so`/`libdilink-car.so` nas 3 ABIs) gerados no aparelho. (3) App root-debug instalado (md5 verificado), KSU grant re-feito e **verificado com o uid real do app** (`su` → uid 0). (4) DiLink continua **não listado** no AA (tela de personalizar); captura de logcat naquela tela NÃO mostrou validação ao vivo — a lista não roda o validador em tempo real; o motivo da rejeição só aparece numa sessão real (carro/DHU). AA foi re-atualizado pelo Play para 17.3. Próximo passo: teste no carro BYD.
+> **Resumo**: **o modo AA está FUNCIONAL de ponta a ponta** (bancada; carro BYD em teste pelo usuário). (1) Mirror validado em sessão AA real: grid do launcher no VD, apps fullscreen em landscape, toque+drag+pinch, rail de navegação, stream estável. (2) **Injeção de input na HyperOS resolvida**: shell não injeta em VD e `su` é inacessível do daemon — o app injeta via root (`AaInput`); gestos multi-pointer via **injetor root dedicado** (app_process + socket localhost:19648). (3) **Root flavor dietado (AA-only)**: manifest sem ConnectionService/acessibilidade/notification/all-files/Shizuku, sem app-server embutido, sem .so nativo — APK 51MB (era 80MB). (4) Painel físico desliga na sessão (lockscreen desativado via root, re-power-off a 30s). **Commitado e pusheado nesta sessão.**
+> **Pendente**: confirmação no carro BYD real (usuário testa a seguir).
 
 ---
 
@@ -213,6 +214,54 @@ Procedimento usado (seguro, repetível): force-stop gms → pull `phenotype.db` 
 - Cadeia completa OK no emulador `bridgetest` (screenshots `bridge_test_3/4.png`): announce → callback → setSurface → VD na SurfaceView → DiLinkLauncher grid → tap injeta e abre app no VD.
 - HyperOS: após fix appOp (`71728b9`), announce entregue, `app callback registered — bridge up`. VD/touch no físico = mesmo código do emulador.
 - KernelSU grant do app: **feito** (daemon sobe sozinho no carro).
+- **ATUALIZADO 24/07 (tarde, PC) — Fase 3 validada no AVD `bridgetab` (Pixel Tablet, API 34 google_apis x86_64, landscape 2560x1600 — melhor p/ testes que o Pixel 6 portrait)**:
+  - **Back-stack vazia → launcher**: validado ponta a ponta (stack esvaziada por keyevents diretos no VD, bypass total do daemon → próximo touch UP religou o launcher; log `VD stack empty — relaunching launcher`).
+  - **Re-announce**: `surfaceDestroyed` no daemon re-anuncia o binder (rotação/recriação de surface reconecta sozinho).
+  - **VD leak fixado**: `NativeBridge.activeVd` + `releaseVirtualDisplay()` — VDs zumbis (displays órfãos com tasks migradas) não acumulam mais.
+  - **Duplo announce**: broadcasts em voo simultâneo entregavam o MESMO binder 2× → `onDaemonConnected` disparava 2 `setSurface` na mesma surface → `BufferQueueProducer: already connected` → `BufferQueue has been abandoned` → surface do host destruída (era a causa do churn de surface no harness). Fix: `AaDaemonClient.onDaemonBinder` só dispara o hook quando o binder é NOVO.
+  - **Re-push de surface**: `AaDaemonClient.onDaemonConnected` → harness e `MirrorScreen` re-enviam a surface guardada — daemon reiniciado recupera o VD sem recriar a activity.
+  - **ARMADILHA do emulador**: `input tap`/`input keyevent` sem `-d` vão para o display FOCADO — que pode ser o VD (OWN_FOCUS), bypassando o harness. Usar sempre `-d 0` (harness) ou `-d N` (VD) explícito nos testes.
+  - Harness: `onBackPressed` encaminha para `daemon.goBack()`; `configChanges` no manifest do flavor bridge evita recriação por rotação.
+
+### 6.8 "Não aparece no AA" — RESOLVIDO DE VEZ (24/07 noite, sessão 3)
+
+**O check da Finsky é LOCAL e tem 2 etapas** (fonte: Finsky 6.0.5 decompilada + microG `PlayGearheadService`, estrutura inalterada na 17.3):
+
+1. `PackageStateRepository.get(pkg)` — lê **`localappstate.db`, tabela `appstate`**. Sem row → inválido imediato.
+2. `Libraries.getAppOwners(pkg, certHashes)` — lê **`library.db`, tabela `ownership`**, iterando as libraries da conta; a row precisa ter `app_certificate_hash` **igual ao hash do cert do APK instalado**. Vazio → log "app owners empty" → `CAR.VALIDATOR: Package DENIED`.
+
+**`app_certificate_hash` = `base64url(SHA-1 do cert DER)` sem padding** (27 chars). Validado empiricamente: SHA-1 do cert da Tuya (`apksigner verify --print-certs`) → base64url bate byte a byte com o valor real da row dela.
+
+**Forges que FUNCIONARAM** (teste #6, 24/07 ~20:49 — app apareceu no launcher do AA):
+- `localappstate.db/appstate`: row do dilink espelhando a da Tuya (account, first_download_ms, persistent_flags=1, permissions_version=1, install_reason='unknown', sandbox_version=1, desired_version=-1, installer_state=0, flags=0).
+- `library.db/ownership`: **duas rows** imitando a Tuya — uma em `u-tpl` (sem hash) e uma na library `3` COM `app_certificate_hash` correto + shareability=2 + purchase_time.
+- Backups: `finsky_localappstate_backup.db` (+ os anteriores). Procedimento: force-stop vending → sqlite3 (binário do Termux: `/data/data/com.termux/files/usr/bin/sqlite3`) → chown u0_a150:u0_a150, chmod 660, restorecon.
+- **Vigilância**: sync da Finsky pode apagar as rows — se sumir do AA de novo, re-verificar/re-aplicar.
+- KingInstaller/AAAD NÃO tocam DBs — só spoofam installer via intent (`EXTRA_INSTALLER_PACKAGE_NAME`); o phenotype patch é via secundária. O `initiatingPackageName` fica `com.android.shell` com `pm install -i` (pm não expõe flag p/ initiating; alternativas: hook Zygisk estilo Fermata em `InstallSourceInfo.getInitiatingPackageName` — NÃO foi preciso).
+
+**Equipamento de teste caseiro (novo)**: **Headunit Revived** (open-source, `andreknieriem/headunit-revived`, APK no repo `headunit-revived_3.1.1.apk`) instalado num Redmi/TV Android via ADB. Conexão: phone com **head unit server ligado** (AA dev settings → "Iniciar servidor de head unit", porta 5277) + `am start -a android.intent.action.VIEW -d "headunit://connect?ip=<ip-do-phone>"` no head unit. **A validação roda igual ao carro** (sem bypass de DHU). Roteiro de reconexão: force-stop HUREV + `su -c 'am force-stop com.google.android.projection.gearhead'` + start-foreground-service do `DeveloperHeadUnitNetworkService` + acordar as duas telas + intent UMA vez (retries wedgeiam o server: aceita TCP mas não responde version exchange — diagnosticável do PC com `adb forward tcp:15277 tcp:5277` + enviar VERSION_REQUEST e esperar resposta). Se o server não responder nem com processo novo: o **toggle "Servidor de head unit" se desliga sozinho** (religar na UI do AA settings). HUREV tem modo Self/WiFiDirect — deixar em **WiFi client**.
+
+### 6.9 Mirror no AA real — estado e armadilhas da HyperOS (24/07 noite)
+
+**Funcionando ponta a ponta** (sessão via Headunit Revived): app abre → `MirrorScreen` (NavigationTemplate) → daemon via KSU → VD 1785×813@240 na surface do AA → `DiLinkLauncher` (UI do carro portada) → apps abrem no VD (`am start --display N --activity-multiple-task` — sem essa flag, apps com task no display 0 escapam pra tela do telefone) → toque injetado via root.
+
+**Bugs reais encontrados SÓ no físico (emulador não pega)**:
+1. **Permissões AA faltando** (crash imediato): `androidx.car.app.ACCESS_SURFACE` e `androidx.car.app.NAVIGATION_TEMPLATES` no manifest. Nunca tinham sido exercitadas — 1ª vez que o MirrorScreen rodou num host real.
+2. **Race do probe de root**: surface chegava ~50ms antes do `RootManager` responder → "no backend". Fix: `MirrorScreen` aguarda `isAvailableFlow` (timeout 10s).
+3. **FakeContext morria no binder thread** (`ExceptionInInitializerError` — ActivityThread precisa de Looper). Fix: `AaDaemonMain` força `FakeContext.get()` na main thread antes do `Binder.joinThreadPool()`.
+4. **DiLinkLauncher `exported=false`** → shell não inicia activity não-exportada de outro uid (root podia — por isso funcionava no emulador). Fix: `exported=true` (sem intent-filter, só componente explícito).
+5. **Crash loop DeadObjectException**: `daemon.setSurface` sem try/catch quando o daemon morria; o `DaemonDeployer.startAaDaemon` dava `pkill` no daemon saudável a cada churn de surface. Fixes: try/catch no setSurface (re-push via onDaemonConnected) + deployer **não reinicia daemon vivo** (`isBinderAlive`).
+6. **HyperOS nega INJECT_EVENTS ao shell em VD** — `input -d N tap/keyevent` e `IInputManager.injectInputEvent` falham como uid 2000 (SecurityException), **e `su` é inacessível do contexto shell do KSU** ("inaccessible or not found" — o grant de shell não se propaga p/ subprocessos). Root injeta normal. **Solução: injeção pelo APP** (`auto/AaInput.kt` — o app tem grant KSU): `MirrorScreen.onClick` → `AaInput.tap(x,y)` via `input -d N tap` como root; Back idem keyevent. Fallback p/ daemon.touch quando sem root (Shizuku/AOSP).
+7. **Stable/visible area do host tem origem offset** (ex.: `Rect(36,132-1749,795)`, e muda com chrome) — VD não pode ser deslocado na surface (renderiza em 0,0), então só shrink/restaura por W×H; offset = log + full surface.
+8. **Daemon stderr vai p/ `/data/local/tmp/aa-daemon.log`** — ler pra debugar (touch, launchApp, VD events estão lá).
+
+**PENDENTES/ABERTOS**:
+- **Stall do stream ~15s após toque**: encoder do gearhead (`c2.qti.hevc.encoder`) zera frames por 10-15s → HUREV cai ("WiFi read timeout (15s)"). Maps nativo no AA não sofre. Causa não confirmada (throttle de conteúdo estático? vsync? focus do VD TRUSTED/OWN_FOCUS?). **Re-testar com o toque root funcionando** (VD passa a atualizar frames no toque — pode resolver sozinho).
+- **Apps em fullscreen cobrem a nav bar**: strip do AA voltou a ter Back/Home/Exit (build de 00:30 NÃO instalado). **Ideia do usuário (a implementar)**: apps em **freeform com launch bounds = rect do viewport** (estilo DeX/Taskbar — "PIP" dentro do VD), mantendo a nav bar sempre visível. Caminho: `settings put global enable_freeform_support 1` (+force_resizable_activities) e launch com ActivityOptions(launchBounds, freeform) via reflection do daemon ou flags do `am`; launcher colapsa p/ coluna de nav quando app em foreground. Literal PIP do Android não serve (só o próprio app entra em PIP).
+- **Duplo setSurface por conexão** (await path + onDaemonConnected) → 2 VDs; mitigar com dedupe de push (binder+dims+surface) no MirrorScreen — NÃO implementado ainda.
+- **Keep-alive FGS** durante a sessão AA (HyperOS freezer) — NÃO implementado (avaliar se ainda morre com os fixes de crash).
+- **Drag/gestures**: `onScroll/onFling` → `input swipe` via root (MOVE) — não implementado.
+- **Commit**: tudo na working tree (ver resumo no topo).
 
 ---
 
@@ -261,15 +310,40 @@ Procedimento usado (seguro, repetível): force-stop gms → pull `phenotype.db` 
 
 </details>
 
-## 7. Próximos passos (ordem exata) — ATUALIZADO 2026-07-24 13:45
+## 7. Próximos passos (ordem exata) — ATUALIZADO 2026-07-25 13:00
 
-1. **Testar no carro BYD** (decisão tomada: DHU abandonado por ora — cert expirado nos dois sentidos, ver 6.1/6.3). Tudo pronto no telefone: app root-debug c/ `.so`, spoof, flags, **KSU grant verificado**, boot logging armado. **Critério de sucesso**: DiLink aparece no launcher do AA do carro; mirror renderiza; touch injeta. Se o mirror falhar mas a tela "Home" (PaneTemplate, nova no strip) renderizar → problema é o NavigationTemplate; se nem a Home → validação.
-2. **Se DiLink não aparecer no carro**: puxar `/sdcard/dilink_boot.log` + `client.log` — a flag `log_reason_apps_not_allowed_all_apps` loga o motivo da rejeição **durante a sessão** (única fonte — a tela de personalizar NÃO roda validação, ver 6.5). Com a razão exata, decidir: mais flags vs LSPosed hook vs AAWireless.
-3. **Vigilância**: (a) **Play já re-atualizou o AA p/ 17.3** — desligar auto-update do AA no Play se o downgrade for necessário de novo (DHU); (b) reboot espontâneo de 19:55 (23/07) — não repetiu em 24/07; (c) KSU grant do app — re-checar após qualquer reinstall (`strings /data/adb/ksu/.allowlist | grep dilink`).
-4. **Fase 3 (continuação)**: back-stack vazia no VD → volta ao DiLinkLauncher; polish do grid.
-5. **Fase 4**: slim root flavor (manifest limpo p/ banco) + remover app-server, dilink-car, ConnectionService, TCP flows (pivô 100% AA). Não esquecer CI workflows. ~~CMake/.so sai do caminho crítico do build~~ — build nativo funciona no Termux (`scripts/termux-ndk-setup.sh`), mas continua fora do CI.
-6. **Fase 5**: polish — dpi dinâmico, gestures (onScroll/onFling → drag via injectMotionEvent MOVE), coolwalk dock, docs.
-7. **DHU (suspenso)**: se um dia voltar — opções em 6.1 (grab_cert.py, cert do DHU 2022 provavelmente expirado em tempo real; DHU 2.0 é a única versão no sdkmanager).
+1. **Instalar o build de 00:30** (strip Back/Home/Exit + AaInput completo) e **re-testar no Redmi**: toque root, Back/Home, e observar se o **stall do stream** (encoder zerando ~15s após toque) persiste agora que o VD atualiza frames no toque. Se persistir: comparar com Maps nativo (não sofre) e investigar throttle/vsync do gearhead.
+2. **Freeform "PIP" no VD (ideia do usuário, prioridade)**: apps abrem com launch bounds = rect do viewport (direita da nav bar), nav bar sempre visível. Habilitar `enable_freeform_support` (root) + launch com bounds via reflection/ActivityOptions; launcher colapsa p/ coluna nav com app em foreground. Ver 6.9 pendentes.
+3. **Commit** de tudo (working tree — ver resumo no topo). Sugestão: `feat: modo AA ponta a ponta — Finsky forge, mirror no host real, UI do carro no VD, injeção root HyperOS` + `docs: handover`.
+4. **Teste no carro BYD real**: o forge já provou na bancada (Headunit Revived); no carro é plugar e ver o DiLink no launcher do AA (Finsky quente antes — abrir Play Store).
+5. **Dedupe do setSurface** (2 VDs por conexão) e **keep-alive FGS** se o freezer ainda matar o app.
+6. **Gestures**: `onScroll/onFling` → `input swipe` root (drag).
+## 7. Próximos passos (ordem exata) — ATUALIZADO 2026-07-25 13:00
+
+1. **Teste no carro BYD real** (usuário executando): abrir Play Store antes (Finsky quente), plugar, DiLink deve aparecer no launcher do AA. Validar: mirror, toque/gestos, rail (menu no strip), painel do telefone apagado, apps em landscape.
+2. **Known issues em aberto**: (a) **BiometricPrompt** (apps com digital, ex.: Revolut) derruba a sessão — prompt vai pro display físico; (b) **stall do stream**: resolvido com keep-alive pulse da rail, mas observar no carro (host BYD pode ter throttle diferente); (c) sync da Finsky pode apagar rows forjadas — se sumir do AA, re-aplicar (candidato a automatizar).
+3. **Fase 4 restante**: remover de vez app-server/dilink-car/TCP do repo (a dieta do root flavor já os exclui do build), CI workflows, self-update sem REQUEST_INSTALL_PACKAGES? (root pode `pm install`).
+4. **Fase 5 (polish)**: dpi dinâmico por host, recents com mais ações (fechar app), coolwalk dock, docs (docs/ ainda descreve o fluxo legado TCP — reescrever pro modo AA).
+5. **Vigilância**: (a) KSU grant após reinstall (`strings /data/adb/ksu/.allowlist | grep dilink`); (b) toggle "Servidor de head unit" auto-desliga — religar na UI se o server parar de responder; (c) auto-update do AA no Play.
+6. **DHU (morto)**: Headunit Revived cobre a bancada; não voltar.
+
+### 6.10 Sessão 4 (25/07) — modo AA funcional: decisões e armadilhas
+
+**Arquitetura final validada (bancada)**:
+- `MirrorScreen` (NavigationTemplate, strip = 1 ação **ícone de menu → toggle da rail**) → VD na surface do AA → `DiLinkLauncher` fullscreen (grid portada do app-server, dados locais) → apps fullscreen via `am start --display N --activity-multiple-task` + `am compat enable OVERRIDE_ANY_ORIENTATION_TO_USER <pkg>` (landscape forçado).
+- **NavRailService** (overlay no VD): handle 10dp na borda esquerda, tap (ou botão de menu do strip) expande p/ 74dp com **app atual + 4 recentes + Home + Back**, auto-hide 5s. Sempre visível com **pulse de alpha 2,5×/s** = keep-alive do stream.
+- **Input**: `AaInput` (app-side, root KSU) — taps/keys via `input -d N` root; gestos via **InputInjectorMain** (app_process ROOT, socket 127.0.0.1:19648, protocolo texto: display/tap/key/down/move/up/mdown/mmove/mup). Log: `/data/local/tmp/input-injector.log`.
+
+**Armadilhas resolvidas (não re-debugar)**:
+- **Stream morre em conteúdo estático**: o encoder do gearhead adapta o fps até zerar (~15s) → HUREV cai ("WiFi read timeout"). Fix: pulse da rail (VD nunca estático). `OWN_FOCUS` do VD removido por suspeita — não era a causa (mantido removido, flags=0x6849).
+- **execShell do daemon só capturava output de `pm ` e `cmd `** — `dumpsys`/`am task` nunca retornavam nada (snap de freeform impossível). Corrigido, mas **freeform abandonado**: MIUI ignora `ActivityOptions.launchBounds` (posiciona onde quer) e janelas separadas por app. Apps são fullscreen; o VD não tem como receber offset (ancora em 0,0 — sem padding esquerdo possível).
+- **Scroll travava na borda**: ponteiro injetado era clampado aos limites do VD. Fix: clamp de ±1 tela de overshoot + re-âncora no centro ao iniciar drag novo.
+- **Drag vertical invertido**: `onScroll` do AA tem Y invertido vs coords do VD (`curY - dy`).
+- **Back esvaziava a stack** (tela preta): `AaInput.back()` ignora quando a única task visível é o launcher (checa via dumpsys root).
+- **Keyguard cobria a projeção ao bloquear**: sessão agora = PARTIAL_WAKELOCK + `settings put secure lockscreen_disabled 1` + `cmd display power-off 0` re-enforçado a 30s; restaura tudo no `onSurfaceDestroyed`. `cmd locksettings` NÃO existe na HyperOS (usar settings secure).
+- **Root flavor diet (AA_ONLY)**: `buildConfigField AA_ONLY` (root=true); root manifest remove `ConnectionService`, `InputInjectionService`, `NotificationService`, `MANAGE_EXTERNAL_STORAGE`, Shizuku perm (tools:node="remove"); `embedServerApk`+`copyNativeLibs` só rodam p/ não-root (assets gerados em `build/generated/server-assets`, source set só dos flavors standard/bridge); `.so` nativos deletados do git (daemon AA é Kotlin puro); MainActivity esconde car-flow (install/status/start-stop) quando AA_ONLY; ensureAssets sem extração p/ sdcard. APK root=51MB, standard=74MB.
+- **`su` inacessível do daemon shell (KSU)**: todo input passa pelo app (root). Daemon segue shell p/ VD/launch/announce (funciona).
+- **MIUI wakepath**: startActivity cross-app do app (launcher) dispara `ConfirmStartActivity` no display 0 — launches SEMPRE via daemon (shell `am start`).
 
 ## 8. Comandos úteis
 
