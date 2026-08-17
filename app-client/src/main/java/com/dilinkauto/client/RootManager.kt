@@ -82,4 +82,46 @@ object RootManager {
             null
         }
     }
+
+    /**
+     * Execute a command as root, returning (exitCode, stdout, stderr).
+     * On timeout the process is destroyed and exit code -1 is returned.
+     * Never throws.
+     */
+    fun execFull(command: String, timeoutSec: Int = 15): Triple<Int, String, String> {
+        if (!isAvailable) return Triple(-1, "", "root not available")
+        return try {
+            val process = ProcessBuilder("su", "-c", command).start()
+            var stdout = ""
+            var stderr = ""
+            val outThread = Thread {
+                stdout = process.inputStream.bufferedReader().readText()
+            }.apply { isDaemon = true; start() }
+            val errThread = Thread {
+                stderr = process.errorStream.bufferedReader().readText()
+            }.apply { isDaemon = true; start() }
+            val deadlineMs = System.currentTimeMillis() + timeoutSec * 1000L
+            var exitCode: Int? = null
+            while (System.currentTimeMillis() < deadlineMs) {
+                try {
+                    exitCode = process.exitValue()
+                    break
+                } catch (_: IllegalThreadStateException) {
+                    Thread.sleep(50)
+                }
+            }
+            outThread.join(1000)
+            errThread.join(1000)
+            if (exitCode == null) {
+                process.destroyForcibly()
+                FileLog.w(TAG, "su command timed out after ${timeoutSec}s: $command")
+                Triple(-1, stdout, stderr)
+            } else {
+                Triple(exitCode, stdout, stderr)
+            }
+        } catch (e: Exception) {
+            FileLog.w(TAG, "su execFull failed: ${e.message}")
+            Triple(-1, "", e.message ?: "")
+        }
+    }
 }
