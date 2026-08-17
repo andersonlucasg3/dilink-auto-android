@@ -167,9 +167,8 @@ object AASelfTweaker {
         FileLog.i(TAG, "Root OK. Ensuring Android Auto registration for '$ourPackage'")
 
         // 2. Phase 0 — ensure installer is com.android.vending.
-        //    If this phase triggers a re-install, the process is killed and
-        //    the remaining phases run on the next launch.
-        val installerOk = ensurePlayStoreInstaller(context, ourPackage)
+        //    Non-blocking: returns true even if spoof fails (phenotype bypass is fallback).
+        ensurePlayStoreInstaller(context, ourPackage)
 
         // 3. Phase 1 — GMS phenotype allowlist.
         val phenotypeOk = ensurePhenotypeOverrides(context, ourPackage)
