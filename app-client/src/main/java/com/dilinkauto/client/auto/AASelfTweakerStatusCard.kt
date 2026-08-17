@@ -18,7 +18,6 @@ import com.dilinkauto.client.R
 import com.dilinkauto.client.auto.AASelfTweakerStatus.Result
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Status card for the Android Auto registration flow.
@@ -39,9 +38,7 @@ fun AASelfTweakerStatusCard(
 
     LaunchedEffect(Unit) {
         loading = true
-        status = withContext(Dispatchers.IO) {
-            AASelfTweakerStatus.check(context)
-        }
+        status = AASelfTweakerStatus.check(context)
         loading = false
     }
 
