@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.dilinkauto.client.BuildConfig
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.PrivilegeRouter
 import com.dilinkauto.client.R
@@ -372,17 +373,35 @@ object UpdateManager {
         val tagName = json.getString("tag_name")
         val versionName = tagName.removePrefix("v")
 
-        // Find APK asset
+        // Find APK asset — prefer matching flavor (root vs standard)
         val assets = json.getJSONArray("assets")
+        val preferRoot = BuildConfig.AA_ONLY
         var apkUrl: String? = null
         var apkSize = 0L
+
+        // First pass: prefer matching flavor
         for (i in 0 until assets.length()) {
             val asset = assets.getJSONObject(i)
             val name = asset.getString("name")
-            if (name.endsWith(".apk")) {
+            val matches = if (preferRoot) name.contains("root", ignoreCase = true)
+                          else name.contains("standard", ignoreCase = true)
+            if (name.endsWith(".apk") && matches) {
                 apkUrl = asset.getString("browser_download_url")
                 apkSize = asset.getLong("size")
                 break
+            }
+        }
+
+        // Fallback: any APK
+        if (apkUrl == null) {
+            for (i in 0 until assets.length()) {
+                val asset = assets.getJSONObject(i)
+                val name = asset.getString("name")
+                if (name.endsWith(".apk")) {
+                    apkUrl = asset.getString("browser_download_url")
+                    apkSize = asset.getLong("size")
+                    break
+                }
             }
         }
 
