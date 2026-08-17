@@ -9,9 +9,18 @@ import kotlin.concurrent.thread
 /**
  * Root (UID 0) command execution via su.
  *
- * KernelSU/Magisk grant su per-app; a single `id -u` probe detects availability
- * and caches the result. API mirrors [ShizukuManager] so [PrivilegeRouter] can
- * treat both backends interchangeably (root is a superset of shell).
+ * KernelSU/Magisk grant su per-app. On devices with isolated mount namespaces
+ * (common on OEM ROMs like BYD DiLink, MIUI/HyperOS), `su -c` runs in a
+ * different mount namespace from the system — commands appear to succeed but
+ * do not affect the real files.
+ *
+ * This manager probes multiple su variants and selects the first that works:
+ *   1. `su --mount-master -c` — forces the master mount namespace (Magisk/KSU)
+ *   2. `su -M -c`             — short form, some builds
+ *   3. `su -c`                 — fallback for environments without namespace isolation
+ *
+ * API mirrors [ShizukuManager] so [PrivilegeRouter] can treat both backends
+ * interchangeably (root is a superset of shell).
  */
 object RootManager {
 
@@ -20,6 +29,10 @@ object RootManager {
     @Volatile
     var isAvailable: Boolean = false
         private set
+
+    /** The su command line that was detected as working. */
+    @Volatile
+    private var suArgs: List<String> = listOf("su", "--mount-master", "-c")
 
     /** Observable probe result: null while probing, true/false once decided. */
     private val _isAvailableFlow = MutableStateFlow<Boolean?>(null)
@@ -46,22 +59,36 @@ object RootManager {
     }
 
     private fun probeSu(): Boolean {
-        return try {
-            val process = ProcessBuilder("su", "-c", "id -u")
-                .redirectErrorStream(true)
-                .start()
-            // waitFor before reading: a blocked su (grant prompt) must hit the
-            // timeout instead of hanging readText forever.
-            if (!process.waitFor(3, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
-                Log.w(TAG, "su probe timed out")
-                return false
+        val candidates = listOf(
+            listOf("su", "--mount-master", "-c"),
+            listOf("su", "-M", "-c"),
+            listOf("su", "-c")
+        )
+        for (args in candidates) {
+            try {
+                val process = ProcessBuilder(*args.toTypedArray(), "id -u")
+                    .redirectErrorStream(true)
+                    .start()
+                // waitFor before reading: a blocked su (grant prompt) must hit the
+                // timeout instead of hanging readText forever.
+                if (!process.waitFor(3, TimeUnit.SECONDS)) {
+                    process.destroyForcibly()
+                    FileLog.w(TAG, "su candidate timed out: ${args.joinToString(" ")}")
+                    continue
+                }
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                if (output == "0") {
+                    suArgs = args
+                    FileLog.i(TAG, "Root OK via: ${args.joinToString(" ")}")
+                    return true
+                }
+                FileLog.w(TAG, "su candidate returned '$output': ${args.joinToString(" ")}")
+            } catch (e: Exception) {
+                FileLog.w(TAG, "su candidate failed (${args.joinToString(" ")}): ${e.message}")
             }
-            process.inputStream.bufferedReader().use { it.readText() }.trim() == "0"
-        } catch (e: Exception) {
-            Log.w(TAG, "su probe failed: ${e.message}")
-            false
         }
+        FileLog.w(TAG, "No working su variant found")
+        return false
     }
 
     /**
@@ -71,7 +98,7 @@ object RootManager {
     fun execAndWait(command: String): String? {
         if (!isAvailable) return null
         return try {
-            val process = ProcessBuilder("su", "-c", command)
+            val process = ProcessBuilder(*suArgs.toTypedArray(), command)
                 .redirectErrorStream(true)
                 .start()
             val output = process.inputStream.bufferedReader().use { it.readText() }
@@ -91,7 +118,7 @@ object RootManager {
     fun execFull(command: String, timeoutSec: Int = 15): Triple<Int, String, String> {
         if (!isAvailable) return Triple(-1, "", "root not available")
         return try {
-            val process = ProcessBuilder("su", "-c", command).start()
+            val process = ProcessBuilder(*suArgs.toTypedArray(), command).start()
             var stdout = ""
             var stderr = ""
             val outThread = Thread {
