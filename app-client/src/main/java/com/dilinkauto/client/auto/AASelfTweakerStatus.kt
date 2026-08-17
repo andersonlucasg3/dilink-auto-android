@@ -1,6 +1,7 @@
 package com.dilinkauto.client.auto
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.os.Build
@@ -34,9 +35,15 @@ object AASelfTweakerStatus {
     private const val WORK_APPSTATE_DB_NAME = "status_appstate_work.db"
     private const val WORK_PHENOTYPE_DB_NAME = "status_phenotype_work.db"
 
+    // Must match AASelfTweaker prefs keys.
+    private const val PREFS_NAME = "dilinkaa_tweaker"
+    private const val PREF_INSTALLER_SPOOF_ATTEMPTED = "installer_spoof_attempted"
+    private const val PREF_LAST_SPOOF_SUCCESS = "last_spoof_success"
+
     data class Result(
         val rootAvailable: Boolean,
         val installerCorrect: Boolean,
+        val installerSpoofAttempted: Boolean,
         val finskyRowsPresent: Boolean,
         val phenotypeFlagsApplied: Boolean,
         val overallReady: Boolean,
@@ -55,28 +62,43 @@ object AASelfTweakerStatus {
         val rootAvailable = RootManager.isAvailable
 
         val installerCorrect = checkInstaller(appContext, ourPackage)
+
+        // Read spoof state from SharedPreferences (set by AASelfTweaker).
+        val prefs: SharedPreferences =
+            appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val spoofAttempted = prefs.getBoolean(PREF_INSTALLER_SPOOF_ATTEMPTED, false)
+        val spoofSucceeded = prefs.getBoolean(PREF_LAST_SPOOF_SUCCESS, false)
+        // installerSpoofAttempted = we tried to spoof but it didn't succeed.
+        // This means the installer is wrong but phenotype bypass should handle it.
+        val installerSpoofAttempted = spoofAttempted && !spoofSucceeded && !installerCorrect
+
         val finskyRowsPresent = if (rootAvailable) checkFinskyRows(appContext, ourPackage) else false
         val phenotypeFlagsApplied = if (rootAvailable) checkPhenotypeFlags(appContext, ourPackage) else false
 
+        // On modern Android, pm install -r cannot change installerPackageName.
+        // Phenotype flags + Finsky forge are sufficient for AA registration.
         val overallReady = rootAvailable &&
-            installerCorrect &&
             finskyRowsPresent &&
             phenotypeFlagsApplied
 
         val message = when {
             !rootAvailable -> "Root required for auto-registration"
-            !installerCorrect -> "Installer not set to Play Store"
             !phenotypeFlagsApplied -> "Phenotype flags missing"
             !finskyRowsPresent -> "Play Store rows missing"
+            installerSpoofAttempted -> "Installer spoof failed — AA may still work via phenotype bypass"
+            !installerCorrect -> "AA registration complete (installer spoof not required)"
             else -> "Android Auto registration complete"
         }
 
         FileLog.i(TAG, "Status: root=$rootAvailable installer=$installerCorrect " +
-                "finsky=$finskyRowsPresent phenotype=$phenotypeFlagsApplied -> $message")
+                "spoofAttempted=$spoofAttempted spoofSucceeded=$spoofSucceeded " +
+                "spoofFailed=$installerSpoofAttempted finsky=$finskyRowsPresent " +
+                "phenotype=$phenotypeFlagsApplied -> $message")
 
         Result(
             rootAvailable = rootAvailable,
             installerCorrect = installerCorrect,
+            installerSpoofAttempted = installerSpoofAttempted,
             finskyRowsPresent = finskyRowsPresent,
             phenotypeFlagsApplied = phenotypeFlagsApplied,
             overallReady = overallReady,

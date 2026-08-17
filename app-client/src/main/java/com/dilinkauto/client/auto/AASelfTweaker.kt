@@ -74,6 +74,7 @@ object AASelfTweaker {
     private const val PREFS_NAME = "dilinkaa_tweaker"
     private const val PREF_LAST_SPOOF_INSTALLER = "last_spoof_installer"
     private const val PREF_LAST_SPOOF_SUCCESS = "last_spoof_success"
+    private const val PREF_INSTALLER_SPOOF_ATTEMPTED = "installer_spoof_attempted"
 
     // flag_overrides.type values (new phenotype schema).
     private const val TYPE_BOOL = 1
@@ -204,9 +205,14 @@ object AASelfTweaker {
         )
 
         // 7. Summary log.
+        // installerOk is now always true (non-blocking), so we log based on actual spoof result.
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val spoofSucceeded = prefs.getBoolean(PREF_LAST_SPOOF_SUCCESS, false)
+        val spoofAttempted = prefs.getBoolean(PREF_INSTALLER_SPOOF_ATTEMPTED, false)
         val installerStatus = when {
-            installerOk -> "OK"
-            else -> "FAILED"
+            spoofSucceeded -> "OK"
+            spoofAttempted -> "FAILED (bypass)"
+            else -> "OK" // already correct or no spoof needed
         }
         FileLog.i(
             TAG,
@@ -248,6 +254,7 @@ object AASelfTweaker {
     @Suppress("DEPRECATION")
     private fun ensurePlayStoreInstaller(context: Context, pkg: String): Boolean {
         val pm = context.packageManager
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
         // 1. Read current installer.
         val currentInstaller = try {
@@ -261,56 +268,99 @@ object AASelfTweaker {
             return false
         }
 
+        FileLog.i(TAG, "[installer] currentInstaller='$currentInstaller' (expected=$VENDING_PACKAGE)")
+
         if (currentInstaller == VENDING_PACKAGE) {
-            FileLog.i(TAG, "Installer already $VENDING_PACKAGE — nothing to do")
+            FileLog.i(TAG, "[installer] already $VENDING_PACKAGE — nothing to do")
             return true
         }
 
-        FileLog.i(TAG, "Installer is '$currentInstaller' (expected $VENDING_PACKAGE)")
-
         // 2. Anti-loop guard: skip if we already failed with this exact installer.
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val lastSpoofInstaller = prefs.getString(PREF_LAST_SPOOF_INSTALLER, null)
         val lastSpoofSuccess = prefs.getBoolean(PREF_LAST_SPOOF_SUCCESS, false)
-        if (!lastSpoofSuccess && lastSpoofInstaller == currentInstaller) {
+        val antiLoopTriggered = !lastSpoofSuccess && lastSpoofInstaller == currentInstaller
+        FileLog.i(TAG, "[installer] antiLoopGuard: lastInstaller='$lastSpoofInstaller' lastSuccess=$lastSpoofSuccess triggered=$antiLoopTriggered")
+
+        if (antiLoopTriggered) {
             FileLog.w(
                 TAG,
-                "Installer spoof already failed for '$currentInstaller' — " +
-                    "skipping to avoid loop"
+                "[installer] spoof already failed for '$currentInstaller' — " +
+                    "skipping to avoid loop (phenotype bypass should still work)"
             )
-            return false
+            // Mark as attempted so status card can show warning instead of X.
+            prefs.edit().putBoolean(PREF_INSTALLER_SPOOF_ATTEMPTED, true).apply()
+            return true // non-blocking: phenotype flags are sufficient fallback
         }
 
         // 3. Obtain our own APK path from PackageManager.
         val sourceDir = try {
             context.applicationInfo.sourceDir
         } catch (t: Throwable) {
-            FileLog.e(TAG, "Could not read sourceDir for '$pkg'", t)
+            FileLog.e(TAG, "[installer] could not read sourceDir for '$pkg'", t)
             return false
         }
+        FileLog.i(TAG, "[installer] sourceDir='$sourceDir'")
 
-        // 4. Run the re-install via root. This kills our process on success.
-        val cmd = "pm install -r -t -i $VENDING_PACKAGE $sourceDir"
-        FileLog.i(TAG, "Executing: $cmd")
-        val (exit, out, err) = RootManager.execFull(cmd, timeoutSec = 60)
-        val success = exit == 0 && out.contains("Success", ignoreCase = true)
+        // 4. Attempt 1: pm install -r -t -i com.android.vending <apk>
+        //    On modern Android this often preserves the original installer,
+        //    but we try it first as it's the documented approach.
+        val cmd1 = "pm install -r -t -i $VENDING_PACKAGE $sourceDir"
+        FileLog.i(TAG, "[installer] attempt 1: $cmd1")
+        val (exit1, out1, err1) = RootManager.execFull(cmd1, timeoutSec = 60)
+        val success1 = exit1 == 0 && out1.contains("Success", ignoreCase = true)
+        FileLog.i(
+            TAG,
+            "[installer] attempt 1 result: exit=$exit1 success=$success1\n" +
+                "  OUT: ${out1.trim().replace("\n", "\n  ")}\n" +
+                "  ERR: ${err1.trim().replace("\n", "\n  ")}"
+        )
 
-        // Persist guard state BEFORE the process dies (on success) so the next
-        // launch knows whether to retry.
+        if (success1) {
+            FileLog.i(TAG, "[installer] pm install succeeded — app will be restarted by the system")
+            prefs.edit()
+                .putString(PREF_LAST_SPOOF_INSTALLER, currentInstaller)
+                .putBoolean(PREF_LAST_SPOOF_SUCCESS, true)
+                .apply()
+            return true
+        }
+
+        // 5. Attempt 2: cmd package install-existing --installer-package
+        //    This is the internal Android command to modify installer metadata
+        //    of an already-installed package without re-installing the APK.
+        val cmd2 = "cmd package install-existing --installer-package $VENDING_PACKAGE $pkg"
+        FileLog.i(TAG, "[installer] attempt 2: $cmd2")
+        val (exit2, out2, err2) = RootManager.execFull(cmd2, timeoutSec = 30)
+        val success2 = exit2 == 0 && !out2.contains("Failure", ignoreCase = true)
+        FileLog.i(
+            TAG,
+            "[installer] attempt 2 result: exit=$exit2 success=$success2\n" +
+                "  OUT: ${out2.trim().replace("\n", "\n  ")}\n" +
+                "  ERR: ${err2.trim().replace("\n", "\n  ")}"
+        )
+
+        if (success2) {
+            FileLog.i(TAG, "[installer] install-existing succeeded — installer spoofed")
+            prefs.edit()
+                .putString(PREF_LAST_SPOOF_INSTALLER, currentInstaller)
+                .putBoolean(PREF_LAST_SPOOF_SUCCESS, true)
+                .apply()
+            return true
+        }
+
+        // 6. Both attempts failed — mark as attempted but non-blocking.
+        //    The phenotype flags (should_bypass_validation=1, play_install_api=0)
+        //    should allow Android Auto to work even without the installer spoof.
+        FileLog.w(
+            TAG,
+            "[installer] both attempts failed — marking as attempted (non-blocking). " +
+                "Phenotype bypass flags will be applied in phase 1."
+        )
         prefs.edit()
             .putString(PREF_LAST_SPOOF_INSTALLER, currentInstaller)
-            .putBoolean(PREF_LAST_SPOOF_SUCCESS, success)
+            .putBoolean(PREF_LAST_SPOOF_SUCCESS, false)
+            .putBoolean(PREF_INSTALLER_SPOOF_ATTEMPTED, true)
             .apply()
-
-        if (success) {
-            FileLog.i(TAG, "pm install succeeded — app will be restarted by the system")
-        } else {
-            FileLog.e(
-                TAG,
-                "pm install failed (exit=$exit):\nOUT: ${out.trim()}\nERR: ${err.trim()}"
-            )
-        }
-        return success
+        return true // non-blocking: let remaining phases run
     }
 
     // ---- Phase 1 — GMS phenotype allowlist ----------------------------------

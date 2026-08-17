@@ -103,15 +103,19 @@ fun AASelfTweakerStatusCard(
 
             // Checklist (only when root is available)
             if (resolvedStatus?.rootAvailable == true && !loading) {
-                val s = resolvedStatus!!
+                val s = resolvedStatus
                 Spacer(Modifier.height(12.dp))
                 CheckItem(
                     label = stringResource(R.string.aa_check_root),
                     checked = s.rootAvailable
                 )
                 CheckItem(
-                    label = stringResource(R.string.aa_check_installer),
-                    checked = s.installerCorrect
+                    label = if (s.installerSpoofAttempted)
+                        stringResource(R.string.aa_check_installer_not_required)
+                    else
+                        stringResource(R.string.aa_check_installer),
+                    checked = s.installerCorrect,
+                    warning = s.installerSpoofAttempted
                 )
                 CheckItem(
                     label = stringResource(R.string.aa_check_finsky),
@@ -154,22 +158,34 @@ fun AASelfTweakerStatusCard(
 }
 
 @Composable
-private fun CheckItem(label: String, checked: Boolean) {
+private fun CheckItem(label: String, checked: Boolean, warning: Boolean = false) {
     Row(
         modifier = Modifier.padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            if (checked) Icons.Default.CheckCircle else Icons.Default.Cancel,
+            when {
+                checked -> Icons.Default.CheckCircle
+                warning -> Icons.Default.Warning
+                else -> Icons.Default.Cancel
+            },
             contentDescription = null,
-            tint = if (checked) Color(0xFF4CAF50) else Color(0xFFEF5350),
+            tint = when {
+                checked -> Color(0xFF4CAF50)
+                warning -> Color(0xFFFFA726)
+                else -> Color(0xFFEF5350)
+            },
             modifier = Modifier.size(16.dp)
         )
         Spacer(Modifier.width(8.dp))
         Text(
             label,
             fontSize = 13.sp,
-            color = if (checked) Color(0xFFB0BEC5) else Color(0xFF757575)
+            color = when {
+                checked -> Color(0xFFB0BEC5)
+                warning -> Color(0xFFB0BEC5)
+                else -> Color(0xFF757575)
+            }
         )
     }
 }

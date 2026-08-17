@@ -222,6 +222,7 @@
     <string name="aa_status_loading">Checking registration status…</string>
     <string name="aa_check_root">Root access</string>
     <string name="aa_check_installer">Play Store installer</string>
+    <string name="aa_check_installer_not_required">Play Store installer (spoof not required)</string>
     <string name="aa_check_finsky">Play Store rows</string>
     <string name="aa_check_phenotype">Phenotype flags</string>
     <string name="aa_rerun_button">Re-run Registration</string>
