@@ -100,6 +100,59 @@ object AASelfTweaker {
         }
     }
 
+    /**
+     * Re-runs the registration flow WITHOUT the installer phase (phase 0).
+     *
+     * This is used from the UI "Re-run Registration" button. Phase 0 runs
+     * `pm install -r`, which kills the current process — calling it from the
+     * UI would crash the app mid-interaction.
+     *
+     * Executes phases 1-4 only: phenotype, finsky, warmup, force-scan.
+     */
+    @JvmStatic
+    fun rerunRegistration(context: Context) {
+        val appContext = context.applicationContext
+        executor.execute {
+            try {
+                if (!RootManager.isAvailable) {
+                    FileLog.w(TAG, "Root not available — skipping rerun")
+                    return@execute
+                }
+
+                val ourPackage = appContext.packageName
+                FileLog.i(TAG, "Re-running registration (phases 1-4) for '$ourPackage'")
+
+                val phenotypeOk = ensurePhenotypeOverrides(appContext, ourPackage)
+                val finskyOk = ensureFinskyRows(appContext, ourPackage)
+                val playWarmupOk = warmUpPlayStore()
+
+                FileLog.i(TAG, "Force-scanning gearhead for '$ourPackage'")
+                RootManager.execFull("dumpsys package $ourPackage", timeoutSec = 10)
+                RootManager.execFull(
+                    "am broadcast -a android.intent.action.PACKAGE_REPLACED " +
+                        "-d package:$ourPackage --user 0",
+                    timeoutSec = 10
+                )
+                RootManager.execFull("am force-stop $GEARHEAD_PACKAGE", timeoutSec = 10)
+                RootManager.execFull(
+                    "am startservice -n $GEARHEAD_PACKAGE/.companion.GearheadService",
+                    timeoutSec = 10
+                )
+
+                FileLog.i(
+                    TAG,
+                    "Re-run summary: " +
+                        "phenotype=${if (phenotypeOk) "OK" else "FAILED"}, " +
+                        "finsky=${if (finskyOk) "OK" else "FAILED"}, " +
+                        "playWarmup=${if (playWarmupOk) "OK" else "FAILED"}, " +
+                        "forceScan=OK"
+                )
+            } catch (t: Throwable) {
+                FileLog.e(TAG, "rerunRegistration: unexpected failure", t)
+            }
+        }
+    }
+
     // ---- Core flow ---------------------------------------------------------
 
     private fun checkAndRegister(context: Context) {

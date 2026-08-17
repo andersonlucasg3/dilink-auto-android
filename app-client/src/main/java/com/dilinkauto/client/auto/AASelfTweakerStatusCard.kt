@@ -16,8 +16,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dilinkauto.client.R
 import com.dilinkauto.client.auto.AASelfTweakerStatus.Result
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 /**
  * Status card for the Android Auto registration flow.
@@ -32,7 +30,6 @@ fun AASelfTweakerStatusCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<Result?>(null) }
     var loading by remember { mutableStateOf(true) }
 
@@ -130,9 +127,7 @@ fun AASelfTweakerStatusCard(
             Spacer(Modifier.height(12.dp))
             Button(
                 onClick = {
-                    scope.launch(Dispatchers.IO) {
-                        AASelfTweaker.ensureRegistered(context)
-                    }
+                    AASelfTweaker.rerunRegistration(context)
                     onRerun()
                 },
                 modifier = Modifier.fillMaxWidth(),
