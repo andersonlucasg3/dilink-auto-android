@@ -272,8 +272,18 @@ class MirrorScreen(
                     AaUiState.onNavAction?.invoke("home")
                 }
                 button?.key == "back" -> {
-                    // Single source: DiLinkLauncher.handleBack() handles both VD1
-                    // and VD2 via daemon or root injector — no duplicate injection.
+                    // Chama daemon diretamente (como home faz) + UI sync
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        try {
+                            val vd2Id = AaUiState.vd2DisplayId.value
+                            val activeApp = AaUiState.activeApp.value
+                            if (activeApp != null && vd2Id >= 0) {
+                                AaDaemonClient.daemon?.goBackOnDisplay(vd2Id)
+                            } else {
+                                AaDaemonClient.daemon?.goBack()
+                            }
+                        } catch (_: Exception) {}
+                    }
                     AaUiState.onNavAction?.invoke("back")
                 }
                 button?.key == "notifications" -> {

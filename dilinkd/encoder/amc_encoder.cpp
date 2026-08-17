@@ -44,8 +44,8 @@ bool AmcEncoder::start(const EncoderConfig& config, ANativeWindow*& out_input_su
     AMediaFormat_setInt32(format_, AMEDIAFORMAT_KEY_PRIORITY, 0); // real-time
     AMediaFormat_setInt32(format_, "max-bframes", 0); // no B-frames
 
-    // Repeat previous frame on static content for up to 500ms
-    AMediaFormat_setInt64(format_, "repeat-previous-frame-after", 500000);
+    // Repeat previous frame on static content for up to 100ms
+    AMediaFormat_setInt64(format_, "repeat-previous-frame-after", 100000);
 
     media_status_t status = AMediaCodec_configure(codec_, format_, nullptr, nullptr,
                                                    AMEDIACODEC_CONFIGURE_FLAG_ENCODE);

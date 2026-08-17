@@ -229,7 +229,6 @@ object AaInput {
                 curX = clampX(curX + stepX)
                 curY = clampY(curY + stepY)
                 ok = sendLocked("move 0 ${curX.toInt()} ${curY.toInt()}")
-                Thread.sleep(FLING_STEP_DELAY_MS)
             }
             sendLocked("up 0 ${curX.toInt()} ${curY.toInt()}")
             dragActive = false
@@ -520,7 +519,6 @@ object AaInput {
                 curX = clampX(curX + stepX)
                 curY = clampY(curY + stepY)
                 ok = sendLocked("move 0 ${curX.toInt()} ${curY.toInt()}")
-                Thread.sleep(FLING_STEP_DELAY_MS)
             }
             sendLocked("up 0 ${curX.toInt()} ${curY.toInt()}")
             dragActive = false
@@ -646,6 +644,8 @@ object AaInput {
             val s = Socket()
             s.connect(InetSocketAddress(HOST, PORT), CONNECT_TIMEOUT_MS)
             s.tcpNoDelay = true
+            s.soTimeout = 500        // 500ms read timeout
+            s.setSoLinger(true, 0)   // close imediato
             socket = s
             writer = BufferedWriter(OutputStreamWriter(s.getOutputStream(), Charsets.UTF_8))
             sentDisplayId = -1

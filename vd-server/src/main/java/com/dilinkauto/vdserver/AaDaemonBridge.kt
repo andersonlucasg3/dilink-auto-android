@@ -97,6 +97,12 @@ class AaDaemonBridge : IAaDaemon.Stub() {
 
     override fun setSurface(surface: Surface, width: Int, height: Int, dpi: Int) {
         System.err.println("[AaDaemon] setSurface ${width}x${height}@${dpi}dpi valid=${surface.isValid}")
+        // Release previous VD before creating a new one
+        val oldId = displayId
+        if (oldId >= 0) {
+            System.err.println("[AaDaemon] releasing previous VD id=$oldId before recreating")
+            nb.releaseVirtualDisplay(oldId)
+        }
         val id = nb.createVirtualDisplay("DiLinkAutoVD1", width, height, dpi, surface)
         if (id < 0) {
             appCallback?.onError("VD creation failed")

@@ -33,7 +33,7 @@ GLuint Pipeline::init(const PipelineConfig& config) {
     enc_cfg.height = config.encode_height;
     enc_cfg.fps = config.fps;
     enc_cfg.bitrate = 5'000'000;
-    enc_cfg.i_frame_interval = 1;
+    enc_cfg.i_frame_interval = 3;  // Keyframe a cada 3 segundos
 
     ANativeWindow* encoder_surface = nullptr;
     if (!encoder_.start(enc_cfg, encoder_surface)) {
