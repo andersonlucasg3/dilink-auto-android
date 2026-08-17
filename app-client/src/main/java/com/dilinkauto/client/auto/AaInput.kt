@@ -2,10 +2,12 @@ package com.dilinkauto.client.auto
 
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.RootManager
-import java.io.BufferedWriter
-import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
-import java.net.Socket
+import java.nio.ByteBuffer
+import java.nio.channels.SelectionKey
+import java.nio.channels.Selector
+import java.nio.channels.SocketChannel
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -38,7 +40,7 @@ object AaInput {
     private const val TAG = "AaInput"
     private const val HOST = "127.0.0.1"
     private const val PORT = 19648
-    private const val CONNECT_TIMEOUT_MS = 200
+    private const val CONNECT_TIMEOUT_MS = 200L
     private const val SPAWN_WAIT_MS = 500L
     private const val SPAWN_RETRIES = 3
     private const val GESTURE_END_DEBOUNCE_MS = 300L
@@ -56,8 +58,9 @@ object AaInput {
     val available: Boolean get() = RootManager.isAvailable && targetDisplayId >= 0
 
     private val lock = Any()
-    private var socket: Socket? = null
-    private var writer: BufferedWriter? = null
+    private var channel: SocketChannel? = null
+    private var selector: Selector? = null
+    private var writeBuffer: ByteBuffer? = null   // pending bytes to write
     private var sentDisplayId = -1
     private var targetDisplayId = -1
 
@@ -245,18 +248,17 @@ object AaInput {
             if (dragActive) endDragLocked()
             pinchFocusX = clampX(focusX)
             pinchFocusY = clampY(focusY)
-            var ok = true
             if (!pinchActive) {
                 pinchSpread = PINCH_SEED_SPREAD
                 val x1 = clampX(pinchFocusX - pinchSpread / 2).toInt()
                 val x2 = clampX(pinchFocusX + pinchSpread / 2).toInt()
-                ok = sendLocked("mdown $x1 ${pinchFocusY.toInt()} $x2 ${pinchFocusY.toInt()}")
+                sendLocked("mdown $x1 ${pinchFocusY.toInt()} $x2 ${pinchFocusY.toInt()}")
                 pinchActive = true
             }
             pinchSpread = (pinchSpread * factor).coerceIn(PINCH_MIN_SPREAD, PINCH_MAX_SPREAD)
             val x1 = clampX(pinchFocusX - pinchSpread / 2).toInt()
             val x2 = clampX(pinchFocusX + pinchSpread / 2).toInt()
-            ok = sendLocked("mmove $x1 ${pinchFocusY.toInt()} $x2 ${pinchFocusY.toInt()}")
+            val ok = sendLocked("mmove $x1 ${pinchFocusY.toInt()} $x2 ${pinchFocusY.toInt()}")
             pinchEndFuture?.cancel(false)
             pinchEndFuture = debouncer.schedule({
                 synchronized(lock) { endPinchLocked() }
@@ -539,18 +541,17 @@ object AaInput {
             if (dragActive) endDragLocked()
             pinchFocusX = clampX(focusX)
             pinchFocusY = clampY(focusY)
-            var ok = true
             if (!pinchActive) {
                 pinchSpread = PINCH_SEED_SPREAD
                 val x1 = clampX(pinchFocusX - pinchSpread / 2).toInt()
                 val x2 = clampX(pinchFocusX + pinchSpread / 2).toInt()
-                ok = sendLocked("mdown $x1 ${pinchFocusY.toInt()} $x2 ${pinchFocusY.toInt()}")
+                sendLocked("mdown $x1 ${pinchFocusY.toInt()} $x2 ${pinchFocusY.toInt()}")
                 pinchActive = true
             }
             pinchSpread = (pinchSpread * factor).coerceIn(PINCH_MIN_SPREAD, PINCH_MAX_SPREAD)
             val x1 = clampX(pinchFocusX - pinchSpread / 2).toInt()
             val x2 = clampX(pinchFocusX + pinchSpread / 2).toInt()
-            ok = sendLocked("mmove $x1 ${pinchFocusY.toInt()} $x2 ${pinchFocusY.toInt()}")
+            val ok = sendLocked("mmove $x1 ${pinchFocusY.toInt()} $x2 ${pinchFocusY.toInt()}")
             pinchEndFuture?.cancel(false)
             pinchEndFuture = debouncer.schedule({
                 synchronized(lock) { endPinchLocked() }
@@ -597,19 +598,23 @@ object AaInput {
     private fun clampX(x: Float) = if (surfaceW > 0) x.coerceIn(-surfaceW.toFloat(), 2f * surfaceW) else x
     private fun clampY(y: Float) = if (surfaceH > 0) y.coerceIn(-surfaceH.toFloat(), 2f * surfaceH) else y
 
-    // ── Socket handling (lock held) ──
+    // ── Socket handling (lock held, NIO non-blocking) ──
+
+    private const val WRITE_TIMEOUT_MS = 500L
 
     /** Connect to the injector, spawning it as root when it is not running. */
     private fun ensureLocked(): Boolean {
         if (!available) return false
-        socket?.let { s ->
-            if (s.isConnected && !s.isClosed && writer != null) {
+        channel?.let { ch ->
+            if (ch.isConnected && ch.isOpen) {
                 // Bug #2 fix: probe write to detect silently-dead peer.
                 // isConnected/isClosed only report local state — a TCP
                 // RST from a dead injector goes undetected until the next
-                // real write. One flush() catches it early.
+                // real write. A zero-byte write catches it early.
                 try {
-                    writer!!.flush()
+                    val probe = ByteBuffer.allocate(1)
+                    probe.put(0.toByte()).flip()
+                    ch.write(probe)
                     return true
                 } catch (_: Exception) {
                     FileLog.w(TAG, "injector socket dead — reconnecting")
@@ -641,13 +646,32 @@ object AaInput {
 
     private fun connectLocked(): Boolean {
         return try {
-            val s = Socket()
-            s.connect(InetSocketAddress(HOST, PORT), CONNECT_TIMEOUT_MS)
-            s.tcpNoDelay = true
-            s.soTimeout = 500        // 500ms read timeout
-            s.setSoLinger(true, 0)   // close imediato
-            socket = s
-            writer = BufferedWriter(OutputStreamWriter(s.getOutputStream(), Charsets.UTF_8))
+            val sel = Selector.open()
+            val ch = SocketChannel.open()
+            ch.configureBlocking(false)
+            val sock = ch.socket()
+            sock.tcpNoDelay = true
+            sock.setSoLinger(true, 0)
+
+            ch.connect(InetSocketAddress(HOST, PORT))
+
+            // Non-blocking connect: wait for OP_CONNECT with timeout
+            ch.register(sel, SelectionKey.OP_CONNECT)
+            val connected = sel.select(CONNECT_TIMEOUT_MS) > 0 &&
+                    sel.selectedKeys().any { it.isConnectable }
+            sel.selectedKeys().clear()
+
+            if (!connected) {
+                FileLog.w(TAG, "injector connect timed out (${CONNECT_TIMEOUT_MS}ms)")
+                sel.close()
+                ch.close()
+                return false
+            }
+
+            ch.finishConnect()
+            channel = ch
+            selector = sel
+            writeBuffer = null
             sentDisplayId = -1
             FileLog.i(TAG, "connected to input injector")
             true
@@ -665,13 +689,65 @@ object AaInput {
         }
     }
 
-    /** Returns false when the write failed (socket closed; next call re-ensures). */
+    /**
+     * Non-blocking write via Selector with timeout.
+     * Encodes the command into a ByteBuffer, then waits for OP_WRITE
+     * until all bytes are flushed or the timeout expires.
+     * Returns false when the write failed (socket closed; next call re-ensures).
+     */
     private fun sendLocked(cmd: String): Boolean {
-        val w = writer ?: return false
+        val ch = channel ?: return false
+        val sel = selector ?: return false
+
+        // Encode command into buffer
+        val bytes = (cmd + "\n").toByteArray(StandardCharsets.UTF_8)
+        val buf = writeBuffer?.let { existing ->
+            // Expand if needed
+            if (existing.remaining() < bytes.size) {
+                val bigger = ByteBuffer.allocate(existing.capacity() * 2 + bytes.size)
+                existing.flip()
+                bigger.put(existing)
+                bigger.put(bytes)
+                bigger
+            } else {
+                existing.put(bytes)
+                existing
+            }
+        } ?: ByteBuffer.wrap(bytes)
+        writeBuffer = buf
+
         return try {
-            w.write(cmd)
-            w.newLine()
-            w.flush()
+            buf.flip()
+            var deadline = System.currentTimeMillis() + WRITE_TIMEOUT_MS
+
+            while (buf.hasRemaining()) {
+                // Register OP_WRITE if not already registered
+                val key = ch.keyFor(sel)
+                if (key == null || !key.isValid) {
+                    throw java.io.IOException("channel deregistered")
+                }
+                key.interestOps(key.interestOps() or SelectionKey.OP_WRITE)
+
+                // Wait for writability or timeout
+                val remaining = deadline - System.currentTimeMillis()
+                if (remaining <= 0) {
+                    throw java.io.IOException("write timeout (${WRITE_TIMEOUT_MS}ms)")
+                }
+                if (sel.select(remaining) == 0) {
+                    throw java.io.IOException("write timeout (${WRITE_TIMEOUT_MS}ms)")
+                }
+
+                // Write all available bytes
+                ch.write(buf)
+            }
+
+            // Clear OP_WRITE interest
+            val key = ch.keyFor(sel)
+            if (key != null && key.isValid) {
+                key.interestOps(key.interestOps() and SelectionKey.OP_WRITE.inv())
+            }
+
+            sel.selectedKeys().clear()
             FileLog.d(TAG, "sent: $cmd")
             true
         } catch (e: Exception) {
@@ -682,9 +758,11 @@ object AaInput {
     }
 
     private fun closeLocked() {
-        try { socket?.close() } catch (_: Exception) {}
-        socket = null
-        writer = null
+        try { selector?.close() } catch (_: Exception) {}
+        selector = null
+        try { channel?.close() } catch (_: Exception) {}
+        channel = null
+        writeBuffer = null
         sentDisplayId = -1
     }
 }
