@@ -19,7 +19,10 @@ import java.net.Socket
  * Line protocol (UTF-8, \n-terminated), one client at a time:
  *   display <displayId>             — set target display for subsequent events
  *   tap <x> <y>                     — single-pointer DOWN+UP
- *   key <keyCode>                   — keyevent via root `input` CLI
+ *   key <keyCode>                   — keyevent via IInputManager (binder)
+ *   back                            — KEYCODE_BACK, suppressed when the VD's
+ *                                     only task is the launcher (would leave
+ *                                     a black VD)
  *   down|move|up <pointerId> <x> <y> — single-pointer event
  *   mdown|mmove|mup <x1> <y1> <x2> <y2> — two-pointer (pinch) event step
  *
@@ -85,14 +88,25 @@ object InputInjectorMain {
                     }
                     "tap" -> {
                         val x = parts[1]; val y = parts[2]
-                        if (!bridge.injectMotionEvent(displayId, 0, "0,0,$x,$y,1.0")) {
-                            log("tap DOWN failed on display $displayId")
-                        }
-                        if (!bridge.injectMotionEvent(displayId, 2, "0,0,$x,$y,1.0")) {
-                            log("tap UP failed on display $displayId")
+                        if (!bridge.injectMotionEvent(displayId, 0, "0,0,$x,$y,1.0") ||
+                            !bridge.injectMotionEvent(displayId, 2, "0,0,$x,$y,1.0")) {
+                            bridge.injectTapViaRoot(displayId, x.toInt(), y.toInt())
                         }
                     }
-                    "key" -> bridge.execShell("input -d $displayId keyevent ${parts[1]}")
+                    "key" -> {
+                        if (!bridge.injectKeyEvent(displayId, parts[1].toInt())) {
+                            log("key ${parts[1]} failed on display $displayId")
+                        }
+                    }
+                    "back" -> {
+                        // Guard lives injector-side: this process is root, so
+                        // the dumpsys probe costs no `su` spawn per press.
+                        if (!bridge.isLauncherOnlyTask(displayId)) {
+                            bridge.injectKeyEvent(displayId, android.view.KeyEvent.KEYCODE_BACK)
+                        } else {
+                            log("back blocked — launcher alone on display $displayId")
+                        }
+                    }
                     "down" -> single(bridge, displayId, 0, parts)
                     "move" -> single(bridge, displayId, 1, parts)
                     "up" -> single(bridge, displayId, 2, parts)

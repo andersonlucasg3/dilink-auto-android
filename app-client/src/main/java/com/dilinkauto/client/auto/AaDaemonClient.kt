@@ -23,7 +23,13 @@ object AaDaemonClient {
     var displayId = -1
         private set
 
+    @Volatile
+    var secondaryDisplayId = -1
+        private set
+
     var onDisplayReady: ((Int) -> Unit)? = null
+    var onSecondaryDisplayReady: ((Int) -> Unit)? = null
+    var onDisplayStackEmpty: ((Int) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
     /** Invoked whenever a (new) daemon binder connects — re-push state here. */
@@ -39,9 +45,20 @@ object AaDaemonClient {
             onDisplayReady?.invoke(id)
         }
 
+        override fun onSecondaryDisplayReady(id: Int) {
+            secondaryDisplayId = id
+            FileLog.i(TAG, "Daemon secondary display ready: id=$id")
+            onSecondaryDisplayReady?.invoke(id)
+        }
+
         override fun onError(message: String) {
             FileLog.w(TAG, "Daemon error: $message")
             onError?.invoke(message)
+        }
+
+        override fun onDisplayStackEmpty(displayId: Int) {
+            FileLog.i(TAG, "Display stack empty: id=$displayId")
+            onDisplayStackEmpty?.invoke(displayId)
         }
     }
 
@@ -79,6 +96,7 @@ object AaDaemonClient {
     fun reset() {
         daemon = null
         displayId = -1
+        secondaryDisplayId = -1
         daemonLatch = CountDownLatch(1)
     }
 }

@@ -1,5 +1,6 @@
 package com.dilinkauto.client.launcher.nav
 
+import android.graphics.Rect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -9,9 +10,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dilinkauto.client.R
+import com.dilinkauto.client.auto.AaUiState
 import com.dilinkauto.client.launcher.LauncherApp
 
 /**
@@ -42,7 +46,7 @@ fun PersistentNavBar(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(76.dp)
+            .width(86.dp)
             .fillMaxHeight()
             .background(Color(0xFF0A0E14))
             .padding(vertical = 12.dp, horizontal = 4.dp)
@@ -53,7 +57,16 @@ fun PersistentNavBar(
         Spacer(Modifier.height(8.dp))
 
         // Notifications button with badge
-        Box {
+        Box(
+            modifier = Modifier.onGloballyPositioned { coords ->
+                val pos = coords.positionInWindow()
+                val size = coords.size
+                val bounds = AaUiState.navbarBounds.value?.toMutableMap() ?: mutableMapOf()
+                bounds["notifications"] = Rect(pos.x.toInt(), pos.y.toInt(),
+                    (pos.x + size.width).toInt(), (pos.y + size.height).toInt())
+                AaUiState.navbarBounds.value = bounds
+            }
+        ) {
             NavActionButton(
                 icon = Icons.Default.Notifications,
                 label = stringResource(R.string.nav_alerts),
@@ -80,10 +93,21 @@ fun PersistentNavBar(
 
         // Recent apps
         recentAppsState.recentApps.forEach { pkg ->
-            RecentAppIcon(
-                app = appMap[pkg],
-                onClick = { onAppClick(pkg) }
-            )
+            Box(
+                modifier = Modifier.onGloballyPositioned { coords ->
+                    val pos = coords.positionInWindow()
+                    val size = coords.size
+                    val bounds = AaUiState.navbarBounds.value?.toMutableMap() ?: mutableMapOf()
+                    bounds["recent:$pkg"] = Rect(pos.x.toInt(), pos.y.toInt(),
+                        (pos.x + size.width).toInt(), (pos.y + size.height).toInt())
+                    AaUiState.navbarBounds.value = bounds
+                }
+            ) {
+                RecentAppIcon(
+                    app = appMap[pkg],
+                    onClick = { onAppClick(pkg) }
+                )
+            }
             Spacer(Modifier.height(4.dp))
         }
 
@@ -96,19 +120,41 @@ fun PersistentNavBar(
         Spacer(Modifier.height(8.dp))
 
         // Home button
-        NavActionButton(
-            icon = Icons.Default.Home,
-            label = stringResource(R.string.nav_home),
-            onClick = onHome
-        )
+        Box(
+            modifier = Modifier.onGloballyPositioned { coords ->
+                val pos = coords.positionInWindow()
+                val size = coords.size
+                val bounds = AaUiState.navbarBounds.value?.toMutableMap() ?: mutableMapOf()
+                bounds["home"] = Rect(pos.x.toInt(), pos.y.toInt(),
+                    (pos.x + size.width).toInt(), (pos.y + size.height).toInt())
+                AaUiState.navbarBounds.value = bounds
+            }
+        ) {
+            NavActionButton(
+                icon = Icons.Default.Home,
+                label = stringResource(R.string.nav_home),
+                onClick = onHome
+            )
+        }
 
         Spacer(Modifier.height(4.dp))
 
         // Back button
-        NavActionButton(
-            icon = Icons.Default.ArrowBack,
-            label = stringResource(R.string.nav_back),
-            onClick = onBack
-        )
+        Box(
+            modifier = Modifier.onGloballyPositioned { coords ->
+                val pos = coords.positionInWindow()
+                val size = coords.size
+                val bounds = AaUiState.navbarBounds.value?.toMutableMap() ?: mutableMapOf()
+                bounds["back"] = Rect(pos.x.toInt(), pos.y.toInt(),
+                    (pos.x + size.width).toInt(), (pos.y + size.height).toInt())
+                AaUiState.navbarBounds.value = bounds
+            }
+        ) {
+            NavActionButton(
+                icon = Icons.Default.ArrowBack,
+                label = stringResource(R.string.nav_back),
+                onClick = onBack
+            )
+        }
     }
 }

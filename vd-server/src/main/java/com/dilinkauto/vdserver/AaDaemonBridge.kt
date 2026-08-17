@@ -21,6 +21,7 @@ class AaDaemonBridge : IAaDaemon.Stub() {
     private val nb = NativeBridge()
 
     @Volatile private var displayId = -1
+    @Volatile private var secondaryDisplayId = -1
     @Volatile private var vdWidth = 0
     @Volatile private var vdHeight = 0
     @Volatile private var appCallback: IAaAppCallback? = null
@@ -96,7 +97,7 @@ class AaDaemonBridge : IAaDaemon.Stub() {
 
     override fun setSurface(surface: Surface, width: Int, height: Int, dpi: Int) {
         System.err.println("[AaDaemon] setSurface ${width}x${height}@${dpi}dpi valid=${surface.isValid}")
-        val id = nb.createVirtualDisplay(width, height, dpi, surface)
+        val id = nb.createVirtualDisplay("DiLinkAutoVD1", width, height, dpi, surface)
         if (id < 0) {
             appCallback?.onError("VD creation failed")
             return
@@ -104,16 +105,18 @@ class AaDaemonBridge : IAaDaemon.Stub() {
         displayId = id
         vdWidth = width
         vdHeight = height
+
         // Force landscape inside the VD: portrait-only apps can't rotate it
         nb.execShell("wm set-ignore-orientation-request -d $id true")
         nb.execShell("am start --display $id -n ${AaBridge.APP_PACKAGE}/${AaBridge.LAUNCHER_FQCN}")
-        System.err.println("[AaDaemon] VD ready: id=$id")
+        System.err.println("[AaDaemon] VD1 ready: id=$id ${width}x${height}")
         appCallback?.onDisplayReady(id)
     }
 
     override fun surfaceDestroyed() {
         System.err.println("[AaDaemon] surfaceDestroyed")
         displayId = -1
+        secondaryDisplayId = -1
         nb.releaseVirtualDisplay()
         // The app resets its client when the surface goes away — re-announce so
         // a recreated surface (rotation, host reconnect) can re-attach
@@ -184,7 +187,10 @@ class AaDaemonBridge : IAaDaemon.Stub() {
     override fun goHome() {
         val id = displayId
         if (id < 0) return
-        nb.execShell("am start --display $id -n ${AaBridge.APP_PACKAGE}/${AaBridge.LAUNCHER_FQCN}")
+        // FLAG_ACTIVITY_REORDER_TO_FRONT (0x00020000) | FLAG_ACTIVITY_NEW_TASK (0x10000000)
+        // = 0x10020000 — brings the existing singleTask instance to front instead of
+        // creating a new one (which would race with MirrorScreen's onNavAction("home")).
+        nb.execShell("am start --display $id -f 0x10020000 -n ${AaBridge.APP_PACKAGE}/${AaBridge.LAUNCHER_FQCN}")
     }
 
     override fun launchApp(packageName: String) {
@@ -209,4 +215,74 @@ class AaDaemonBridge : IAaDaemon.Stub() {
     override fun shutdown() {
         exitProcess(0)
     }
+
+    // ── VD2 (secondary) — multi-display API (FASE 1) ──
+
+    override fun createSecondaryDisplay(surface: Surface, width: Int, height: Int, dpi: Int): Int {
+        System.err.println("[AaDaemon] createSecondaryDisplay ${width}x${height}@${dpi}dpi")
+        val id = nb.createVirtualDisplay("DiLinkAutoVD2", width, height, dpi, surface)
+        if (id < 0) {
+            appCallback?.onError("VD2 creation failed")
+            return -1
+        }
+        secondaryDisplayId = id
+        System.err.println("[AaDaemon] VD2 ready: id=$id")
+        appCallback?.onSecondaryDisplayReady(id)
+        return id
+    }
+
+    override fun releaseSecondaryDisplay(displayId: Int) {
+        if (displayId == secondaryDisplayId) {
+            nb.releaseVirtualDisplay(displayId)
+            secondaryDisplayId = -1
+            System.err.println("[AaDaemon] VD2 released: id=$displayId")
+        }
+    }
+
+    override fun launchAppOnDisplay(displayId: Int, packageName: String) {
+        System.err.println("[AaDaemon] launchAppOnDisplay $packageName on display $displayId")
+        nb.launchApp(displayId, packageName)
+    }
+
+    override fun goHomeOnDisplay(displayId: Int) {
+        // No-op for VD2 in FASE 1: the launcher UI (VD1) will handle
+        // "back to grid" by changing its own view state.
+        System.err.println("[AaDaemon] goHomeOnDisplay $displayId (no-op for VD2)")
+    }
+
+    override fun goBackOnDisplay(displayId: Int) {
+        System.err.println("[AaDaemon] goBackOnDisplay $displayId")
+        if (nb.shellInjectionBlocked) {
+            nb.injectKeyViaRoot(displayId, 4)
+        } else {
+            nb.execShell("input -d $displayId keyevent 4")
+        }
+        scheduleDisplayStackCheck(displayId, 300)
+    }
+
+    /**
+     * Debounced empty-stack watcher for an arbitrary display. After a Back event
+     * the activity teardown takes ~1s — poll briefly and notify the app via
+     * [IAaAppCallback.onDisplayStackEmpty] when the stack is truly empty.
+     */
+    private fun scheduleDisplayStackCheck(displayId: Int, delayMs: Long) {
+        val seq = ++stackCheckSeq
+        Thread({
+            try {
+                Thread.sleep(delayMs)
+                repeat(10) {
+                    if (displayId < 0 || seq != stackCheckSeq) return@Thread
+                    if (nb.isDisplayStackEmpty(displayId)) {
+                        System.err.println("[AaDaemon] Display $displayId stack empty — notifying app")
+                        appCallback?.onDisplayStackEmpty(displayId)
+                        return@Thread
+                    }
+                    Thread.sleep(300)
+                }
+                System.err.println("[AaDaemon] Display $displayId stack check exhausted")
+            } catch (_: Exception) {}
+        }, "AaStackCheck").start()
+    }
+
+    // companion removed — RAIL_WIDTH_DP no longer needed (rail is overlay-only)
 }

@@ -5,19 +5,24 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateListOf
 
 /**
- * Tracks recently launched apps for the nav bar.
- * Persists to SharedPreferences so recent apps survive app restarts.
+ * Tracks recently launched apps for the nav bar / nav rail.
+ *
+ * Singleton — [DiLinkLauncher] and [PersistentNavBar] share the same
+ * in-memory list. Persisted to SharedPreferences so recents survive process
+ * restarts.
  */
-class RecentAppsState(context: Context) {
+object RecentAppsState {
 
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences("recent_apps", Context.MODE_PRIVATE)
+    private var prefs: SharedPreferences? = null
 
     private val _recentApps = mutableStateListOf<String>()
     val recentApps: List<String> get() = _recentApps
 
-    init {
-        val saved = prefs.getString(KEY_RECENT, null)
+    /** Idempotent — call once from any early entry point (launcher / rail service). */
+    fun init(context: Context) {
+        if (prefs != null) return
+        prefs = context.applicationContext.getSharedPreferences("recent_apps", Context.MODE_PRIVATE)
+        val saved = prefs!!.getString(KEY_RECENT, null)
         if (!saved.isNullOrEmpty()) {
             _recentApps.addAll(saved.split(",").filter { it.isNotEmpty() }.take(MAX_RECENT))
         }
@@ -39,11 +44,9 @@ class RecentAppsState(context: Context) {
     }
 
     private fun save() {
-        prefs.edit().putString(KEY_RECENT, _recentApps.joinToString(",")).apply()
+        prefs?.edit()?.putString(KEY_RECENT, _recentApps.joinToString(","))?.apply()
     }
 
-    companion object {
-        const val MAX_RECENT = 5
-        private const val KEY_RECENT = "recent_packages"
-    }
+    const val MAX_RECENT = 5
+    private const val KEY_RECENT = "recent_packages"
 }

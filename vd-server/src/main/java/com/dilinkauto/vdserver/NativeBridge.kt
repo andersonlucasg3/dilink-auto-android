@@ -33,7 +33,7 @@ class NativeBridge {
     private var persistentShell: Process? = null
     private var shellOutput: java.io.OutputStream? = null
     private var surfaceTexture: android.graphics.SurfaceTexture? = null
-    private var activeVd: VirtualDisplay? = null
+    private val activeVds = HashMap<Int, VirtualDisplay>()
 
     init {
         initInputManager()
@@ -62,19 +62,22 @@ class NativeBridge {
     }
 
     /**
-     * Create a VirtualDisplay with the given Surface.
-     * Called from createVirtualDisplayFromTexture or externally.
+     * Create a VirtualDisplay with the given Surface (default name "DiLinkAutoVD").
      *
      * @return display ID, or -1 on failure
      */
     fun createVirtualDisplay(width: Int, height: Int, dpi: Int, surface: Surface): Int {
-        releaseVirtualDisplay()
+        return createVirtualDisplay("DiLinkAutoVD", width, height, dpi, surface)
+    }
+
+    /**
+     * Create a named VirtualDisplay with the given Surface.
+     *
+     * @return display ID, or -1 on failure
+     */
+    fun createVirtualDisplay(name: String, width: Int, height: Int, dpi: Int, surface: Surface): Int {
         lastVdWidth = width
         lastVdHeight = height
-        val name = "DiLinkAutoVD"
-        // TRUSTED + OWN_DISPLAY_GROUP + PUBLIC + OWN_CONTENT_ONLY (no OWN_FOCUS:
-        // when an app launches, the VD's display group takes focus and the
-        // gearhead ghost display stops producing frames — stream starves)
         val flags = 0x6849
 
         // Try DisplayManagerGlobal first (more reliable on newer Android)
@@ -123,7 +126,7 @@ class NativeBridge {
 
             if (vd != null) {
                 val id = try { vd.display.displayId } catch (_: Exception) { findDisplayId(name) }
-                activeVd = vd
+                activeVds[id] = vd
                 println("[NativeBridge] VD created via DisplayManagerGlobal: id=$id ${width}x${height}@${dpi}dpi")
                 try { setDisplayImePolicy(id) } catch (_: Exception) {}
                 try { execShell("settings put global force_resizable_activities 1") } catch (_: Exception) {}
@@ -150,7 +153,7 @@ class NativeBridge {
 
             val vd = dm.createVirtualDisplay(name, width, height, dpi, surface, dmFlags)
             val id = try { vd.display.displayId } catch (_: Exception) { findDisplayId(name) }
-            activeVd = vd
+            activeVds[id] = vd
             println("[NativeBridge] VD created via DisplayManager: id=$id ${width}x${height}@${dpi}dpi")
             try { setDisplayImePolicy(id) } catch (_: Exception) {}
             return id
@@ -161,13 +164,22 @@ class NativeBridge {
         return -1
     }
 
-    /** Release the current VirtualDisplay, if any (idempotent). */
+    /** Release a specific VirtualDisplay by id (idempotent). */
+    fun releaseVirtualDisplay(displayId: Int) {
+        val vd = activeVds.remove(displayId) ?: return
+        try { clearForcedDisplaySize(displayId) } catch (_: Exception) {}
+        try { vd.release() } catch (_: Exception) {}
+        println("[NativeBridge] VD released: id=$displayId")
+    }
+
+    /** Release all active VirtualDisplays (idempotent). */
     fun releaseVirtualDisplay() {
-        try {
-            activeVd?.release()
-            if (activeVd != null) println("[NativeBridge] VD released")
-        } catch (_: Exception) {}
-        activeVd = null
+        activeVds.forEach { (id, vd) ->
+            try { clearForcedDisplaySize(id) } catch (_: Exception) {}
+            try { vd.release() } catch (_: Exception) {}
+            println("[NativeBridge] VD released: id=$id")
+        }
+        activeVds.clear()
         lastVdWidth = 0
         lastVdHeight = 0
     }
@@ -193,6 +205,123 @@ class NativeBridge {
                 Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                 .invoke(wm, id, 0)
         } catch (_: Exception) {}
+    }
+
+    // ── Overscan ──
+
+    /**
+     * Apply overscan insets to a display via reflection on IWindowManager.
+     *
+     * Android 12+ (API 31): IWindowManager.setOverscan(displayId, left, top,
+     * right, bottom). The method is @hide — accessed through ServiceManager +
+     * Stub.asInterface reflection, same pattern as [setDisplayImePolicy].
+     *
+     * On ROMs that removed the method (e.g. HyperOS), this logs an explicit
+     * warning and returns false — the caller can fall back or ignore.
+     *
+     * @return true if the call was dispatched successfully
+     */
+    fun setOverscan(displayId: Int, left: Int, top: Int, right: Int, bottom: Int): Boolean {
+        return try {
+            val wm = Class.forName("android.view.IWindowManager\$Stub")
+                .getDeclaredMethod("asInterface", IBinder::class.java)
+                .invoke(null, Class.forName("android.os.ServiceManager")
+                    .getDeclaredMethod("getService", String::class.java)
+                    .invoke(null, "window"))
+            wm.javaClass.getDeclaredMethod("setOverscan",
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType)
+                .invoke(wm, displayId, left, top, right, bottom)
+            println("[NativeBridge] setOverscan display=$displayId left=$left top=$top right=$right bottom=$bottom")
+            true
+        } catch (e: NoSuchMethodException) {
+            System.err.println("[NativeBridge] setOverscan NOT available on this ROM (method missing)")
+            false
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] setOverscan failed: ${e.message}")
+            false
+        }
+    }
+
+    // ── Forced Display Size ──
+
+    /**
+     * Force the content area of a display to a specific size via reflection on
+     * DisplayManagerGlobal.setForcedDisplaySize (AOSP @hide).
+     *
+     * @return true if the call was dispatched successfully
+     */
+    fun setForcedDisplaySize(displayId: Int, width: Int, height: Int): Boolean {
+        return try {
+            val dmgClass = Class.forName("android.hardware.display.DisplayManagerGlobal")
+            val dmg = dmgClass.getDeclaredMethod("getInstance").apply { isAccessible = true }
+                .invoke(null)
+            dmgClass.getDeclaredMethod("setForcedDisplaySize",
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+                .invoke(dmg, displayId, width, height)
+            println("[NativeBridge] setForcedDisplaySize display=$displayId ${width}x${height}")
+            true
+        } catch (e: NoSuchMethodException) {
+            System.err.println("[NativeBridge] setForcedDisplaySize NOT available on this ROM (method missing)")
+            false
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] setForcedDisplaySize failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Clear any forced display size previously applied via [setForcedDisplaySize].
+     */
+    fun clearForcedDisplaySize(displayId: Int): Boolean {
+        return try {
+            val dmgClass = Class.forName("android.hardware.display.DisplayManagerGlobal")
+            val dmg = dmgClass.getDeclaredMethod("getInstance").apply { isAccessible = true }
+                .invoke(null)
+            dmgClass.getDeclaredMethod("clearForcedDisplaySize", Int::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+                .invoke(dmg, displayId)
+            println("[NativeBridge] clearForcedDisplaySize display=$displayId")
+            true
+        } catch (e: NoSuchMethodException) {
+            System.err.println("[NativeBridge] clearForcedDisplaySize NOT available on this ROM (method missing)")
+            false
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] clearForcedDisplaySize failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Force display size via the `wm size` shell command (fallback when the
+     * reflection path is unavailable — e.g. HyperOS).
+     */
+    fun setForcedDisplaySizeViaShell(displayId: Int, width: Int, height: Int): Boolean {
+        return try {
+            execShell("wm size ${width}x${height} -d $displayId")
+            println("[NativeBridge] setForcedDisplaySizeViaShell display=$displayId ${width}x${height}")
+            true
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] setForcedDisplaySizeViaShell failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Clear forced display size via `wm size reset` shell command.
+     */
+    fun clearForcedDisplaySizeViaShell(displayId: Int): Boolean {
+        return try {
+            execShell("wm size reset -d $displayId")
+            println("[NativeBridge] clearForcedDisplaySizeViaShell display=$displayId")
+            true
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] clearForcedDisplaySizeViaShell failed: ${e.message}")
+            false
+        }
     }
 
     // ── Input Injection ──
@@ -234,6 +363,20 @@ class NativeBridge {
             if (parts.size >= 4) {
                 val x = parts[2]; val y = parts[3]
                 try { execShell("input -d $displayId tap $x $y") } catch (_: Exception) {}
+            }
+            return false
+        }
+
+        if (setDisplayIdMethod == null) {
+            // HyperOS: no setDisplayId — IInputManager would go to display 0
+            // silently. Use root CLI instead.
+            val parts = desc.split(",")
+            if (parts.size >= 4) {
+                val x = parts[2]; val y = parts[3]
+                try {
+                    execShell("input -d $displayId tap $x $y")
+                    return true
+                } catch (_: Exception) {}
             }
             return false
         }
@@ -364,6 +507,57 @@ class NativeBridge {
             System.err.println("[NativeBridge] injectKeyViaRoot failed: ${e.message}")
             false
         }
+    }
+
+    /**
+     * Key event straight through IInputManager — unlike [injectKeyViaRoot],
+     * no per-press process spawn (~300ms saved per Back/Home). DOWN+UP pair.
+     * Falls back to the plain `input` CLI when the binder path is unavailable.
+     */
+    fun injectKeyEvent(displayId: Int, keyCode: Int): Boolean {
+        if (inputManager == null || injectInputEventMethod == null) {
+            try { execShell("input -d $displayId keyevent $keyCode") } catch (_: Exception) {}
+            return false
+        }
+        return try {
+            val now = SystemClock.uptimeMillis()
+            val down = android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_DOWN,
+                keyCode, 0)
+            val up = android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_UP,
+                keyCode, 0)
+            // InputEvent.setDisplayId is @hide — reflect per-event in case the
+            // method is absent on some OEM builds (cached setDisplayIdMethod
+            // is MotionEvent-typed; KeyEvent needs its own lookup).
+            val setDisplay = try {
+                down.javaClass.getMethod("setDisplayId", Int::class.javaPrimitiveType)
+            } catch (_: Exception) { null }
+            setDisplay?.invoke(down, displayId)
+            setDisplay?.invoke(up, displayId)
+            injectInputEventMethod!!.invoke(inputManager, down, 0)
+            injectInputEventMethod!!.invoke(inputManager, up, 0)
+            true
+        } catch (e: Exception) {
+            System.err.println("[NativeBridge] injectKeyEvent failed: ${e.message}")
+            try { execShell("input -d $displayId keyevent $keyCode") } catch (_: Exception) {}
+            false
+        }
+    }
+
+    /**
+     * True when the display's only visible task is our own launcher — pressing
+     * Back there would empty the stack and leave a black VD (the daemon's
+     * relaunch watcher is unreachable on HyperOS).
+     */
+    fun isLauncherOnlyTask(displayId: Int): Boolean {
+        val dumpsys = execShellOutput("dumpsys activity activities 2>/dev/null") ?: return false
+        val marker = "Display #$displayId "
+        val start = dumpsys.indexOf(marker)
+        if (start < 0) return false
+        val next = dumpsys.indexOf("Display #", start + marker.length)
+        val section = if (next >= 0) dumpsys.substring(start, next) else dumpsys.substring(start)
+        val tasks = Regex("Task\\{[0-9a-f]+ #\\d+ type=\\S+ (?:A=\\d+:)?(\\S+) U=")
+            .findAll(section).map { it.groupValues[1] }.toList()
+        return tasks.isNotEmpty() && tasks.all { it.contains("dilinkauto") }
     }
 
     // ── Display Power ──
