@@ -133,7 +133,24 @@ object AASelfTweaker {
         //    dead, the bind fails and the app is rejected.
         val playWarmupOk = warmUpPlayStore()
 
-        // 6. Summary log.
+        // 6. Phase 4 — Force gearhead to re-scan our package.
+        //    dumpsys package refreshes the PMS cache for our package, and the
+        //    PACKAGE_REPLACED broadcast makes gearhead re-run its validation
+        //    logic as if the app had just been reinstalled.
+        FileLog.i(TAG, "Force-scanning gearhead for '$ourPackage'")
+        RootManager.execFull("dumpsys package $ourPackage", timeoutSec = 10)
+        RootManager.execFull(
+            "am broadcast -a android.intent.action.PACKAGE_REPLACED " +
+                "-d package:$ourPackage --user 0",
+            timeoutSec = 10
+        )
+        RootManager.execFull("am force-stop $GEARHEAD_PACKAGE", timeoutSec = 10)
+        RootManager.execFull(
+            "am startservice -n $GEARHEAD_PACKAGE/.companion.GearheadService",
+            timeoutSec = 10
+        )
+
+        // 7. Summary log.
         val installerStatus = when {
             installerOk -> "OK"
             else -> "FAILED"
@@ -144,7 +161,8 @@ object AASelfTweaker {
                 "installer=$installerStatus, " +
                 "phenotype=${if (phenotypeOk) "OK" else "FAILED"}, " +
                 "finsky=${if (finskyOk) "OK" else "FAILED"}, " +
-                "playWarmup=${if (playWarmupOk) "OK" else "FAILED"}"
+                "playWarmup=${if (playWarmupOk) "OK" else "FAILED"}, " +
+                "forceScan=OK"
         )
     }
 

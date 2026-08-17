@@ -38,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dilinkauto.client.auto.AASelfTweaker
+import com.dilinkauto.client.auto.AASelfTweakerStatusCard
 import com.dilinkauto.client.service.ConnectionService
 import kotlinx.coroutines.launch
 import com.dilinkauto.client.service.DistributionChannel
@@ -757,6 +759,14 @@ fun MainScreen(
                     }
                 }
             }
+            Spacer(Modifier.height(12.dp))
+        }
+
+        // Android Auto registration status (AA_ONLY builds only)
+        if (aaOnly) {
+            AASelfTweakerStatusCard(
+                onRerun = { /* status card reloads itself via LaunchedEffect */ }
+            )
             Spacer(Modifier.height(12.dp))
         }
 
