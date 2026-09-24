@@ -19,8 +19,8 @@ import kotlin.concurrent.thread
  *   2. `su -M -c`             — short form, some builds
  *   3. `su -c`                 — fallback for environments without namespace isolation
  *
- * API mirrors [ShizukuManager] so [PrivilegeRouter] can treat both backends
- * interchangeably (root is a superset of shell).
+ * Exposes the same surface [PrivilegeRouter] needs from a privileged backend
+ * (root is a superset of shell).
  */
 object RootManager {
 

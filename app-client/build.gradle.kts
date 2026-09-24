@@ -40,7 +40,7 @@ android {
     }
 
     // Privilege flavors share the same code for now (backend selected at runtime).
-    // The "root" flavor exists so later phases can strip Shizuku/sensitive
+    // The "root" flavor exists so later phases can strip sensitive
     // permissions from its manifest — banking SDKs scan declared permissions.
     flavorDimensions += "privilege"
     productFlavors {
@@ -115,9 +115,6 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("dev.mobile:dadb:1.2.10")
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:aidl:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
     // Android Auto mode: renders the VD mirror inside the stock AA host (NavigationTemplate surface)
     implementation("androidx.car.app:app:1.4.0")
 }

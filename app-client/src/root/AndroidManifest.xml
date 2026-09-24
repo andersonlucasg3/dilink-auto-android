@@ -9,9 +9,6 @@
     <!-- All-files access: only used by the legacy /sdcard daemon staging path -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:node="remove" />
-    <!-- Root flavor never uses Shizuku (su only) -->
-    <uses-permission android:name="moe.shizuku.manager.permission.API_V23"
-        tools:node="remove" />
 
     <application>
         <!-- Legacy car flow: TCP listeners (9637/9638/9639), VD deploy to car,

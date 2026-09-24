@@ -5,7 +5,6 @@ import com.dilinkauto.client.BuildConfig
 import com.dilinkauto.client.FileLog
 import com.dilinkauto.client.PrivilegeRouter
 import com.dilinkauto.client.RootManager
-import com.dilinkauto.client.ShizukuManager
 import java.io.File
 import java.util.zip.CRC32
 
@@ -52,7 +51,7 @@ object DaemonDeployer {
     }
 
     /**
-     * Start dilinkd via PrivilegeRouter (root su, or Shizuku shell).
+     * Start dilinkd via PrivilegeRouter (root su).
      * Blocking — call from an IO dispatcher. Returns false if no backend/asset failed.
      */
     fun start(context: Context, vdWidth: Int, vdHeight: Int, vdDpi: Int,
@@ -103,8 +102,7 @@ object DaemonDeployer {
 
     /**
      * Start the pure-Kotlin AA daemon (IAaDaemon on ServiceManager).
-     * Runs as shell uid: via `su shell` when root, directly via Shizuku
-     * otherwise — root is only the launcher, never the daemon.
+     * Runs as shell uid via `su shell` — root is only the launcher, never the daemon.
      */
     fun startAaDaemon(context: Context): Boolean {
         if (!PrivilegeRouter.isAvailable) {
@@ -133,11 +131,7 @@ object DaemonDeployer {
             val cmd = "setsid env CLASSPATH=/data/local/tmp/vd-server.jar app_process / " +
                     "com.dilinkauto.vdserver.DaemonEntry aa-daemon" +
                     " >/data/local/tmp/aa-daemon.log 2>&1 &"
-            if (RootManager.isAvailable) {
-                RootManager.execAndWait("su shell -c '$cmd'")
-            } else {
-                ShizukuManager.execAndWait(cmd)
-            }
+            RootManager.execAndWait("su shell -c '$cmd'")
             FileLog.i(TAG, "AA daemon started via ${PrivilegeRouter.displayName}")
             true
         } catch (e: Exception) {

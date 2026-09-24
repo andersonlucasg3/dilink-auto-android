@@ -221,7 +221,7 @@ object UpdateManager {
         val version = latestRelease?.versionName ?: ""
 
         if (PrivilegeRouter.isAvailable) {
-            // Silent install via privileged shell (root/Shizuku) — no system confirmation dialog
+            // Silent install via privileged shell (root) — no system confirmation dialog
             _updateState.value = UpdateState.Installing(version)
             scope.launch(Dispatchers.IO) {
                 try {

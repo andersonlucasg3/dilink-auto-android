@@ -18,7 +18,6 @@ class ClientApp : Application() {
         allowHiddenApiReflection()
         createNotificationChannels()
         UpdateManager.init(this)
-        ShizukuManager.init(this)
         RootManager.init()
         // Run the full Android Auto self-registration flow (installer spoof,
         // phenotype flags, Finsky DBs, Play Store warmup). Runs on a short

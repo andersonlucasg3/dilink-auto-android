@@ -421,7 +421,7 @@ class ConnectionService : Service() {
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
             "vd-server.jar"
         ).absolutePath
-        // Root (su) preferred, Shizuku fallback — phone deploys daemon locally.
+        // Root (su) preferred — phone deploys daemon locally.
         // Car waits for VD_PORTS_BOUND instead of deploying via ADB.
         val connMethod = PrivilegeRouter.connectionMethod
         FileLog.i(TAG, "Handshake: connMethod=${PrivilegeRouter.displayName}")
@@ -483,7 +483,7 @@ class ConnectionService : Service() {
                     conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
                     FileLog.i(TAG, "Handshake response sent")
 
-                    // Deploy daemon locally (root/Shizuku) while car waits for VD_PORTS_BOUND
+                    // Deploy daemon locally (root) while car waits for VD_PORTS_BOUND
                     if (PrivilegeRouter.isAvailable) {
                         FileLog.i(TAG, "Deploying daemon via ${PrivilegeRouter.displayName}...")
                         startVdServerLocally(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
@@ -515,7 +515,7 @@ class ConnectionService : Service() {
 
     /**
      * Start the VD server process directly on the phone with elevated privileges
-     * (root via su, or shell via Shizuku — selected by PrivilegeRouter).
+     * (root via su — selected by PrivilegeRouter).
      * Deploy is delegated to DaemonDeployer; the daemon connects its lifecycle
      * channel to the persistent listener on :19647 and video/input to the car.
      */
@@ -1004,7 +1004,7 @@ class ConnectionService : Service() {
         // True when the privileged shell already proved cmd shortcut is unavailable on this
         // device, so we can skip the redundant VD server attempt (both run the same command).
         var cmdShortcutUnavailable = false
-        // Try privileged shell first (root/Shizuku) — has full access to shortcut data
+        // Try privileged shell first (root) — has full access to shortcut data
         if (PrivilegeRouter.isAvailable) {
             try {
                 val output = PrivilegeRouter.execAndWait("cmd shortcut get-shortcuts --package $packageName")
@@ -1031,7 +1031,7 @@ class ConnectionService : Service() {
                 FileLog.w(TAG, "Privileged shortcut query failed for $packageName: ${e.message}")
             }
         }
-        // Try VD server — skip if Shizuku already proved cmd shortcut is unavailable
+        // Try VD server — skip if the privileged shell already proved cmd shortcut is unavailable
         if (!cmdShortcutUnavailable) {
             val vd = vdClient
             if (vd != null && vd.isConnected) {
