@@ -38,8 +38,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dilinkauto.client.auto.AASelfTweaker
-import com.dilinkauto.client.auto.AASelfTweakerStatusCard
 import com.dilinkauto.client.service.ConnectionService
 import kotlinx.coroutines.launch
 import com.dilinkauto.client.service.DistributionChannel
@@ -66,8 +64,7 @@ class MainActivity : ComponentActivity() {
         // Auto-start the service when the app is opened (e.g. by the car via USB ADB).
         // Only if onboarding is done and the service isn't already running — calling
         // startForegroundService on an already-running service is harmless but noisy.
-        // AA_ONLY builds have no ConnectionService (stripped from the manifest).
-        if (!BuildConfig.AA_ONLY && onboardingCompleted && ConnectionService.serviceState.value == ConnectionService.State.IDLE) {
+        if (onboardingCompleted && ConnectionService.serviceState.value == ConnectionService.State.IDLE) {
             startConnectionService()
         }
 
@@ -220,7 +217,7 @@ private data class OnboardingStep(
 )
 
 @Composable
-fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, installStatus: String, aaOnly: Boolean = BuildConfig.AA_ONLY) {
+fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, installStatus: String) {
     val context = LocalContext.current
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     val pkg = context.packageName
@@ -253,10 +250,6 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
         flat.contains(pkg)
     }
 
-    // Root mode: su handles deploy/input — all-files, accessibility and
-    // notification prompts become unnecessary and are hidden from the flow.
-    val rootMode = RootManager.isAvailableFlow.collectAsState().value == true
-
     // Resolve strings outside remember to avoid crossinline restriction
     val welcomeTitle = stringResource(R.string.onboarding_welcome_title)
     val welcomeDesc = stringResource(R.string.onboarding_welcome_desc)
@@ -283,7 +276,7 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
     val doneAction = stringResource(R.string.onboarding_start)
     val grantLabel = stringResource(R.string.onboarding_grant)
 
-    val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications, rootMode, aaOnly, refreshKey) {
+    val steps = remember(hasAllFiles, hasBattery, hasAccessibility, hasNotifications, refreshKey) {
         buildList {
             add(OnboardingStep(
                 icon = Icons.Default.CarRepair,
@@ -291,19 +284,17 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                 actionLabel = welcomeAction,
                 isGranted = { true }, onAction = {}
             ))
-            if (!rootMode) {
-                add(OnboardingStep(
-                    icon = Icons.Default.Folder,
-                    title = filesTitle, description = filesDesc,
-                    actionLabel = grantLabel,
-                    isGranted = { hasAllFiles },
-                    onAction = {
-                        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
-                            context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                        }
+            add(OnboardingStep(
+                icon = Icons.Default.Folder,
+                title = filesTitle, description = filesDesc,
+                actionLabel = grantLabel,
+                isGranted = { hasAllFiles },
+                onAction = {
+                    if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+                        context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
                     }
-                ))
-            }
+                }
+            ))
             add(OnboardingStep(
                 icon = Icons.Default.BatterySaver,
                 title = batteryTitle, description = batteryDesc,
@@ -311,53 +302,41 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
                 isGranted = { hasBattery },
                 onAction = {
                     if (!pm.isIgnoringBatteryOptimizations(pkg)) {
-                        if (PrivilegeRouter.isAvailable) {
-                            // Silent grant — root/shell hold DEVICE_POWER
-                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                PrivilegeRouter.execAndWait("dumpsys deviceidle whitelist +$pkg")
-                            }
-                        } else {
-                            try {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                        data = android.net.Uri.parse("package:$pkg")
-                                    }
-                                )
-                            } catch (_: Exception) {}
-                        }
+                        try {
+                            context.startActivity(
+                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = android.net.Uri.parse("package:$pkg")
+                                }
+                            )
+                        } catch (_: Exception) {}
                     }
                 }
             ))
-            if (!rootMode) {
-                add(OnboardingStep(
-                    icon = Icons.Default.TouchApp,
-                    title = accessibilityTitle, description = accessibilityDesc,
-                    actionLabel = grantLabel,
-                    isGranted = { hasAccessibility },
-                    onAction = {
-                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    }
-                ))
-                add(OnboardingStep(
-                    icon = Icons.Default.Notifications,
-                    title = notificationTitle, description = notificationDesc,
-                    actionLabel = grantLabel,
-                    isGranted = { hasNotifications },
-                    onAction = {
-                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    }
-                ))
-            }
-            // Car-APK setup step: legacy car flow — AA_ONLY builds never install on the car
-            if (!aaOnly) {
-                add(OnboardingStep(
-                    icon = Icons.Default.DirectionsCar,
-                    title = carSetupTitle, description = carSetupDesc,
-                    actionLabel = carSetupContinue,
-                    isGranted = { true }, onAction = {},
-                    prerequisites = listOf(carPrereqWifiAdb, carPrereqHotspot, carPrereqConnected, carPrereqInstalled)
-                ))
-            }
+            add(OnboardingStep(
+                icon = Icons.Default.TouchApp,
+                title = accessibilityTitle, description = accessibilityDesc,
+                actionLabel = grantLabel,
+                isGranted = { hasAccessibility },
+                onAction = {
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+            ))
+            add(OnboardingStep(
+                icon = Icons.Default.Notifications,
+                title = notificationTitle, description = notificationDesc,
+                actionLabel = grantLabel,
+                isGranted = { hasNotifications },
+                onAction = {
+                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }
+            ))
+            add(OnboardingStep(
+                icon = Icons.Default.DirectionsCar,
+                title = carSetupTitle, description = carSetupDesc,
+                actionLabel = carSetupContinue,
+                isGranted = { true }, onAction = {},
+                prerequisites = listOf(carPrereqWifiAdb, carPrereqHotspot, carPrereqConnected, carPrereqInstalled)
+            ))
             add(OnboardingStep(
                 icon = Icons.Default.CheckCircle,
                 title = doneTitle, description = doneDesc,
@@ -462,8 +441,8 @@ fun OnboardingScreen(onComplete: () -> Unit, onInstallOnCar: () -> Unit, install
         }
 
         // Car setup step: prerequisites + install button + skip
-        // (index 5 only exists when the car step is present — never in AA_ONLY builds)
-        if (currentStep == 5 && !aaOnly) {
+        // (index 5 only exists when the car step is present)
+        if (currentStep == 5) {
             Spacer(Modifier.height(16.dp))
 
             // Prerequisite items
@@ -688,8 +667,7 @@ fun MainScreen(
     onOpenSettings: () -> Unit,
     onShareLogs: () -> Unit,
     onDownloadUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit,
-    aaOnly: Boolean = BuildConfig.AA_ONLY
+    onInstallUpdate: () -> Unit
 ) {
     val serviceState by ConnectionService.serviceState.collectAsState()
     val installStatus by ConnectionService.installStatusFlow.collectAsState()
@@ -762,18 +740,8 @@ fun MainScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        // Android Auto registration status (AA_ONLY builds only)
-        if (aaOnly) {
-            AASelfTweakerStatusCard(
-                onRerun = { /* status card reloads itself via LaunchedEffect */ }
-            )
-            Spacer(Modifier.height(12.dp))
-        }
-
-        // Service status (legacy car flow — no ConnectionService in AA_ONLY builds)
-        if (!aaOnly) {
-            StatusCard(serviceState)
-        }
+        // Service status
+        StatusCard(serviceState)
 
         // Update available notification
         if (updateState is UpdateState.Available && !updateDismissed) {
@@ -871,32 +839,29 @@ fun MainScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Start/Stop + Install on Car: legacy car flow — hidden in AA_ONLY builds
-        if (!aaOnly) {
-            // Start/Stop
-            Button(
-                onClick = { if (isRunning) onStopService() else onStartService() },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isRunning) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Icon(if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(if (isRunning) stringResource(R.string.stop_service) else stringResource(R.string.start_service), fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            // Install on Car (unified: button + status)
-            CarInstallCard(
-                installStatus = installStatus,
-                onInstallOnCar = onInstallOnCar
+        // Start/Stop
+        Button(
+            onClick = { if (isRunning) onStopService() else onStartService() },
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isRunning) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
             )
-
-            Spacer(Modifier.height(24.dp))
+        ) {
+            Icon(if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (isRunning) stringResource(R.string.stop_service) else stringResource(R.string.start_service), fontSize = 18.sp, fontWeight = FontWeight.Medium)
         }
+
+        Spacer(Modifier.height(24.dp))
+
+        // Install on Car (unified: button + status)
+        CarInstallCard(
+            installStatus = installStatus,
+            onInstallOnCar = onInstallOnCar
+        )
+
+        Spacer(Modifier.height(24.dp))
 
         // Support / Donations
         DonationCard()
@@ -1013,22 +978,17 @@ fun SettingsScreen(
         ) {
             Spacer(Modifier.height(16.dp))
 
-        // Root mode: prompts that su makes unnecessary are hidden
-        val rootMode = RootManager.isAvailableFlow.collectAsState().value == true
-
         // Permissions
         Text(stringResource(R.string.settings_permissions), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
             modifier = Modifier.padding(bottom = 12.dp))
 
-        if (!rootMode) {
-            SetupItem(
-                icon = if (hasAllFiles) Icons.Default.CheckCircle else Icons.Default.Folder,
-                title = if (hasAllFiles) "${stringResource(R.string.perm_all_files)} ✓" else stringResource(R.string.perm_all_files),
-                description = if (hasAllFiles) stringResource(R.string.perm_granted) else stringResource(R.string.perm_all_files_granted),
-                onClick = onOpenAllFilesAccess
-            )
-            Spacer(Modifier.height(8.dp))
-        }
+        SetupItem(
+            icon = if (hasAllFiles) Icons.Default.CheckCircle else Icons.Default.Folder,
+            title = if (hasAllFiles) "${stringResource(R.string.perm_all_files)} ✓" else stringResource(R.string.perm_all_files),
+            description = if (hasAllFiles) stringResource(R.string.perm_granted) else stringResource(R.string.perm_all_files_granted),
+            onClick = onOpenAllFilesAccess
+        )
+        Spacer(Modifier.height(8.dp))
 
         SetupItem(
             icon = if (hasBattery) Icons.Default.CheckCircle else Icons.Default.BatterySaver,
@@ -1038,33 +998,31 @@ fun SettingsScreen(
         )
         Spacer(Modifier.height(8.dp))
 
-        if (!rootMode) {
-            SetupItem(
-                icon = if (hasAccessibility) Icons.Default.CheckCircle else Icons.Default.TouchApp,
-                title = if (hasAccessibility) "${stringResource(R.string.perm_accessibility)} ✓" else stringResource(R.string.perm_accessibility),
-                description = if (hasAccessibility) stringResource(R.string.perm_granted) else stringResource(R.string.perm_accessibility_granted),
-                onClick = onOpenAccessibility
-            )
-            Spacer(Modifier.height(8.dp))
+        SetupItem(
+            icon = if (hasAccessibility) Icons.Default.CheckCircle else Icons.Default.TouchApp,
+            title = if (hasAccessibility) "${stringResource(R.string.perm_accessibility)} ✓" else stringResource(R.string.perm_accessibility),
+            description = if (hasAccessibility) stringResource(R.string.perm_granted) else stringResource(R.string.perm_accessibility_granted),
+            onClick = onOpenAccessibility
+        )
+        Spacer(Modifier.height(8.dp))
 
-            SetupItem(
-                icon = if (hasNotifications) Icons.Default.CheckCircle else Icons.Default.Notifications,
-                title = if (hasNotifications) "${stringResource(R.string.perm_notifications)} ✓" else stringResource(R.string.perm_notifications),
-                description = if (hasNotifications) stringResource(R.string.perm_granted) else stringResource(R.string.perm_notifications_granted),
-                onClick = onOpenNotificationAccess
-            )
+        SetupItem(
+            icon = if (hasNotifications) Icons.Default.CheckCircle else Icons.Default.Notifications,
+            title = if (hasNotifications) "${stringResource(R.string.perm_notifications)} ✓" else stringResource(R.string.perm_notifications),
+            description = if (hasNotifications) stringResource(R.string.perm_granted) else stringResource(R.string.perm_notifications_granted),
+            onClick = onOpenNotificationAccess
+        )
 
-            Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp))
 
-            SetupItem(
-                icon = Icons.Default.Usb,
-                title = stringResource(R.string.perm_usb_debugging),
-                description = stringResource(R.string.perm_usb_desc),
-                onClick = onOpenDeveloperOptions
-            )
+        SetupItem(
+            icon = Icons.Default.Usb,
+            title = stringResource(R.string.perm_usb_debugging),
+            description = stringResource(R.string.perm_usb_desc),
+            onClick = onOpenDeveloperOptions
+        )
 
-            Spacer(Modifier.height(8.dp))
-        }
+        Spacer(Modifier.height(8.dp))
 
         Spacer(Modifier.height(32.dp))
 

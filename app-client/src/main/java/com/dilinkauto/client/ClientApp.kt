@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.Canvas
-import com.dilinkauto.client.auto.AASelfTweaker
 import com.dilinkauto.client.service.UpdateManager
 import java.io.ByteArrayOutputStream
 
@@ -15,29 +14,8 @@ class ClientApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        allowHiddenApiReflection()
         createNotificationChannels()
         UpdateManager.init(this)
-        RootManager.init()
-        // Run the full Android Auto self-registration flow (installer spoof,
-        // phenotype flags, Finsky DBs, Play Store warmup). Runs on a short
-        // delay to let the root probe complete (~100ms).
-        kotlin.concurrent.thread(name = "AASelfTweaker", isDaemon = true) {
-            try {
-                Thread.sleep(2000)
-                AASelfTweaker.ensureRegistered(this@ClientApp)
-            } catch (_: Exception) {}
-        }
-    }
-
-    // The AA bridge reaches the daemon via ServiceManager.getService (@hide)
-    private fun allowHiddenApiReflection() {
-        try {
-            val vmRuntimeClass = Class.forName("dalvik.system.VMRuntime")
-            val runtime = vmRuntimeClass.getDeclaredMethod("getRuntime").invoke(null)
-            vmRuntimeClass.getDeclaredMethod("setHiddenApiExemptions", Array<String>::class.java)
-                .invoke(runtime, arrayOf("L"))
-        } catch (_: Exception) {}
     }
 
     private fun createNotificationChannels() {

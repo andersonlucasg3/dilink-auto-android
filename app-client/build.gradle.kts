@@ -39,30 +39,6 @@ android {
         }
     }
 
-    // Privilege flavors share the same code for now (backend selected at runtime).
-    // The "root" flavor exists so later phases can strip sensitive
-    // permissions from its manifest — banking SDKs scan declared permissions.
-    flavorDimensions += "privilege"
-    productFlavors {
-        create("standard") {
-            dimension = "privilege"
-            buildConfigField("String", "PRIVILEGE_FLAVOR", "\"standard\"")
-            buildConfigField("boolean", "AA_ONLY", "false")
-        }
-        create("root") {
-            dimension = "privilege"
-            buildConfigField("String", "PRIVILEGE_FLAVOR", "\"root\"")
-            // Android-Auto-only build: no car flow (TCP relay, car-APK install,
-            // accessibility/notification injection) — gated at runtime via this flag.
-            buildConfigField("boolean", "AA_ONLY", "true")
-        }
-        create("bridge") {
-            dimension = "privilege"
-            buildConfigField("String", "PRIVILEGE_FLAVOR", "\"bridge\"")
-            buildConfigField("boolean", "AA_ONLY", "false")
-        }
-    }
-
     // Apply release signing to both debug and release when env vars are available.
     // This ensures users can install any build over another without signature conflicts.
     signingConfigs.findByName("release")?.let { releaseConfig ->
@@ -71,11 +47,9 @@ android {
     }
 
     // Car-flow build outputs (embedded car APK, native daemon libs) are generated
-    // into a build dir attached ONLY to the flavors that still ship them — the
-    // root flavor is Android-Auto-only and must never package these artifacts.
+    // into a build dir attached to the client assets.
     sourceSets {
-        getByName("standard") { assets.srcDir("build/generated/server-assets") }
-        getByName("bridge") { assets.srcDir("build/generated/server-assets") }
+        getByName("main") { assets.srcDir("build/generated/server-assets") }
     }
 
     buildFeatures {
@@ -115,14 +89,11 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("dev.mobile:dadb:1.2.10")
-    // Android Auto mode: renders the VD mirror inside the stock AA host (NavigationTemplate surface)
-    implementation("androidx.car.app:app:1.4.0")
 }
 
 // Build the VD server JAR and copy it to assets before the client APK is assembled.
 // vd-server is a proper Gradle module — compilation handled by AGP/Kotlin.
-// This task runs d8 + jar packaging. Needed by ALL flavors (the AA daemon runs
-// vd-server.jar via app_process). The native .so copy lives in copyNativeLibs.
+// This task runs d8 + jar packaging. The native .so copy lives in copyNativeLibs.
 tasks.register("buildVdServer") {
     dependsOn(":vd-server:bundleLibRuntimeToJarDebug")
 
@@ -188,8 +159,7 @@ tasks.register("buildVdServer") {
 }
 
 // Copy the native daemon .so from AGP's cxx build output into the car-flow
-// assets dir (build/generated/server-assets — only in the standard/bridge
-// sourceSets). The root flavor's AA daemon is pure Kotlin and skips this.
+// assets dir (build/generated/server-assets).
 tasks.register("copyNativeLibs") {
     dependsOn(":vd-server:externalNativeBuildDebug")
 
@@ -218,7 +188,7 @@ tasks.register("copyNativeLibs") {
 }
 
 // Embed the car (server) APK in client assets so the phone can auto-install it
-// on the car. Standard/bridge only — the root flavor has no car flow.
+// on the car.
 tasks.register("embedServerApk") {
     dependsOn(":app-server:assembleDebug")
     val serverApk = file("${rootDir}/app-server/build/outputs/apk/debug/app-server-debug.apk")
@@ -238,13 +208,10 @@ tasks.register("embedServerApk") {
     }
 }
 
-// Wire asset-producing tasks per variant: every flavor needs vd-server.jar,
-// but the root flavor is Android-Auto-only — no embedded car APK, no native
-// daemon libs, and no :app-server/:vd-server native build forced on it.
+// Wire asset-producing tasks per variant: every variant needs vd-server.jar
+// plus the embedded car APK and the native daemon libs.
 android.applicationVariants.all {
     val variantPreBuild = tasks.named("pre${name.replaceFirstChar(Char::uppercaseChar)}Build")
     variantPreBuild.configure { dependsOn("buildVdServer") }
-    if (flavorName != "root") {
-        variantPreBuild.configure { dependsOn("embedServerApk", "copyNativeLibs") }
-    }
+    variantPreBuild.configure { dependsOn("embedServerApk", "copyNativeLibs") }
 }

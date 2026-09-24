@@ -17,10 +17,6 @@
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- Android Auto: required for SurfaceCallback (VD rendering on host surface) -->
-    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
-    <!-- Android Auto: required to send NavigationTemplate to the host -->
-    <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
     <!-- Nav rail overlay on the virtual display (granted via root appops) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
@@ -59,17 +55,6 @@
             android:taskAffinity="com.dilinkauto.vd.home"
             android:theme="@android:style/Theme.Black.NoTitleBar" />
 
-        <!-- AA VD home screen: started by the daemon via explicit component.
-             No HOME category — never selectable as the system home.
-             exported=true: the daemon runs as SHELL (uid 2000), which cannot
-             start non-exported activities of another uid (root could — that's
-             why this only ever worked on the emulator). -->
-        <activity
-            android:name=".launcher.DiLinkLauncher"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:theme="@android:style/Theme.Black.NoTitleBar" />
-
         <service
             android:name=".service.ConnectionService"
             android:foregroundServiceType="connectedDevice"
@@ -105,31 +90,6 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
-
-        <!-- Android Auto mode: VD mirror rendered inside the stock AA host -->
-        <meta-data
-            android:name="com.google.android.gms.car.application"
-            android:resource="@xml/automotive_app_desc" />
-        <meta-data
-            android:name="androidx.car.app.minCarApiLevel"
-            android:value="2" />
-        <service
-            android:name=".auto.DilinkCarAppService"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="androidx.car.app.CarAppService" />
-                <category android:name="androidx.car.app.category.NAVIGATION" />
-            </intent-filter>
-        </service>
-
-        <!-- Receives the daemon's IAaDaemon binder via explicit broadcast -->
-        <receiver
-            android:name=".auto.AaDaemonReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.dilinkauto.client.AA_DAEMON" />
-            </intent-filter>
-        </receiver>
 
     </application>
 </manifest>

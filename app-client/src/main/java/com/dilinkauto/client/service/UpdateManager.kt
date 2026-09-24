@@ -6,9 +6,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.content.FileProvider
-import com.dilinkauto.client.BuildConfig
 import com.dilinkauto.client.FileLog
-import com.dilinkauto.client.PrivilegeRouter
 import com.dilinkauto.client.R
 import dadb.AdbKeyPair
 import dadb.Dadb
@@ -220,32 +218,8 @@ object UpdateManager {
 
         val version = latestRelease?.versionName ?: ""
 
-        if (PrivilegeRouter.isAvailable) {
-            // Silent install via privileged shell (root) — no system confirmation dialog
-            _updateState.value = UpdateState.Installing(version)
-            scope.launch(Dispatchers.IO) {
-                try {
-                    val result = PrivilegeRouter.execAndWait("pm install -r ${apkFile.absolutePath}")
-                    if (result != null && result.contains("Success")) {
-                        FileLog.i(TAG, "${PrivilegeRouter.displayName} install succeeded: $result")
-                        _updateState.value = UpdateState.Installed
-                        downloadedFile?.delete()
-                        downloadedFile = null
-                        latestRelease = null
-                    } else {
-                        val msg = result ?: "Privileged command returned null"
-                        FileLog.w(TAG, "${PrivilegeRouter.displayName} install failed, trying dadb fallback: $msg")
-                        tryDadbInstall(apkFile, version)
-                    }
-                } catch (e: Exception) {
-                    FileLog.e(TAG, "Privileged install error, trying dadb fallback", e)
-                    tryDadbInstall(apkFile, version)
-                }
-            }
-        } else {
-            // Fallback to system package installer
-            launchSystemInstaller(context, apkFile)
-        }
+        // Fallback to system package installer
+        launchSystemInstaller(context, apkFile)
     }
 
     private suspend fun tryDadbInstall(apkFile: File, version: String) {
@@ -373,18 +347,16 @@ object UpdateManager {
         val tagName = json.getString("tag_name")
         val versionName = tagName.removePrefix("v")
 
-        // Find APK asset — prefer matching flavor (root vs standard)
+        // Find APK asset — prefer the standard build
         val assets = json.getJSONArray("assets")
-        val preferRoot = BuildConfig.AA_ONLY
         var apkUrl: String? = null
         var apkSize = 0L
 
-        // First pass: prefer matching flavor
+        // First pass: prefer the standard asset
         for (i in 0 until assets.length()) {
             val asset = assets.getJSONObject(i)
             val name = asset.getString("name")
-            val matches = if (preferRoot) name.contains("root", ignoreCase = true)
-                          else name.contains("standard", ignoreCase = true)
+            val matches = name.contains("standard", ignoreCase = true)
             if (name.endsWith(".apk") && matches) {
                 apkUrl = asset.getString("browser_download_url")
                 apkSize = asset.getLong("size")

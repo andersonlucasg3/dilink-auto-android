@@ -20,7 +20,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.dilinkauto.client.ClientApp
 import com.dilinkauto.client.FileLog
-import com.dilinkauto.client.PrivilegeRouter
 import com.dilinkauto.client.R
 import com.dilinkauto.client.display.VirtualDisplayClient
 import com.dilinkauto.protocol.*
@@ -407,12 +406,8 @@ class ConnectionService : Service() {
         FileLog.i(TAG, "Car display: ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi fps=${request.targetFps}")
         targetFps = request.targetFps
 
-        // Create VD at car viewport size — no GPU downscale needed.
         // Keep phone DPI (480) so apps don't blow up at car's low DPI (240).
         val displayDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
-        val vdWidth = request.screenWidth and 0x7FFFFFFE.toInt()
-        val vdHeight = request.screenHeight and 0x7FFFFFFE.toInt()
-        FileLog.i(TAG, "VD: ${vdWidth}x${vdHeight} @${displayDpi}dpi (car-native res, no downscale)")
 
         // Daemon lifecycle listener is persistent (started in onStartCommand).
         // It accepts daemon connections on :19647 and triggers VD_PORTS_BOUND.
@@ -421,10 +416,8 @@ class ConnectionService : Service() {
             java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
             "vd-server.jar"
         ).absolutePath
-        // Root (su) preferred — phone deploys daemon locally.
-        // Car waits for VD_PORTS_BOUND instead of deploying via ADB.
-        val connMethod = PrivilegeRouter.connectionMethod
-        FileLog.i(TAG, "Handshake: connMethod=${PrivilegeRouter.displayName}")
+        val connMethod = CONNECTION_METHOD_USB_ADB
+        FileLog.i(TAG, "Handshake: connMethod=USB_ADB")
         val resp = HandshakeResponse(
             accepted = true,
             deviceName = android.os.Build.MODEL,
@@ -482,12 +475,6 @@ class ConnectionService : Service() {
                 try {
                     conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
                     FileLog.i(TAG, "Handshake response sent")
-
-                    // Deploy daemon locally (root) while car waits for VD_PORTS_BOUND
-                    if (PrivilegeRouter.isAvailable) {
-                        FileLog.i(TAG, "Deploying daemon via ${PrivilegeRouter.displayName}...")
-                        startVdServerLocally(request.screenWidth, request.screenHeight, vdWidth, vdHeight)
-                    }
                 } catch (e: Exception) {
                     FileLog.e(TAG, "Failed to send handshake response", e)
                     return@launch
@@ -512,27 +499,6 @@ class ConnectionService : Service() {
     }
 
     // ─── VD Server Connection ───
-
-    /**
-     * Start the VD server process directly on the phone with elevated privileges
-     * (root via su — selected by PrivilegeRouter).
-     * Deploy is delegated to DaemonDeployer; the daemon connects its lifecycle
-     * channel to the persistent listener on :19647 and video/input to the car.
-     */
-    private fun startVdServerLocally(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int) {
-        if (!PrivilegeRouter.isAvailable) {
-            FileLog.w(TAG, "No privileged backend available — cannot start VD server")
-            return
-        }
-        serviceScope.launch(Dispatchers.IO) {
-            val carIp = controlConnection?.remoteAddress ?: "127.0.0.1"
-            DaemonDeployer.start(
-                this@ConnectionService,
-                vdWidth, vdHeight, VideoConfig.VIRTUAL_DISPLAY_DPI,
-                carWidth, carHeight, targetFps, carIp
-            )
-        }
-    }
 
     /**
      * Auto-update car app via dadb when handshake reveals outdated version.
@@ -1000,58 +966,26 @@ class ConnectionService : Service() {
     }
 
     private suspend fun queryShortcuts(packageName: String): List<AppShortcut> {
-        FileLog.i(TAG, "Querying shortcuts for $packageName: priv=${PrivilegeRouter.displayName} vdClient=${vdClient != null} vdConnected=${vdClient?.isConnected}")
-        // True when the privileged shell already proved cmd shortcut is unavailable on this
-        // device, so we can skip the redundant VD server attempt (both run the same command).
-        var cmdShortcutUnavailable = false
-        // Try privileged shell first (root) — has full access to shortcut data
-        if (PrivilegeRouter.isAvailable) {
+        FileLog.i(TAG, "Querying shortcuts for $packageName: vdClient=${vdClient != null} vdConnected=${vdClient?.isConnected}")
+        // Try VD server
+        val vd = vdClient
+        if (vd != null && vd.isConnected) {
+            FileLog.i(TAG, "VD server path: querying shortcuts for $packageName")
             try {
-                val output = PrivilegeRouter.execAndWait("cmd shortcut get-shortcuts --package $packageName")
-                if (!output.isNullOrEmpty()) {
+                val output = vd.queryShortcuts(packageName)
+                if (!output.isNullOrBlank()) {
                     val parsed = parseCmdShortcutOutput(output, packageName)
                     if (parsed.isNotEmpty()) {
-                        FileLog.i(TAG, "${PrivilegeRouter.displayName}: ${parsed.size} shortcuts for $packageName")
+                        FileLog.i(TAG, "VD server returned ${parsed.size} shortcuts for $packageName")
                         return parsed
+                    } else {
+                        FileLog.w(TAG, "VD server returned output but parsed empty for $packageName")
                     }
-                    // cmd shortcut unavailable on this device — try dumpsys via privileged shell
-                    cmdShortcutUnavailable = true
-                    FileLog.d(TAG, "${PrivilegeRouter.displayName}: cmd shortcut returned ${output.length} chars but parsed empty, trying dumpsys")
-                    val dumpOutput = PrivilegeRouter.execAndWait("dumpsys shortcut $packageName 2>&1")
-                    if (!dumpOutput.isNullOrBlank()) {
-                        val dumpParsed = parseCmdShortcutOutput(dumpOutput, packageName)
-                        if (dumpParsed.isNotEmpty()) {
-                            FileLog.i(TAG, "${PrivilegeRouter.displayName} dumpsys: ${dumpParsed.size} shortcuts for $packageName")
-                            return dumpParsed
-                        }
-                    }
-                    FileLog.i(TAG, "${PrivilegeRouter.displayName}: cmd shortcut unavailable, skipping VD server")
+                } else {
+                    FileLog.w(TAG, "VD server returned empty/null output for $packageName")
                 }
             } catch (e: Exception) {
-                FileLog.w(TAG, "Privileged shortcut query failed for $packageName: ${e.message}")
-            }
-        }
-        // Try VD server — skip if the privileged shell already proved cmd shortcut is unavailable
-        if (!cmdShortcutUnavailable) {
-            val vd = vdClient
-            if (vd != null && vd.isConnected) {
-                FileLog.i(TAG, "VD server path: querying shortcuts for $packageName")
-                try {
-                    val output = vd.queryShortcuts(packageName)
-                    if (!output.isNullOrBlank()) {
-                        val parsed = parseCmdShortcutOutput(output, packageName)
-                        if (parsed.isNotEmpty()) {
-                            FileLog.i(TAG, "VD server returned ${parsed.size} shortcuts for $packageName")
-                            return parsed
-                        } else {
-                            FileLog.w(TAG, "VD server returned output but parsed empty for $packageName")
-                        }
-                    } else {
-                        FileLog.w(TAG, "VD server returned empty/null output for $packageName")
-                    }
-                } catch (e: Exception) {
-                    FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
-                }
+                FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
             }
         }
         // Fallback: read shortcuts directly from the APK's XML resource.

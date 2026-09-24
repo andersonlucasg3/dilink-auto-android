@@ -5,7 +5,7 @@ import android.os.Looper
 /**
  * Entry point for the native streaming daemon.
  *
- * Launched via Shizuku or ADB:
+ * Launched via ADB:
  *   CLASSPATH=bridge.jar app_process / com.dilinkauto.vdserver.DaemonEntry <args>
  *
  * Loads libdilinkd.so and delegates to nativeRun() which runs the full
@@ -27,7 +27,6 @@ object DaemonEntry {
                 try {
                     System.load("/sdcard/DiLinkAuto/libdilinkd.so")
                 } catch (e3: UnsatisfiedLinkError) {
-                    // Non-fatal: aa-daemon is pure Kotlin and needs no native lib
                     System.err.println("[Daemon] libdilinkd.so not found — native streaming unavailable")
                 }
             }
@@ -39,18 +38,6 @@ object DaemonEntry {
         // Ensure main looper for FakeContext
         if (Looper.getMainLooper() == null) {
             Looper.prepareMainLooper()
-        }
-
-        if (args.firstOrNull() == "aa-daemon") {
-            val code = AaDaemonMain.run()
-            println("[Daemon] AA daemon exit=$code")
-            return
-        }
-
-        if (args.firstOrNull() == "input-injector") {
-            val code = InputInjectorMain.run()
-            println("[Daemon] input injector exit=$code")
-            return
         }
 
         val bridge = NativeBridge()
