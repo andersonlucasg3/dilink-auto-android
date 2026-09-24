@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">DiLink Auto 车机服务</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_searching">正在搜索手机…</string>
+    <string name="notification_connected">已连接到手机</string>
+
+    <!-- Launcher -->
+    <string name="search_hint">搜索应用…</string>
+    <string name="not_connected">未连接</string>
+    <string name="plug_phone_usb">请将手机插入车机 USB 接口</string>
+    <string name="phone_ip_label">手机 IP 地址</string>
+    <string name="connect_button">连接</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_launcher">启动台</string>
+    <string name="nav_recent">最近任务</string>
+    <string name="nav_notifications">通知中心</string>
+    <string name="nav_back">返回</string>
+    <string name="nav_home">主页</string>
+
+    <!-- Mirror -->
+    <string name="status_updating">正在更新车机端应用…</string>
+    <string name="status_please_wait">请稍候</string>
+
+    <!-- Orientation note -->
+    <string name="landscape_app_note">应用控制自身的显示方向。仅支持竖屏的应用可能会显示黑边。</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">连接步骤</string>
+
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">Wi-Fi 直连模式</string>
+    <string name="dev_mode_desc_on">Wi-Fi ADB（车机通过 Wi-Fi 连接手机 — 无需 USB 数据线）</string>
+    <string name="dev_mode_desc_off">USB ADB（车机通过 USB 数据线连接手机）</string>
+    <string name="wifi_adb_setup_title">Wi-Fi ADB 设置指南</string>
+    <string name="wifi_adb_setup_desc">使用 Wi-Fi 直连模式前，必须先在手机上开启网络 ADB。将手机通过 USB 连接电脑并执行：\n\nadb tcpip 5555\n\n该操作仅需执行一次。之后车机即可通过 Wi-Fi 连接手机，无需 USB 数据线。</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">或通过 IP 手动连接</string>
+    <string name="manual_connect_ip_label">手机 IP 地址</string>
+    <string name="manual_connect_button">连接</string>
+
+    <!-- Branding -->
+    <string name="branding_title">DiLink Auto</string>
+    <string name="branding_tagline">在汽车中控屏上畅享手机应用</string>
+
+    <!-- Connection Status -->
+    <string name="status_ready_to_connect">就绪，等待连接</string>
+    <string name="status_connecting">正在连接…</string>
+    <string name="status_connected">已连接</string>
+    <string name="status_streaming">正在投屏</string>
+
+    <!-- How to Connect Steps -->
+    <string name="how_to_step_1">开启手机 Wi-Fi 个人热点</string>
+    <string name="how_to_step_2">将手机插入车机的 USB 数据接口</string>
+    <string name="how_to_step_3">在手机上打开 DiLink Auto 应用</string>
+    <string name="how_to_step_4">等待车机自动完成连接</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_eject">断开连接</string>
+    <string name="nav_alerts">提醒</string>
+
+    <!-- Network -->
+    <string name="network_connected">已连接</string>
+    <string name="network_offline">离线</string>
+
+    <!-- Recent Apps -->
+    <string name="recent_app_fallback">应用</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">暂无通知</string>
+    <string name="notifications_count">通知 (%d)</string>
+    <string name="clear_all">全部清除</string>
+    <string name="clear_notification">清除通知</string>
+
+    <!-- Connection Status Messages -->
+    <string name="status_deploying_vd">正在部署虚拟显示器…</string>
+    <string name="status_waiting_usb">等待 USB 连接…</string>
+    <string name="status_waiting_wifi">等待 Wi-Fi 连接…</string>
+    <string name="status_tcp_adb_failed">TCP ADB 连接失败</string>
+    <string name="status_tcp_adb_connected">TCP ADB 已连接</string>
+    <string name="status_connecting_tcp_adb">正在通过 TCP ADB 连接至 %s…</string>
+    <string name="status_connecting_usb">正在建立 USB 连接… 请在手机上确认授权弹窗</string>
+    <string name="status_usb_failed">USB 连接失败 — 请检查手机上的授权弹窗</string>
+    <string name="status_usb_connected">USB 已连接</string>
+    <string name="status_updating_car">正在更新车机端应用…</string>
+    <string name="status_preparing_vd">正在准备虚拟显示器…</string>
+    <string name="status_starting_vd">正在启动虚拟显示器…</string>
+    <string name="status_vd_failed">虚拟显示器服务启动失败</string>
+    <string name="status_waiting_video">正在等待视频流…</string>
+    <string name="status_updating_please_wait">正在更新车机端应用… 请稍候</string>
+    <string name="status_no_adb">请将手机连接至车机 USB 接口</string>
+    <string name="status_no_phone_ip">无法获取手机 IP 地址</string>
+
+    <!-- App Context Actions -->
+    <string name="action_uninstall">卸载</string>
+    <string name="action_app_info">应用信息</string>
+</resources>
