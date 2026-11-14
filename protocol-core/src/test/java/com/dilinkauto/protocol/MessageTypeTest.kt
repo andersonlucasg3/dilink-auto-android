@@ -48,4 +48,11 @@ class MessageTypeTest {
         // issue #9：车机端索要 IDR 的逃生通道，编号同样是协议契约
         assertEquals(0x33.toByte(), ControlMsg.REQUEST_SYNC_FRAME)
     }
+
+    @Test
+    fun `PHONE_STATUS 编号固定为 0x21`() {
+        // issue #151：手机电量上行。0x20 已是 NAVIGATION_STATE，0x21 是表内下一个空位；
+        // 改动等于破坏兼容（老车机按新类型解码会静默忽略，但新手机与新协议文档对不上）。
+        assertEquals(0x21.toByte(), DataMsg.PHONE_STATUS)
+    }
 }

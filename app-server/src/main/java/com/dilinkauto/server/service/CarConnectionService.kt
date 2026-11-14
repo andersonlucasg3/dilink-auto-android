@@ -110,6 +110,10 @@ class CarConnectionService : Service() {
             adbTrackerProvider = { adbTracker },
             deployVdServer = { vdDeployer.deploy() },
             updateNotification = { updateNotification(it) },
+            // issue #151：手机电量状态。null = 会话结束，让 chip 回到 `—`。
+            onPhoneStatus = { status ->
+                if (status == null) phoneStatusProvider?.clear() else phoneStatusProvider?.onStatus(status)
+            },
         )
     }
 
@@ -139,6 +143,14 @@ class CarConnectionService : Service() {
     private val _weatherState = MutableStateFlow<WeatherUiState?>(null)
     val weatherState: StateFlow<WeatherUiState?> = _weatherState.asStateFlow()
     private var weatherProvider: WeatherProvider? = null
+
+    /**
+     * 手机电量（issue #151）：由 [PhoneStatusProvider] 持有，数据来自
+     * [CarSessionCoordinator] 解出的 `DataMsg.PHONE_STATUS`，断开时清回 null（chip 显示 `—`）。
+     */
+    private val _phoneStatusState = MutableStateFlow<PhoneStatusUiState?>(null)
+    val phoneStatusState: StateFlow<PhoneStatusUiState?> = _phoneStatusState.asStateFlow()
+    private var phoneStatusProvider: PhoneStatusProvider? = null
 
     enum class State { IDLE, CONNECTING, CONNECTED, STREAMING }
 
@@ -247,6 +259,12 @@ class CarConnectionService : Service() {
             weatherProvider = it
             it.start()
         }
+        // issue #151：手机电量的唯一写入者；数据由 sessionCoordinator 的
+        // DataMsg.PHONE_STATUS 分支回调进来。
+        PhoneStatusProvider(_phoneStatusState).let {
+            phoneStatusProvider = it
+            it.start()
+        }
     }
 
     private fun registerNetworkCallback() {
@@ -318,6 +336,8 @@ class CarConnectionService : Service() {
         altitudeProvider = null
         weatherProvider?.stop()
         weatherProvider = null
+        phoneStatusProvider?.stop()
+        phoneStatusProvider = null
         networkCallback?.let {
             try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) }
             catch (_: Exception) {}

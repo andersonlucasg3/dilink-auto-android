@@ -126,6 +126,14 @@ class ConnectionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private var packageRemovedReceiver: BroadcastReceiver? = null
+
+    /**
+     * 手机电量采集与上行（issue #151）。
+     *
+     * sticky 广播只在服务存活期间订阅；`isReady` 要求**握手完成**且控制连接可用，
+     * 以免把新消息推给尚未完成握手的对端（老车机对它也是静默忽略，这里只是双保险）。
+     */
+    private var phoneBatteryReporter: PhoneBatteryReporter? = null
     @Volatile private var savedDefaultIme: String? = null
 
     override fun onCreate() {
@@ -138,6 +146,16 @@ class ConnectionService : Service() {
         acquireWakeLock()
         setupNetworkMonitor()
         registerPackageRemovedReceiver()
+        // issue #151：电量采集跟随服务生命周期；只在握手完成后上行，未连接不发。
+        PhoneBatteryReporter(
+            scope = serviceScope,
+            context = applicationContext,
+            isReady = { handshakeReceived && controlConnection?.isConnected == true },
+            send = { type, payload -> controlConnection?.sendData(type, payload) }
+        ).also {
+            phoneBatteryReporter = it
+            it.start()
+        }
         deployAssets()
         logDeviceInfo()
         cacheDefaultIme()
@@ -818,6 +836,8 @@ class ConnectionService : Service() {
         val conn = controlConnection
         controlConnection = null
         activeConnection = null
+        // issue #151：会话结束清掉上报节流基准，重连后的第一帧立即上屏。
+        phoneBatteryReporter?.onSessionEnded()
         appListBuilder.resetIconHashes() // Force resend icons on reconnect
         _serviceState.value = State.WAITING
         val ime = savedDefaultIme
@@ -876,6 +896,8 @@ class ConnectionService : Service() {
         stopEverything()
         networkMonitor?.stop()
         networkMonitor = null
+        phoneBatteryReporter?.stop()
+        phoneBatteryReporter = null
         packageRemovedReceiver?.let {
             try { unregisterReceiver(it) } catch (_: Exception) {}
         }

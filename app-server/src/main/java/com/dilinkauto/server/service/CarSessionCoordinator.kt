@@ -30,6 +30,12 @@ internal class CarSessionCoordinator(
     private val adbTrackerProvider: () -> CarAdbTracker,
     private val deployVdServer: () -> Unit,
     private val updateNotification: (Int) -> Unit,
+    /**
+     * 手机电量状态回调（issue #151）：收到合法 `PHONE_STATUS` 帧时传值，会话断开时传
+     * `null`。由 [CarConnectionService] 接到 [PhoneStatusProvider] 上，作为该
+     * StateFlow 的唯一写入路径。
+     */
+    private val onPhoneStatus: (PhoneStatus?) -> Unit,
 ) {
     private val adbTracker: CarAdbTracker get() = adbTrackerProvider()
 
@@ -485,6 +491,17 @@ internal class CarSessionCoordinator(
             DataMsg.MEDIA_PLAYBACK_STATE -> { _playbackState.value = PlaybackState.decode(frame.payload) }
             DataMsg.APP_UNINSTALLED -> appListReceiver.onAppUninstalled(frame.payload)
             DataMsg.APP_INFO_DATA -> appListReceiver.onAppInfoData(frame.payload)
+            DataMsg.PHONE_STATUS -> {
+                // issue #151：手机电量。坏帧只丢这一条并留痕，绝不能把 data reader 打断
+                // （与 docs/protocol.md 的「Decoding contract」一致）。
+                try {
+                    val status = PhoneStatus.decode(frame.payload)
+                    carLogSend("phone status level=${status.level} charging=${status.charging} temp=${status.temperatureC}")
+                    onPhoneStatus(status)
+                } catch (e: ProtocolDecodeException) {
+                    carLogSend("Malformed PHONE_STATUS ignored: ${e.message}", "W")
+                }
+            }
             DataMsg.LOG_TOGGLE -> {
                 val enabled = frame.payload.isNotEmpty() && frame.payload[0].toInt() == 1
                 logWriter.setEnabled(enabled)
@@ -642,6 +659,8 @@ internal class CarSessionCoordinator(
         wifiReady = false
         vdServerStarted = false
         handshakeDone = false
+        // issue #151：电量属于会话态，断开后必须回到 `—`，否则会显示上一台手机的旧值。
+        onPhoneStatus(null)
         adbTracker.resetAdbReadiness()
         if (adbTracker.adbController?.isConnected == true) adbTracker.usbReady = true
 

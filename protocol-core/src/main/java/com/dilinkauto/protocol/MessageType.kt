@@ -84,6 +84,17 @@ object DataMsg {
     const val MEDIA_PLAYBACK_STATE: Byte = 0x11
     const val MEDIA_ACTION: Byte = 0x12
     const val NAVIGATION_STATE: Byte = 0x20
+    /**
+     * Phone → Car: 手机电量 / 充电状态（issue #151）。
+     *
+     * 定长 3 字节载荷（见 [PhoneStatus]）：`level | flags(bit0=charging) | temperature`。
+     * 手机端在握手完成后按 [BatteryReportGate] 的节奏上行（≥2% 变化或充电位翻转立即、
+     * 1% 变化 5s 防抖、每 60s 兜底），车机端只用于信息栏 chip。
+     *
+     * 向后兼容：车机端 [DataMsg] 的 `when` 分发没有 else 分支，
+     * 老车机会直接忽略未知类型，不会把这一帧当成别的消息执行。
+     */
+    const val PHONE_STATUS: Byte = 0x21
     /** Car → Phone: log line (UTF-8 text). Phone writes to FileLog */
     const val CAR_LOG: Byte = 0x30.toByte()
     /** Phone ↔ Car: toggle logging (payload: 1-byte 0 or 1) */

@@ -310,6 +310,24 @@ UTF-8 text line. Car routes all logs (including VideoDecoder and UsbAdbConnectio
 
 1-byte payload (0 or 1). Toggles car-side logging. Defaults: ON for debug/pre-release builds, OFF for release. The user choice persists. When off, zero disk writes occur on the car.
 
+### PHONE_STATUS (0x21) -- Phone -> Car
+
+手机电量与充电状态（issue #151）。定长 3 字节：
+
+```
++----------------------+--------+
+| level                | uint8  |  0-100（手机已按 EXTRA_LEVEL/EXTRA_SCALE 换算）
+| flags                | uint8  |  bit0 = 充电中；其余位保留，接收端忽略
+| temperature          | int8   |  摄氏度；-128 = 手机未上报
++----------------------+--------+
+```
+
+- 发送时机：手机端在**握手完成且控制连接可用**后，按 `BatteryReportGate` 节流上行 —— 首次采样必发、充电位翻转或 ≥2% 变化立即发、1% 变化需距上次 ≥5s、电量不变时 60s 兜底一次。未连接/未握手不发，发送失败只记日志并保留状态以便下一轮重试（issue #41 的教训）。
+- 载荷长度必须恰好 3 字节：短于或长于 3 字节都抛 `ProtocolDecodeException`（定长状态向量多出字节说明组帧错位，不能静默按前 3 字节解析）。`level > 100` 同样判错。
+- 车机端只用于信息栏 chip：`86%` / `86%+`（充电中）/ `—`（未收到或已断开）。文本由 `protocol-core` 的 `BatteryFormat` 生成，受横屏左栏 76dp 定宽约束，不加图标。
+
+**向后兼容**：车机端 `CarSessionCoordinator.handleDataFrame` 的 `when` 没有 else 分支，老版本收到 `0x21` 会直接忽略，不会误当作别的消息执行；手机端只在握手完成（`handshakeReceived`）后才发送，且未知类型不会影响老会话的其他帧。
+
 ### Decoding contract (all payloads)
 
 Every fixed-size read is preceded by a remaining-bytes check and every length prefix is read as **unsigned** (a `0x8004` short used to become `-32764` and throw `NegativeArraySizeException`). Violations raise `ProtocolDecodeException` — never an unchecked `BufferUnderflowException` — so `Connection`'s reader can catch it, log the reason and disconnect, instead of the exception escaping into an unhandled coroutine and killing the process.

@@ -622,6 +622,81 @@ data class AppUninstalledMessage(val packageName: String) {
     }
 }
 
+// ─── Phone status (issue #151) ───
+
+/**
+ * 手机电量 / 充电状态（issue #151，载荷在 [DataMsg.PHONE_STATUS]）。
+ *
+ * 定长 3 字节，全部无符号读取：
+ *
+ * ```
+ * +-------------+--------+-----------------------------------------------+
+ * | level       | uint8  | 0-100，手机端已按 EXTRA_LEVEL/EXTRA_SCALE 换算   |
+ * | flags       | uint8  | bit0 = 充电中；其余位保留，解码头忽略            |
+ * | temperature | int8   | 摄氏度；[TEMPERATURE_UNKNOWN] = 手机未上报       |
+ * +-------------+--------+-----------------------------------------------+
+ * ```
+ *
+ * 为什么定长且**多余字节也判错**：这是个纯状态向量，长度由协议钉死。多出来
+ * 的字节只可能来自对端组帧错位（或未来版本硬塞尾字段），静默按前 3 字节解析
+ * 会把错位当成合法数据渲染出去；按 [ProtocolDecodeException] 显式拒绝，车机
+ * 端的 `handleDataFrame` 会记一条警告并继续跑，不会打断整条会话。
+ *
+ * 温度只是顺带携带（手机 `EXTRA_TEMPERATURE` 的 0.1°C 换算成整数），v1 不上屏。
+ */
+data class PhoneStatus(
+    val level: Int,
+    val charging: Boolean,
+    val temperatureC: Int? = null
+) {
+    fun encode(): ByteArray {
+        require(level in 0..100) { "Battery level out of range 0-100: $level" }
+        val temp = temperatureC
+        require(temp == null || (temp in MIN_TEMPERATURE_C..MAX_TEMPERATURE_C)) {
+            "Battery temperature out of range $MIN_TEMPERATURE_C..$MAX_TEMPERATURE_C: $temp"
+        }
+        return ByteArray(PAYLOAD_SIZE).also { out ->
+            out[0] = level.toByte()
+            out[1] = (if (charging) FLAG_CHARGING else 0).toByte()
+            out[2] = (temp ?: TEMPERATURE_UNKNOWN).toByte()
+        }
+    }
+
+    companion object {
+        /** 定长载荷字节数：level + flags + temperature。 */
+        const val PAYLOAD_SIZE = 3
+
+        /** flags 的 bit0：正在充电（`EXTRA_STATUS` 为 CHARGING / FULL）。 */
+        const val FLAG_CHARGING = 0x01
+
+        /** 手机未上报温度时的哨兵值（有符号 int8）。 */
+        const val TEMPERATURE_UNKNOWN = -128
+
+        /** 手机电池的合理温度区间：低于 -40°C 或高于 100°C 一定是坏数据。 */
+        const val MIN_TEMPERATURE_C = -40
+        const val MAX_TEMPERATURE_C = 100
+
+        fun decode(data: ByteArray): PhoneStatus {
+            if (data.size != PAYLOAD_SIZE) {
+                throw ProtocolDecodeException(
+                    "PhoneStatus payload must be $PAYLOAD_SIZE bytes, got ${data.size}"
+                )
+            }
+            val level = data[0].toInt() and 0xFF
+            if (level > 100) {
+                throw ProtocolDecodeException("PhoneStatus level out of range 0-100: $level")
+            }
+            val flags = data[1].toInt() and 0xFF
+            val rawTemp = data[2].toInt() // Byte 有符号扩展，-128 即哨兵
+            return PhoneStatus(
+                level = level,
+                charging = flags and FLAG_CHARGING != 0,
+                temperatureC = if (rawTemp == TEMPERATURE_UNKNOWN) null else rawTemp
+            )
+        }
+    }
+}
+
 /** Phone → Car: app info data for display on car screen (payload in DataMsg.APP_INFO_DATA) */
 data class AppInfoDataMessage(
     val packageName: String,
