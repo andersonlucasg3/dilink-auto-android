@@ -21,6 +21,7 @@ fun NavActionButton(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     modifier: Modifier = Modifier
 ) {
@@ -33,13 +34,17 @@ fun NavActionButton(
             // usable width, so a 48dp floor fits without clipping.
             .widthIn(min = 48.dp)
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp)
+            // 禁用态（issue #152-PA 的「最近」键在重握手窗口内）不响应点击，
+            // 避免把 GO_RECENT 发进正在拆除的连接、刷 `dropped` 日志。
+            .clickable(enabled = enabled, onClick = onClick)
+            // issue #152-PA：竖向 padding 10dp -> 6dp，给第 4 个键腾出高度；
+            // 触控高度仍有 40 + 12 = 52dp，高于 48dp 无障碍下限。
+            .padding(vertical = 6.dp)
     ) {
         Icon(
             icon,
             contentDescription = label,
-            tint = tint,
+            tint = if (enabled) tint else tint.copy(alpha = 0.38f),
             modifier = Modifier.size(40.dp)
         )
     }

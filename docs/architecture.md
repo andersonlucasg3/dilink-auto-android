@@ -364,7 +364,7 @@ The BYD head unit runs Android 9 (API 28). Several framework APIs the project us
 ## Removed Features (relative to upstream)
 
 - **Notification forwarding.** Phone notifications -> car screen, the nav-bar notification button, the notification list screen, the phone-side `NotificationService` (manifest entry, onboarding step, strings), and the `FOCUSED_APP` / `APP_SHORTCUTS` / `NOTIFICATION_*` protocol messages are all deleted. The car nav bar has no notification button.
-- **Recent-apps rail, clock, network info** in the nav bar: deleted. The nav bar is three buttons only (Eject / Home / Back).
+- **Recent-apps rail, clock, network info** in the nav bar: deleted. The nav bar is four buttons (home, back, previous app, disconnect; `NavBarLayout.actions()` owns the order — the left rail top-down is home/back/recent/eject, the portrait bottom bar is its exact reverse). The fourth one is not the old recents rail coming back — it is the single "switch to the previous app" key added in issue #152-PA, which just sends `GO_RECENT` (0x1F, double-tap-recents semantics, resolved on the phone by `CarCommandRouter.quickSwitch`). No task list, no thumbnails, no per-app state is cached on the car.
 - **Media controls and navigation widgets** are not implemented. (Audio streaming is implemented in v1.0.3; `NowPlayingBar` exists in the source tree but is only composed when `MediaMetadata` is present, which the phone never sends.)
 
 ## Session Stability
