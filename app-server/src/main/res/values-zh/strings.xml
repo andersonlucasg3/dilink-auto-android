@@ -59,6 +59,11 @@
     <string name="video_fps_desc">发送给解码器的帧率。降低帧率可减少 CPU/GPU 负载</string>
     <string name="video_fps_hint">24 FPS 相比 30 FPS 可节省约 20% 的 CPU/GPU 与 Wi-Fi 负载</string>
 
+    <!-- VD 合成面积档位（issue #153 PB） -->
+    <string name="vd_area_tier_title">VD 合成面积档位</string>
+    <string name="vd_area_tier_desc_off">默认档：按车机宽 1.6 倍封顶（最小 1600），合成面积约省 44%。下次连接生效</string>
+    <string name="vd_area_tier_desc_on">键盘兼容档：保留 2560 上限，输入法最完整、合成面积最大。下次连接生效</string>
+
     <!-- Setting Presets -->
     <string name="preset_auto">自动</string>
     <string name="preset_dpi_160">160（标配）</string>

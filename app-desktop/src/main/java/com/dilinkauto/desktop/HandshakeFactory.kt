@@ -23,6 +23,7 @@ object HandshakeFactory {
         .targetFps(config.targetFps)
         .dpiOverride(config.dpiOverride)
         .bitrate(config.bitrate)
+        .vdAreaTier(config.vdAreaTier)
         .build()
 
     /** 向下取偶数，并保证最小为 2（奇数边长会被 H.264 编码器拒绝或导致画面错位）。 */

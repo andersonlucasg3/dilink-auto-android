@@ -77,10 +77,13 @@ The DATA channel multiplexes on the same TCP socket as CONTROL. VIDEO, INPUT and
 | appVersionName       | UTF-8  |  car app version name
 | dpiOverride          | int32  |  trailing field, default 0
 | bitrate              | int32  |  trailing field, target bitrate in bps, default 0
+| vdAreaTier           | int32  |  trailing field, VD 合成面积档位（0=AUTO / 1=COMPAT_2560），default 0
 +----------------------+--------+
 ```
 
-Both trailing fields are appended after `appVersionName` and decode as `0` when absent, so older peers interoperate: a missing `dpiOverride` means auto-calibrate, a missing `bitrate` means the 4 Mbps default.
+All three trailing fields are appended after `appVersionName` and decode as `0` when absent, so older peers interoperate: a missing `dpiOverride` means auto-calibrate, a missing `bitrate` means the 4 Mbps default, a missing `vdAreaTier` means the default area tier ([VdAreaTier.AUTO]).
+
+`vdAreaTier` (issue #153 PB) 是**会话级**档位：车机在握手时下发 `0` 或 `1`，手机在本次建 VD 时把它交给 `VdDimensions.compute` 决定 anti-crop 放大上限（默认档 `max(carW*1.6, 1600)`、兼容档 2560）。它**不是**运行期尺寸同步消息，切档靠下次连接 / 旋转重握手，不在会话中 `resize`。老手机忽略尾部 4B；老车机不带该字段时手机解出 `0` = 默认档。注意车机 ADB 部署路径（`VdServerDeployer`）本来就用 car-native 视口建 VD、不消费 `HandshakeResponse.vdWidth/vdHeight`，因此档位对它是 no-op；真正消费方是 Shizuku 路径与桌面端 `AdbDeploy`。
 
 `supportedFeatures` 默认只置 `FEATURE_VIDEO`。`FEATURE_AUDIO` 必须由 `HandshakeRequest.builder().supportedFeatures(...)` 显式开启，含义是「接收端想播且能解码音频」，与手机能不能采集无关。S1 之前默认值是 `FEATURE_VIDEO or FEATURE_AUDIO`，导致两个构造点（车机 `buildHandshakeRequest`、桌面端 `HandshakeFactory.build`）都在假广告一个根本没实现的音频通道（issue #67）。手机自身的能力由 `HandshakeResponse` 的尾字段 `supportedFeatures` 回传；protocol-core 的 `isAudioNegotiated(request, response)` 是唯一判据，要求 `accepted == true` **且**两侧都置了 `FEATURE_AUDIO`，之后才允许 bind 9640。接收端音频开关的置灰依据必须是手机的 response，绝不能用接收端自己的 `SDK_INT`：Android 11（SDK 30）的采集下限约束的是手机，不是车机（`app-server` 的 `minSdk` 为 26）。
 
@@ -562,7 +565,7 @@ The cross-endpoint contracts above are pinned by unit tests so a "tidy-up" canno
 |-----------|--------------------|
 | ADB frame: `magic == command ^ 0xFFFFFFFF`, additive checksum, `MAX_PAYLOAD` ceiling accepted by `encode` but rejected by `parseHeader`, CRC verified on read | `protocol/.../adb/AdbProtocolTest`, `TcpAdbConnectionTest` |
 | `AdbCrypto` primitives: `bigIntToLEPadded`, `SHA1_DIGEST_INFO`, NUL-terminated public-key string, SHA-1 fingerprint, `buildAuthReply` sequencing | `protocol/.../adb/AdbCryptoTest` |
-| Handshake round-trips plus legacy-payload truncation for every trailing field (`dpiOverride`, `bitrate`, `vdWidth`/`vdHeight`) | `MessagesTest` |
+| Handshake round-trips plus legacy-payload truncation for every trailing field (`dpiOverride`, `bitrate`, `vdAreaTier`, `vdWidth`/`vdHeight`) | `MessagesTest` |
 | `VdDeploy` kill/stop/probe commands byte-for-byte, `[P]ipelineServer` pattern, `shellQuote`, the exact launch command line, `buildDeployPlan` | `VdDeployConstantsTest`, `VdDeployCommandLineTest` |
 | `VdDeployArgs.format` layout, aspect-preserving clamp, bitrate bounds, `CAR_HOST` sanitisation, `coerceDpiOverride` | `VdDeployArgsFormatTest` |
 | `H264NalParser.isKeyFrame` via `nal_type & 0x1F` on real-encoder `0x65` headers | `H264NalParserRefIdcTest` |

@@ -31,6 +31,11 @@ object AppPrefs {
     const val STARTUP_BITRATE = "startup_bitrate"
     const val DEV_PHONE_IP = "dev_phone_ip"
 
+    // Car-side VD composite-area tier (issue #153 PB): 0 = AUTO, 1 = COMPAT_2560.
+    // Read when building the handshake request, so a change applies on the next
+    // connect / rotation re-handshake, never in the middle of a live VD.
+    const val VD_AREA_TIER = "vd_area_tier"
+
     // Car-side audio mirroring toggle (issue #72, Refs #13). Written by the
     // settings switch, read when building the handshake request and by the S3
     // audio-channel gate. Default is ON (issue #13 decision 3).

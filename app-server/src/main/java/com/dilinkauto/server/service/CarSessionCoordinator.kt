@@ -334,7 +334,10 @@ internal class CarSessionCoordinator(
             targetFps = targetFps,
             dpiOverride = carPrefs.startupDpi,
             bitrate = carPrefs.startupBitrate,
-            audioEnabled = carPrefs.audioEnabled
+            audioEnabled = carPrefs.audioEnabled,
+            // issue #153 PB：与 startupDpi 同范式，握手构造时读取，切档在下一次
+            // 连接 / 旋转重握手生效，绝不触发会话内 VD resize。
+            vdAreaTier = carPrefs.vdAreaTier
         )
         ctrl.sendControl(ControlMsg.HANDSHAKE_REQUEST, handshake.encode())
     }

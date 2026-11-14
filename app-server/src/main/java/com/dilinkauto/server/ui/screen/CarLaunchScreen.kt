@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.dilinkauto.protocol.SettingsFormat
+import com.dilinkauto.protocol.VdAreaTier
 import com.dilinkauto.server.R
 import com.dilinkauto.server.service.AudioSwitchBlockReason
 import com.dilinkauto.server.service.CarConnectionService
@@ -64,6 +65,8 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
     val startupDpi by service.carPrefs.startupDpiFlow.collectAsState()
     val startupFps by service.carPrefs.startupFpsFlow.collectAsState()
     val startupBitrate by service.carPrefs.startupBitrateFlow.collectAsState()
+    // VD 合成面积档位（issue #153 PB）：与上面三项同为启动设置，握手构造时读取。
+    val vdAreaTier by service.carPrefs.vdAreaTierFlow.collectAsState()
     // 音频镜像（issue #72）：开关值来自 CarPrefs，置灰依据是手机端握手响应回传的
     // 能力位（service.phoneAudioSupported），不是车机自身 SDK。
     val audioEnabled by service.carPrefs.audioEnabledFlow.collectAsState()
@@ -86,7 +89,9 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
             startupFps = startupFps,
             onStartupFpsChange = { service.setStartupFps(it) },
             startupBitrate = startupBitrate,
-            onStartupBitrateChange = { service.carPrefs.startupBitrate = it }
+            onStartupBitrateChange = { service.carPrefs.startupBitrate = it },
+            vdAreaTier = vdAreaTier,
+            onVdAreaTierChange = { service.carPrefs.vdAreaTier = it }
         )
     }
 
@@ -218,7 +223,9 @@ private fun ConnectionStatusCard(
     startupFps: Int,
     onStartupFpsChange: (Int) -> Unit,
     startupBitrate: Int,
-    onStartupBitrateChange: (Int) -> Unit
+    onStartupBitrateChange: (Int) -> Unit,
+    vdAreaTier: Int,
+    onVdAreaTierChange: (Int) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -428,6 +435,39 @@ private fun ConnectionStatusCard(
                     },
                     manualSuffix = "FPS"
                 )
+
+                Spacer(Modifier.height(12.dp))
+                // VD 合成面积档位（issue #153 分节 PB）。开 = 键盘兼容档 2560（issue #71 原行为），
+                // 关 = 默认档 max(车机宽*1.6, 1600)。只在下次握手生效，不 resize 当前 VD。
+                val compatTier = vdAreaTier == VdAreaTier.COMPAT_2560
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.vd_area_tier_title),
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            if (compatTier) stringResource(R.string.vd_area_tier_desc_on)
+                            else stringResource(R.string.vd_area_tier_desc_off),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    // 不传 colors：material3 1.1.2 只给 containerColor 时 contentColor
+                    // 会默认 onPrimary，这里用主题默认色更安全。
+                    Switch(
+                        checked = compatTier,
+                        onCheckedChange = { enabled ->
+                            onVdAreaTierChange(
+                                if (enabled) VdAreaTier.COMPAT_2560 else VdAreaTier.AUTO
+                            )
+                        }
+                    )
+                }
             }
         }
     }

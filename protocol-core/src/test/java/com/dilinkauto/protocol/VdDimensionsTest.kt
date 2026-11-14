@@ -121,8 +121,9 @@ class VdDimensionsTest {
         // 封顶前 VD 会放大 2.6512 倍到 3192x1748（每帧 5.58MP，实测持续发烫）；
         // issue #71 封顶 2560 → 2560x1402（-36% 合成像素），车机密度同步放大到 340，
         // 落出 120..320 带后由 golden 公式给出 302。
+        // 显式钉在兼容档：issue #71 的 2560 上限必须原样保留（PB 默认档另测）。
         val (w, h, dpi) = VdDimensions.compute(
-            defaultRequest(carW = 1204, carH = 660), 1368, 3192
+            defaultRequest(carW = 1204, carH = 660), 1368, 3192, VdAreaTier.COMPAT_2560
         )
         assertEquals(2560, w)
         assertEquals(1402, h)
@@ -133,9 +134,9 @@ class VdDimensionsTest {
     fun upscaleIsCappedAtMaxUpscaledWidth() {
         // 手机物理长边远超上限时，VD 只到 [VdDimensions.MAX_UPSCALED_WIDTH]。
         // 代价：输入法按物理宽渲染，会在这里被裁掉 3200-2560 = 640px（约 20%），
-        // 这是 issue #71 明确接受的取舍（发烫 vs 键盘）。
+        // 这是 issue #71 明确接受的取舍（发烫 vs 键盘）。兼容档必须保持这条不变。
         val (w, _, _) = VdDimensions.compute(
-            defaultRequest(carW = 1204, carH = 660), 1440, 3200
+            defaultRequest(carW = 1204, carH = 660), 1440, 3200, VdAreaTier.COMPAT_2560
         )
         assertEquals(VdDimensions.MAX_UPSCALED_WIDTH, w)
     }
@@ -160,12 +161,145 @@ class VdDimensionsTest {
             Triple(3192, 1368, 3192L), // landscape phone, long edge 3192
         )
         for ((pw, ph, longEdge) in fixtures) {
-            val (w, _, _) = VdDimensions.compute(defaultRequest(), pw, ph)
+            val (w, _, _) = VdDimensions.compute(
+                defaultRequest(), pw, ph, VdAreaTier.COMPAT_2560
+            )
             val required = minOf(longEdge, VdDimensions.MAX_UPSCALED_WIDTH.toLong())
             assertTrue(
                 "VD width $w must be >= $required (phone ${pw}x$ph, cap ${VdDimensions.MAX_UPSCALED_WIDTH})",
                 w >= required
             )
         }
+    }
+
+    // ─── issue #153 分节 PB：VD 面积静态档位 ───
+
+    @Test
+    fun autoTier_capsAtCarWidthTimes1_6_andShrinksRealCarCompositeArea() {
+        // 实车 1204x660@160dpi + 手机物理 1368x3192：
+        // cap = max(1204*8/5=1926, 1600) = 1926 → 1926x1054 @234dpi，约 2.03MP
+        // （兼容档 2560x1402 = 3.59MP，故 -43.4%）。
+        val (w, h, dpi) = VdDimensions.compute(
+            defaultRequest(carW = 1204, carH = 660), 1368, 3192, VdAreaTier.AUTO
+        )
+        assertEquals(1926, w)
+        assertEquals(1054, h)
+        assertEquals(234, dpi)
+        assertEquals(2.030004, w.toLong() * h / 1_000_000.0, 0.000001)
+    }
+
+    @Test
+    fun compatTier_preservesIssue71LegacyCapOnSameInput() {
+        val (w, h, dpi) = VdDimensions.compute(
+            defaultRequest(carW = 1204, carH = 660), 1368, 3192, VdAreaTier.COMPAT_2560
+        )
+        assertEquals(2560, w)
+        assertEquals(1402, h)
+        assertEquals(302, dpi)
+    }
+
+    @Test
+    fun tierCap_isTableDrivenAndNeverExceedsHardCap() {
+        val cases = listOf(
+            0 to 1600,      // 非法输入也落到下限
+            -5 to 1600,
+            720 to 1600,    // 1.6x=1152 < 1600 下限
+            1000 to 1600,   // 1.6x=1600 恰好等于下限
+            1204 to 1926,   // 实车
+            1205 to 1928,   // tierCap 本身不做偶数对齐；compute 传的是已对齐的宽
+            1600 to 2560,   // 1.6x=2560
+            1920 to 2560,   // 1.6x=3072 被硬上限截住
+            2560 to 2560,
+        )
+        for ((carWidth, expected) in cases) {
+            assertEquals(
+                "AUTO cap for car $carWidth", expected,
+                VdDimensions.tierCap(carWidth, VdAreaTier.AUTO)
+            )
+            assertEquals(
+                "COMPAT cap for car $carWidth", VdDimensions.MAX_UPSCALED_WIDTH,
+                VdDimensions.tierCap(carWidth, VdAreaTier.COMPAT_2560)
+            )
+        }
+    }
+
+    @Test
+    fun autoTier_neverScalesDownAWideCarViewport() {
+        val (w, h, dpi) = VdDimensions.compute(
+            defaultRequest(carW = 2560, carH = 1440), 2400, 1080, VdAreaTier.AUTO
+        )
+        assertEquals(2560, w)
+        assertEquals(1440, h)
+        assertEquals(160, dpi)
+    }
+
+    @Test
+    fun autoTier_minimumWidthFloorAppliesToNarrowCar() {
+        // 车机 720x1280（竖屏）+ 手机 1600x3200（竖屏）：同向 → phonePhysicalWidth = 1600，
+        // AUTO cap 由 1600 下限决定；若下限失效会退化成 720*1.6 = 1152。
+        val (w, _, _) = VdDimensions.compute(
+            defaultRequest(carW = 720, carH = 1280), 1600, 3200, VdAreaTier.AUTO
+        )
+        assertEquals(1600, w)
+    }
+
+    @Test
+    fun autoTier_keepsOutputEvenAligned() {
+        // 奇数车机视口先偶数对齐成 1204x660，因此 cap 仍是 1926 而不是 1928。
+        val (w, h, _) = VdDimensions.compute(
+            defaultRequest(carW = 1205, carH = 661), 1368, 3192, VdAreaTier.AUTO
+        )
+        assertEquals(1926, w)
+        assertEquals(1054, h)
+        assertEquals(0, w and 1)
+        assertEquals(0, h and 1)
+    }
+
+    @Test
+    fun dpiOverrideIsTierIndependent() {
+        for (tier in listOf(VdAreaTier.AUTO, VdAreaTier.COMPAT_2560)) {
+            val (_, _, dpi) = VdDimensions.compute(
+                defaultRequest(carW = 1204, carH = 660, dpiOverride = 300),
+                1368, 3192, tier
+            )
+            assertEquals(300, dpi)
+        }
+    }
+
+    @Test
+    fun unknownTierFallsBackToAuto() {
+        for (raw in listOf(-1, 2, 99, Int.MAX_VALUE, Int.MIN_VALUE)) {
+            assertEquals(VdAreaTier.AUTO, VdAreaTier.normalize(raw))
+            assertEquals(
+                VdDimensions.tierCap(1204, VdAreaTier.AUTO),
+                VdDimensions.tierCap(1204, raw)
+            )
+        }
+        val (w, _, _) = VdDimensions.compute(
+            defaultRequest(carW = 1204, carH = 660), 1368, 3192, 99
+        )
+        assertEquals(1926, w)
+    }
+
+    @Test
+    fun imeWidthInvariant_autoTierUsesItsOwnCap() {
+        // 默认档把上限压小，但「VD 宽 >= min(手机物理长边, 该档上限)」仍必须成立。
+        val fixtures = listOf(Triple(1368, 3192, 3192L), Triple(3192, 1368, 3192L))
+        for ((pw, ph, longEdge) in fixtures) {
+            val (w, _, _) = VdDimensions.compute(
+                defaultRequest(carW = 1204, carH = 660), pw, ph, VdAreaTier.AUTO
+            )
+            val required = minOf(longEdge, VdDimensions.tierCap(1204, VdAreaTier.AUTO).toLong())
+            assertTrue("VD width $w must be >= $required (phone ${pw}x$ph)", w >= required)
+        }
+    }
+
+    @Test
+    fun mpixPerSec_isFullSpeedTheoreticalThroughput() {
+        // 精确值；口径是「按 fps 满速」，静止短路后实际合成拍数远低于 fps，
+        // 温升归因要看 idleSkip/ticks/frames 增长率，不能只看这个数。
+        assertEquals(107.6736, VdDimensions.mpixPerSec(2560, 1402, 30), 0.000001)
+        assertEquals(60.90012, VdDimensions.mpixPerSec(1926, 1054, 30), 0.000001)
+        assertEquals(0.0, VdDimensions.mpixPerSec(0, 0, 30), 0.000001)
     }
 }

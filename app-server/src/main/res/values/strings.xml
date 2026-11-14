@@ -59,6 +59,11 @@
     <string name="video_fps_desc">Frame rate sent to decoder. Lower FPS reduces CPU/GPU load</string>
     <string name="video_fps_hint">24 FPS cuts 20% CPU/GPU and Wi-Fi load vs 30 FPS</string>
 
+    <!-- VD composite area tier (issue #153 PB) -->
+    <string name="vd_area_tier_title">VD composite area tier</string>
+    <string name="vd_area_tier_desc_off">Default: cap at 1.6x car width (min 1600), ~44% less composite area. Applies on next connect.</string>
+    <string name="vd_area_tier_desc_on">Keyboard compatibility: keeps the 2560 cap, full IME but largest composite area. Applies on next connect.</string>
+
     <!-- Setting Presets -->
     <string name="preset_auto">Auto</string>
     <string name="preset_dpi_160">160 (Standard)</string>

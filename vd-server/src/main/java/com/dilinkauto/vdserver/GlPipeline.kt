@@ -180,9 +180,11 @@ internal class GlPipeline(
         val keepAliveIntervalNanos = VideoConfig.KEEP_ALIVE_COMPOSE_INTERVAL_MS * 1_000_000L
         // 22:03 追评要的量化字段：合成面积吞吐。分母用 VD 尺寸（displayWidth/Height），
         // 不是 encode 尺寸 —— 面积成本发生在 SurfaceFlinger 合成那一步。
+        // 口径见 VdDimensions.mpixPerSec KDoc：这是按目标 fps 算的**满速理论值**，
+        // 静止短路后实际合成拍数远低于 fps，温升归因要看 idleSkip/ticks/frames 增长率。
         val mpixPerSec = String.format(
             java.util.Locale.US, "%.1f",
-            displayWidth.toLong() * displayHeight * fps / 1_000_000.0
+            VdDimensions.mpixPerSec(displayWidth, displayHeight, fps)
         )
         val adaptive = AdaptiveBitrate(bitrate)
         // 有界队列 + 独立写线程（issue #3）：本线程只入队，写慢不再反压 updateTexImage。

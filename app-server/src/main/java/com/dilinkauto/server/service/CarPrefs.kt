@@ -2,6 +2,7 @@ package com.dilinkauto.server.service
 
 import android.content.Context
 import com.dilinkauto.protocol.AppPrefs
+import com.dilinkauto.protocol.VdAreaTier
 import com.dilinkauto.protocol.VideoConfig
 import com.dilinkauto.server.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -109,6 +110,25 @@ internal class CarPrefs(context: Context) {
         set(value) {
             prefs.edit().putInt(AppPrefs.STARTUP_BITRATE, value).apply()
             _startupBitrate.value = value
+        }
+
+    // ─── VD 合成面积档位（issue #153 分节 PB）───
+    //
+    // 与 startupDpi 同一范式：StateFlow 镜像 + setter 唯一写入；读取点是
+    // sendHandshake，因此改动在下次连接 / 旋转重握手生效，**不在会话中 resize**。
+    // getter 过 normalize，prefs 被手工改脏时回落默认档而不是把面积悄悄放大。
+
+    private val _vdAreaTier = MutableStateFlow(
+        VdAreaTier.normalize(prefs.getInt(AppPrefs.VD_AREA_TIER, VdAreaTier.AUTO))
+    )
+    val vdAreaTierFlow: StateFlow<Int> = _vdAreaTier.asStateFlow()
+
+    var vdAreaTier: Int
+        get() = VdAreaTier.normalize(prefs.getInt(AppPrefs.VD_AREA_TIER, VdAreaTier.AUTO))
+        set(value) {
+            val normalized = VdAreaTier.normalize(value)
+            prefs.edit().putInt(AppPrefs.VD_AREA_TIER, normalized).apply()
+            _vdAreaTier.value = normalized
         }
 
     // ─── 天气（issue #41 / #154）───
