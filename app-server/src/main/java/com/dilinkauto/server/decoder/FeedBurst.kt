@@ -12,7 +12,12 @@ package com.dilinkauto.server.decoder
  */
 internal object FeedBurst {
 
-    /** 单轮最多连续喂的帧数。4 槽队列 + 30fps 输入下，8 帧足以吸收一次关键帧突发。 */
+    /**
+     * 单轮最多连续喂的帧数。
+     *
+     * 队列容量 `VideoDecoder.FRAME_QUEUE_CAPACITY` = 8（issue #163 从 4 扩容），与这个上限
+     * 对齐：消费侧单轮能吃 8 帧，缓冲深度也必须跟得上，否则突发时仍会丢帧 → 断链重同步。
+     */
     const val MAX_FRAMES_PER_ROUND = 8
 
     /** 是否继续本轮排空：队列里还有帧，且本轮未达上限。 */

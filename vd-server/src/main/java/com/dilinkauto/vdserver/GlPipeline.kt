@@ -88,8 +88,11 @@ internal class GlPipeline(
 
     // Write-loop policy (5s deadline + 100us backoff) now comes from FrameCodec.
 
-    /** 上一次**授予** IDR 请求的时刻（elapsedRealtime，ms）；0 = 本会话尚未授予过。 */
-    private var lastSyncRequestMs = 0L
+    /**
+     * IDR 补帧请求闸门状态（issue #75 / #163）：与车机端共用 protocol-core 的 [SyncRequestGate]，
+     * 滑动窗口「1s 内最多 2 次」。管线是单线程，直接持有最新不可变状态即可。
+     */
+    private var syncRequestGate = SyncRequestGate()
 
     /**
      * Initialize EGL/GLES on the current thread, create the SurfaceTexture
@@ -268,15 +271,17 @@ internal class GlPipeline(
     }
 
     /**
-     * 请求一个 IDR，但**限流到 ≥[VideoConfig.SYNC_FRAME_REQUEST_MIN_INTERVAL_MS] 一次**。
+     * 请求一个 IDR，但**限流到 [VideoConfig.SYNC_FRAME_REQUEST_WINDOW_MS] 窗口内最多
+     * [VideoConfig.SYNC_FRAME_REQUEST_MAX_PER_WINDOW] 次**。
      *
      * 现场日志（issue #3）：丢帧/降码率后立刻索要 IDR 会在大 I 帧上再卡一次写，
      * 下一次采样又降码率——小正反馈。自然 IDR 的节奏由
      * [PipelineServer] 的 `I_FRAME_INTERVAL` 决定（issue #70 起改为 3s），这里只负责
      * 「丢过帧、参考链断了」时的尽快修复，不必每帧都发。
      *
-     * 闸门判定与车机端共用 [VideoConfig.syncFrameRequestAllowed] / [VideoConfig.SYNC_FRAME_REQUEST_MIN_INTERVAL_MS]
-     * （issue #75）：两端取值一旦不一致就会出现「车机放行、手机吞掉」的死区。
+     * 闸门是 [SyncRequestGate]（与车机端同一状态机，issue #75 / #163）：旧实现是硬性 1s
+     * 间隔，会吞掉「刚恢复又断链」的二次请求，车机因此干等 3s 自然 GOP（issue #163 实测
+     * 冻结 2894ms）；滑动窗口允许窗口内放行 2 次，既补二次缺口又不放开 IDR 风暴。
      *
      * @param reason 触发来源（日志用）：`car request` / `sendDrops` / `bitrate drop`。
      * @return true 表示本次**真的**调用了 encoder.setParameters（授予）；false 表示被
@@ -284,11 +289,16 @@ internal class GlPipeline(
      */
     private fun requestSyncFrameThrottled(enc: MediaCodec, reason: String): Boolean {
         val now = SystemClock.elapsedRealtime()
-        if (!VideoConfig.syncFrameRequestAllowed(now, lastSyncRequestMs)) {
-            PipeLog.log("Pipeline: IDR request throttled ($reason, last grant ${now - lastSyncRequestMs}ms ago)")
+        val next = syncRequestGate.tryAcquire(now)
+        if (next == null) {
+            val lastGrant = syncRequestGate.grantsMs.lastOrNull()
+            PipeLog.log(
+                "Pipeline: IDR request throttled ($reason, window ${VideoConfig.SYNC_FRAME_REQUEST_WINDOW_MS}ms/" +
+                    "${VideoConfig.SYNC_FRAME_REQUEST_MAX_PER_WINDOW} grants, last grant ${lastGrant?.let { now - it } ?: -1L}ms ago)"
+            )
             return false
         }
-        lastSyncRequestMs = now
+        syncRequestGate = next
         requestSyncFrame(enc)
         return true
     }
@@ -353,10 +363,10 @@ internal class GlPipeline(
         eglDisplay = display
     }
 
-    // IDR 请求闸门（取值 + 判定 + 上次授予时刻）都来自 :protocol-core 的
-    // VideoConfig.SYNC_FRAME_REQUEST_MIN_INTERVAL_MS / VideoConfig.syncFrameRequestAllowed，
-    // 与车机端共用一份——见 GlPipeline.requestSyncFrameThrottled 与 issue #75。
-    // 这里刻意不再保留手机端私有的间隔常量：两端各写一个私有值正是死区的成因。
+    // IDR 请求闸门（窗口长度 + 窗口内次数 + 已放行时刻）都来自 :protocol-core 的
+    // VideoConfig.SYNC_FRAME_REQUEST_WINDOW_MS / VideoConfig.SYNC_FRAME_REQUEST_MAX_PER_WINDOW
+    // 与 SyncRequestGate，与车机端共用一份——见 GlPipeline.requestSyncFrameThrottled 与
+    // issue #75 / #163。这里刻意不再保留手机端私有的间隔常量：两端各写一个私有值正是死区的成因。
 
     companion object {
         internal const val VERTEX_SHADER_SRC =

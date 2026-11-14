@@ -1,5 +1,6 @@
 package com.dilinkauto.server.service
 
+import com.dilinkauto.protocol.SyncRequestGate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -7,106 +8,136 @@ import org.junit.Test
 import java.io.File
 
 /**
- * 源码级钉子：两端 IDR 请求闸门必须是同一份实现、且不存在死区（issue #75）。
+ * 源码级钉子：车机端与手机端的 IDR 请求闸门必须共用 protocol-core 的同一个 [SyncRequestGate]
+ * （issue #75 的「两端单一来源」结构，issue #163 的滑动窗口语义）。
  *
- * 缺陷形态就是「两端各写一个模块内私有阈值」——车机 500ms、手机 1000ms，于是
- * 「距上次授予 500–999ms」的补帧请求被车机放行、又被手机静默吞掉，车机只能干等
- * 一个自然 GOP（3s）。本文件把「车机放行 ⇒ 手机不吞」做成可执行断言，并在**未修复的
- * base** 上以与症状一致的签名变红（`dead zone replay at the observed 747ms gap`）。
+ * 缺陷形态是「两端各自写死一个阈值」——车机 500ms、手机 1000ms，于是距上次授予
+ * 500–999ms 的补帧请求被车机放行、又被手机吞掉（issue #75）；或者两端共用「硬性 1s 间隔」，
+ * 吞掉刚恢复又断链的二次请求，车机干等 3s 自然 GOP（issue #163）。本文件把
+ * 「两端同判 + 二次缺口放行」做成可执行断言。
  *
- * 刻意只读源码文本、不引用被修复后才存在的符号，因此本文件在 base 上也能编译并按
- * 断言变红——这正是 `docs/PR_GUIDE.md`「基线验证」要的「不打补丁就红」。
+ * 刻意只读源码文本 + 直接驱动 protocol-core 的纯状态机，不依赖 Android 运行时。
  */
 class SyncFrameRequestGateSourceTest {
 
     private val carPath = "app-server/src/main/java/com/dilinkauto/server/service/CarConnectionService.kt"
     private val phonePath = "vd-server/src/main/java/com/dilinkauto/vdserver/GlPipeline.kt"
     private val corePath = "protocol-core/src/main/java/com/dilinkauto/protocol/VideoConfig.kt"
+    private val gatePath = "protocol-core/src/main/java/com/dilinkauto/protocol/SyncRequestGate.kt"
 
     private val car = sourceOf(carPath)
     private val phone = sourceOf(phonePath)
     private val core = sourceOf(corePath)
+    private val gate = sourceOf(gatePath)
 
-    /** 不允许再出现的模块内私有阈值常量（车机 ms / 手机 nanos 两种旧的书写方式）。 */
+    /** 不允许再出现的模块内私有阈值常量（车机 ms / 手机 nanos / 窗口 / 次数等旧书写方式）。 */
     private val moduleLocalGateConst =
-        Regex("""const val\s+\w*(SYNC|IDR)\w*(INTERVAL|NANOS)\w*\s*=""")
+        Regex("""const val\s+\w*(SYNC|IDR)\w*(INTERVAL|NANOS|WINDOW|LIMIT|MAX)\w*\s*=""")
 
     @Test
-    fun `car applies the shared gate helper`() {
+    fun `car applies the shared gate state machine`() {
         assertTrue(
-            "车机端必须调用 VideoConfig.syncFrameRequestAllowed（单一来源），当前源码未匹配到",
-            car.contains("VideoConfig.syncFrameRequestAllowed"),
+            "车机端必须持并推进共享的 SyncRequestGate（单一来源），当前源码未匹配到",
+            car.contains("sessionCoordinator.syncRequestGate.get()") &&
+                car.contains("tryAcquire(now)") &&
+                car.contains("compareAndSet("),
+        )
+        assertFalse(
+            "车机端不得再回到旧的硬性间隔判定（issue #163）",
+            car.contains("syncFrameRequestAllowed"),
         )
     }
 
     @Test
-    fun `phone applies the shared gate helper`() {
+    fun `phone applies the shared gate state machine`() {
         assertTrue(
-            "手机端必须调用 VideoConfig.syncFrameRequestAllowed（单一来源），当前源码未匹配到",
-            phone.contains("VideoConfig.syncFrameRequestAllowed"),
+            "手机端必须用 SyncRequestGate.tryAcquire 推进共享状态（单一来源），当前源码未匹配到",
+            phone.contains("syncRequestGate.tryAcquire(now)"),
+        )
+        assertFalse(
+            "手机端不得再回到旧的硬性间隔判定（issue #163）",
+            phone.contains("syncFrameRequestAllowed"),
         )
     }
 
     @Test
-    fun `neither end declares a module local interval constant`() {
+    fun `neither end declares a module local gate constant`() {
         for ((name, src) in listOf("CarConnectionService.kt" to car, "GlPipeline.kt" to phone)) {
             val hit = moduleLocalGateConst.find(src)
             assertFalse(
-                "$name 又长出了模块内私有阈值常量 ${hit?.value}（issue #75 的缺陷形态：两端阈值漂移）",
+                "$name 又长出了模块内私有阈值常量 ${hit?.value}（issue #75 / #163 的缺陷形态：两端阈值漂移）",
                 hit != null,
             )
         }
     }
 
-    /**
-     * 死区重放：解析两端**当前源码里实际生效的** IDR 请求间隔，用现场真实数字
-     * （第 1 次请求已被服务，747ms 后第 2 次缺口到来）驱动两个闸门，断言绝不出现
-     * 「车机放行、手机吞掉」。
-     *
-     * base 上：车机 500ms 放行、手机 1000ms 吞掉 → 747ms 与 999ms 两条断言失败。
-     * 修复后：两端都取自 VideoConfig 的同一个常量（1000ms）→ 车机也拒 → 无死区。
-     */
     @Test
-    fun `dead zone replay at the observed 747ms gap is empty`() {
-        val carMs = effectiveIntervalMs("CarConnectionService.kt", car, carLiteral, scale = 1L)
-        val phoneMs = effectiveIntervalMs("GlPipeline.kt", phone, phoneLiteral, scale = 1_000_000L)
-
-        // 现场：距上次授予 500/747/999ms 的补帧请求，两端必须同时拒绝或同时放行。
-        for (gapMs in listOf(500L, 747L, 999L)) {
-            val carAllows = carMs != null && gapMs >= carMs
-            val phoneAllows = phoneMs != null && gapMs >= phoneMs
+    fun `the sliding window lives only in protocol-core`() {
+        assertTrue(
+            "滑动窗口必须由 protocol-core 的 SyncRequestGate 实现",
+            gate.contains("class SyncRequestGate") && gate.contains("fun tryAcquire(nowMs: Long)"),
+        )
+        for ((name, src) in listOf("CarConnectionService.kt" to car, "GlPipeline.kt" to phone)) {
             assertFalse(
-                "gap=${gapMs}ms 出现死区：车机闸门=${carMs}ms 放行=$carAllows，手机闸门=${phoneMs}ms 授予=$phoneAllows" +
-                    " —— 请求注定被吞，车机要干等一个自然 GOP",
-                carAllows && !phoneAllows,
+                "$name 私自实现了闸门判定（fun tryAcquire），单一来源被破坏",
+                src.contains("fun tryAcquire("),
             )
         }
-        // 顺带钉住「两侧解析出的就是同一个数」，防止靠两个恰好相等的私有值蒙混过关。
-        assertEquals("两端实际生效的 IDR 请求间隔必须相同", carMs, phoneMs)
     }
 
-    private val carLiteral = Regex("""const val\s+\w*SYNC\w*INTERVAL\w*\s*=\s*([\d_]+)L""")
-
-    /** 手机侧常量以纳秒书写，除以该系数换算成毫秒。 */
-    private val phoneLiteral = Regex("""const val\s+\w*SYNC\w*NANOS\w*\s*=\s*([\d_]+)L""")
-
-    private val sharedConstant =
-        Regex("""const val\s+SYNC_FRAME_REQUEST_MIN_INTERVAL_MS\s*=\s*([\d_]+)L""")
-
     /**
-     * 该端实际生效的 IDR 请求间隔（ms）：
-     * - 若源码引用了共享常量，则取 :protocol-core 里该常量的字面量（=「两端引用同一常量」
-     *   的可执行证明，而不是在测试里另抄一个 1000）；
-     * - 否则回落到该端自己的私有字面量（base 形态）。
+     * 死区重放：用 :protocol-core 源码里**实际生效的**窗口与次数驱动两端闸门。
+     *
+     * 现场：第 8 次重同步的请求刚被放行，298–305ms 后又断链；接着 999ms 内再来一次。
+     * 旧语义（窗口内 1 次）会把二次请求吞掉；修复后两端必须同时放行，且第 3 次同时拒绝。
      */
-    private fun effectiveIntervalMs(fileName: String, src: String, literal: Regex, scale: Long): Long? {
-        if (src.contains("VideoConfig.SYNC_FRAME_REQUEST_MIN_INTERVAL_MS")) {
-            val m = sharedConstant.find(core)
-                ?: error("$fileName 引用了共享常量，但 :protocol-core 的 VideoConfig.kt 里找不到它的字面量")
-            return m.groupValues[1].replace("_", "").toLong()
+    @Test
+    fun `dead zone replay at the observed secondary gap is empty`() {
+        val windowMs = literal(windowLiteral, "SYNC_FRAME_REQUEST_WINDOW_MS").toLong()
+        val maxPerWindow = literal(maxLiteral, "SYNC_FRAME_REQUEST_MAX_PER_WINDOW").toInt()
+        assertEquals("窗口长度必须仍是 1000ms（issue #75 的取值）", 1000L, windowMs)
+        assertEquals("窗口内必须放行 2 次（issue #163）", 2, maxPerWindow)
+
+        for (gapMs in listOf(298L, 305L, 747L, 999L)) {
+            // 两端都从「刚放行一次」的同一状态出发，模拟二次缺口。
+            val carFirst = SyncRequestGate(windowMs, maxPerWindow).tryAcquire(0L)
+            val phoneFirst = SyncRequestGate(windowMs, maxPerWindow).tryAcquire(0L)
+            val carSecond = carFirst!!.tryAcquire(gapMs)
+            val phoneSecond = phoneFirst!!.tryAcquire(gapMs)
+            assertFalse(
+                "gap=${gapMs}ms 出现死区：车机放行=${carSecond != null} 手机授予=${phoneSecond != null}" +
+                    " —— 请求注定被吞，车机要干等一个自然 GOP",
+                carSecond != null && phoneSecond == null,
+            )
+            assertTrue(
+                "gap=${gapMs}ms 的二次缺口必须被两端同时放行（issue #163 的修复目标）",
+                carSecond != null && phoneSecond != null,
+            )
+            // 紧接着的同一时刻第 3 次必须两端同时拒绝，保住 issue #70 / #55 的 IDR 风暴闸门。
+            val carThird = carSecond?.tryAcquire(gapMs)
+            val phoneThird = phoneSecond?.tryAcquire(gapMs)
+            assertEquals(
+                "gap=${gapMs}ms 后窗口内第 3 次：两端决策必须一致且为拒绝",
+                carThird != null,
+                phoneThird != null,
+            )
+            assertTrue(
+                "gap=${gapMs}ms 后窗口内第 3 次必须被拒（防 IDR 风暴）",
+                carThird == null,
+            )
         }
-        val m = literal.find(src) ?: return null
-        return m.groupValues[1].replace("_", "").toLong() / scale
+    }
+
+    private val windowLiteral =
+        Regex("""const val\s+SYNC_FRAME_REQUEST_WINDOW_MS\s*=\s*([\d_]+)L""")
+
+    private val maxLiteral =
+        Regex("""const val\s+SYNC_FRAME_REQUEST_MAX_PER_WINDOW\s*=\s*([\d_]+)""")
+
+    /** 从 :protocol-core 的 VideoConfig.kt 里读实际生效的常量字面量（不另抄一个数）。 */
+    private fun literal(regex: Regex, name: String): String {
+        val m = regex.find(core) ?: error(":protocol-core 的 VideoConfig.kt 里找不到 $name 的字面量")
+        return m.groupValues[1].replace("_", "")
     }
 
     /** Gradle 测试工作目录不保证是仓库根，向上找到含源文件的目录。 */
