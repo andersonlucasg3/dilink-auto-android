@@ -5,6 +5,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.view.Surface
+import com.dilinkauto.protocol.VideoConfig
 import java.io.IOException
 
 /**
@@ -65,7 +66,8 @@ internal object VideoEncoderSelector {
         format.setInteger(MediaFormat.KEY_PRIORITY, 0)
         format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
         format.setInteger(MediaFormat.KEY_OPERATING_RATE, fps)
-        format.setLong("repeat-previous-frame-after", 500_000L)
+        // 单位是微秒；与 GlPipeline 的静止保活合成共用一个值（issue #153-PA）。
+        format.setLong("repeat-previous-frame-after", VideoConfig.KEEP_ALIVE_COMPOSE_INTERVAL_MS * 1000L)
 
         val tried = mutableListOf<String>()
         for (name in orderEncoderCandidates(candidates)) {
