@@ -123,6 +123,8 @@ class PipelineServer(
         displayWidth = displayWidth,
         displayHeight = displayHeight,
         dpi = dpi,
+        // issue #153-PA：用 coerce 后的 fps，让 VD 合成节拍与目标帧率一致。
+        refreshRate = this.fps.toFloat(),
         execShell = { shell.exec(it) },
         execShellOutput = { shell.execOutput(it) },
         log = { log(it) },

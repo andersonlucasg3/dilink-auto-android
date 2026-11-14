@@ -30,6 +30,12 @@ internal class VirtualDisplayCreator(
     private val displayWidth: Int,
     private val displayHeight: Int,
     private val dpi: Int,
+    /**
+     * 目标刷新率（Hz），issue #153-PA。0（默认）= 不设置，保持旧行为。
+     * 只在 [createViaDisplayManagerGlobal] 的反射路径生效；DisplayManager
+     * 兜底路径的公开 `createVirtualDisplay` 没有这个参数，会记日志说明。
+     */
+    private val refreshRate: Float = 0f,
     private val execShell: (String) -> Unit,
     private val execShellOutput: (String) -> String?,
     private val log: (String) -> Unit,
@@ -115,6 +121,16 @@ internal class VirtualDisplayCreator(
             val bld = bldCtor.newInstance("DiLinkAutoVD", displayWidth, displayHeight, dpi)
             bldClass.getDeclaredMethod("setSurface", Surface::class.java).apply { isAccessible = true; invoke(bld, surface) }
             bldClass.getDeclaredMethod("setFlags", Int::class.javaPrimitiveType).apply { isAccessible = true; invoke(bld, VD_FLAGS) }
+            // issue #153-PA：让 VD 的合成节拍与目标 fps 一致，避免内容按物理屏
+            // 60/90Hz 反复触发合成。隐藏 Builder 上该方法在部分 ROM 不存在 ——
+            // 缺失时只记日志、VD 照常创建，绝不阻断建屏。
+            if (refreshRate > 0f) {
+                if (applyRefreshRate(bld, bldClass, refreshRate)) {
+                    log("VD refreshRate=$refreshRate")
+                } else {
+                    log("VD setRefreshRate unavailable on this ROM — keeping default")
+                }
+            }
             val cfg = bldClass.getDeclaredMethod("build").apply { isAccessible = true }.invoke(bld)
             val cbClass = Class.forName("android.hardware.display.IVirtualDisplayCallback")
             val createVd: Method = try {
@@ -141,6 +157,9 @@ internal class VirtualDisplayCreator(
             val vd = dm.createVirtualDisplay("DiLinkAutoVD", displayWidth, displayHeight, dpi, surface, VD_FLAGS)
             displayId = try { vd.display.displayId } catch (_: Exception) { findDisplayId("DiLinkAutoVD") }
             log("VD via DisplayManager: id=$displayId")
+            if (refreshRate > 0f) {
+                log("VD refreshRate=$refreshRate not applied: DisplayManager fallback has no refreshRate parameter")
+            }
             return vd
         } catch (e: Exception) { err("DisplayManager: ${e.message}"); return null }
     }
@@ -236,4 +255,28 @@ internal class VirtualDisplayCreator(
         val out = execShellOutput("dumpsys display 2>/dev/null | grep -A 5 '$name' | grep 'mDisplayId=' | head -1")?.trim() ?: return -1
         return Regex("mDisplayId=(\\d+)").find(out)?.groupValues?.get(1)?.toIntOrNull() ?: -1
     }
+}
+
+/**
+ * 反射给 `VirtualDisplayConfig.Builder` 设刷新率（issue #153-PA）。
+ *
+ * 抽成顶层函数是为了能纯 JVM 单测：注入一个带 / 不带 `setRefreshRate(Float)`
+ * 的假 Builder 就能验证调用与容错，不必真的起 `DisplayManagerGlobal`。
+ *
+ * @return true = 设置成功；false = 该方法不存在或调用失败（调用方只记日志，
+ *   VD 创建继续走原路径）。
+ */
+internal fun applyRefreshRate(
+    builder: Any,
+    builderClass: Class<*>,
+    rate: Float,
+    log: (String) -> Unit = {},
+): Boolean = try {
+    val m = builderClass.getDeclaredMethod("setRefreshRate", java.lang.Float.TYPE)
+    m.isAccessible = true
+    m.invoke(builder, rate)
+    true
+} catch (e: Exception) {
+    log("setRefreshRate unavailable: ${e.javaClass.simpleName}")
+    false
 }

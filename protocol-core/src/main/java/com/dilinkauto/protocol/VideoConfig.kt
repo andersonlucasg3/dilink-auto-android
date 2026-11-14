@@ -51,6 +51,23 @@ object VideoConfig {
     const val TARGET_SW_DP = 600  // smallest-width dp for VD size calculation
     const val DEFAULT_FALLBACK_DPI = 160
 
+    /**
+     * 静止画面的保活合成间隔（毫秒），issue #153-PA。
+     *
+     * 手机侧两处共用：`GlPipeline` 按 [ComposeDecision] 决策每隔这么久用
+     * 上一帧纹理重画一次；`VideoEncoderSelector` 把它换算成微秒写进
+     * `repeat-previous-frame-after`，让编码器在无输入时自动重复上一帧。
+     *
+     * 必须是**同一个值**：手机侧短路间隔若大于编码器补帧间隔，会有一段
+     * 车机收不到任何帧的窗口；若小于，则两个保活机制互相抢拍、多编码帧。
+     * 这与 issue #75 的 IDR 闸门死区同源 —— 两端各写一个字面量必然漂移。
+     *
+     * 取 500ms 而不是更长：车机侧 `VideoDecoder` 空闲按 `poll(1000/fps)`
+     * 等帧、`RenderStallDetector` 会把明显的停顿打成 STALL；2fps 的保活
+     * 足以维持画面与参考链，同时把静止时的合成次数降到满速的约 1/10。
+     */
+    const val KEEP_ALIVE_COMPOSE_INTERVAL_MS = 500L
+
     // ─── IDR 补帧请求闸门（两端单一来源，issue #75）───
 
     /**

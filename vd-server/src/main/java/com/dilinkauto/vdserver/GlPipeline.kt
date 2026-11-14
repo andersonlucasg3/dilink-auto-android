@@ -162,9 +162,25 @@ internal class GlPipeline(
         // so updateTexImage() picks the queue's most recent frame instead of a
         // stale/black one.
         var nextFrameNanos = System.nanoTime()
-        var frameCount = 0L; var keyFrameCount = 0L; var lastLogAt = 0L
+        var frameCount = 0L; var keyFrameCount = 0L
+        // issue #153-PA：周期日志改按「帧循环拍数」触发。原实现按产出的编码帧数
+        // （frameCount）触发，静止短路后 frames 几乎不涨，120 帧门槛要几分钟才到，
+        // 既观测不到 idleSkip，也会让 e2e 的 wait_stream_alive 误判「流静止」。
+        var tickCount = 0L; var lastLogTick = 0L
         var texUpdates = 0L; var swapFails = 0L
         var sendDrops = 0L; var lastWriteMs = 0L
+        // issue #153-PA：静止画面短路的状态与计数。lastComposeNanos=0 表示本会话
+        // 尚未合成过，由 ComposeDecision 兜底一次 KEEP_ALIVE，避免启动期零帧。
+        var lastComposeNanos = 0L
+        var idleSkip = 0L
+        var keepAliveCount = 0L
+        val keepAliveIntervalNanos = VideoConfig.KEEP_ALIVE_COMPOSE_INTERVAL_MS * 1_000_000L
+        // 22:03 追评要的量化字段：合成面积吞吐。分母用 VD 尺寸（displayWidth/Height），
+        // 不是 encode 尺寸 —— 面积成本发生在 SurfaceFlinger 合成那一步。
+        val mpixPerSec = String.format(
+            java.util.Locale.US, "%.1f",
+            displayWidth.toLong() * displayHeight * fps / 1_000_000.0
+        )
         val adaptive = AdaptiveBitrate(bitrate)
         // 有界队列 + 独立写线程（issue #3）：本线程只入队，写慢不再反压 updateTexImage。
         val sender = VideoFrameSender(
@@ -176,28 +192,48 @@ internal class GlPipeline(
 
         try {
             while (running()) {
+                tickCount++
                 val waitNs = nextFrameNanos - System.nanoTime()
                 if (waitNs > 0) LockSupport.parkNanos(waitNs)
                 nextFrameNanos += frameIntervalNanos
                 if (nextFrameNanos <= System.nanoTime()) nextFrameNanos = System.nanoTime() + frameIntervalNanos
 
+                val nowNanos = System.nanoTime()
                 val hasNewFrame = frameAvail.getAndSet(false)
-                if (hasNewFrame) {
-                    st.updateTexImage()
-                    st.getTransformMatrix(texMatrix)
-                    texUpdates++
+                // issue #153-PA：只有「有新帧」或「到保活时刻」才碰 GL。静止时 SKIP 掉
+                // 整段 glClear/draw/eglSwapBuffers，编码器不再收到重复提交，frames 不涨。
+                // 短路范围到此为止 —— 下面的编码器输出排空、码率自适应、IDR 闸门、
+                // 写线程断线检查与周期日志每拍都必须照常执行，否则车机请求与补帧
+                // 会没人处理（这也是 7be74c1 那类「静止降帧率」不能复用的原因）。
+                val action = ComposeDecision.decide(
+                    hasNewFrame = hasNewFrame,
+                    nowNanos = nowNanos,
+                    lastComposeNanos = lastComposeNanos,
+                    keepAliveIntervalNanos = keepAliveIntervalNanos,
+                )
+                if (action == ComposeDecision.Action.SKIP) {
+                    idleSkip++
+                } else {
+                    if (hasNewFrame) {
+                        st.updateTexImage()
+                        st.getTransformMatrix(texMatrix)
+                        texUpdates++
+                    }
+                    // KEEP_ALIVE 不取新纹理：沿用上一帧的纹理与 texMatrix 重画一次，
+                    // 保证每 500ms 仍有一帧真实编码输出送到车机。
+                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+                    GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, stTexId)
+                    GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, texMatrix, 0)
+                    val qb = quadBuf!!; qb.position(0)
+                    GLES20.glVertexAttribPointer(glPosLoc, 2, GLES20.GL_FLOAT, false, 16, qb); GLES20.glEnableVertexAttribArray(glPosLoc)
+                    qb.position(2); GLES20.glVertexAttribPointer(glTexLoc, 2, GLES20.GL_FLOAT, false, 16, qb); GLES20.glEnableVertexAttribArray(glTexLoc)
+                    GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+                    val ptsNanos = computeFramePtsNanos(hasNewFrame, st.timestamp, nowNanos)
+                    EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, ptsNanos)
+                    if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) swapFails++
+                    lastComposeNanos = nowNanos
+                    if (action == ComposeDecision.Action.KEEP_ALIVE) keepAliveCount++
                 }
-
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, stTexId)
-                GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, texMatrix, 0)
-                val qb = quadBuf!!; qb.position(0)
-                GLES20.glVertexAttribPointer(glPosLoc, 2, GLES20.GL_FLOAT, false, 16, qb); GLES20.glEnableVertexAttribArray(glPosLoc)
-                qb.position(2); GLES20.glVertexAttribPointer(glTexLoc, 2, GLES20.GL_FLOAT, false, 16, qb); GLES20.glEnableVertexAttribArray(glTexLoc)
-                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-                val ptsNanos = computeFramePtsNanos(hasNewFrame, st.timestamp, System.nanoTime())
-                EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, ptsNanos)
-                if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) swapFails++
 
                 var drained = 0
                 while (true) {
@@ -250,9 +286,9 @@ internal class GlPipeline(
                     break
                 }
 
-                if (frameCount - lastLogAt >= 120) {
-                    lastLogAt = frameCount
-                    PipeLog.log("Pipeline: $frameCount frames ${adaptive.currentBitrate/1_000_000}Mbps keys=$keyFrameCount tex=$texUpdates cb=${frameCbCount.get()} swapFails=$swapFails q=${sender.queued} sendDrops=$sendDrops maxW=${lastWriteMs}ms ts=${st.timestamp} glErr=${GLES20.glGetError()}")
+                if (tickCount - lastLogTick >= 120) {
+                    lastLogTick = tickCount
+                    PipeLog.log("Pipeline: $frameCount frames ${adaptive.currentBitrate/1_000_000}Mbps keys=$keyFrameCount tex=$texUpdates cb=${frameCbCount.get()} swapFails=$swapFails q=${sender.queued} sendDrops=$sendDrops maxW=${lastWriteMs}ms ts=${st.timestamp} glErr=${GLES20.glGetError()} ticks=$tickCount mpixPerSec=$mpixPerSec idleSkip=$idleSkip keepAlive=$keepAliveCount")
                 }
             }
         } finally {
