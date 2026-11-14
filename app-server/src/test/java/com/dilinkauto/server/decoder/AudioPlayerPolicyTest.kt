@@ -23,10 +23,11 @@ class AudioPlayerPolicyTest {
     @Test
     fun `stat line matches the frozen S6 grep contract`() {
         val line = audioPlayerStatLine(
-            decoded = 469, starved = 3, underrun = 2, maxRecoverMs = 45, queue = 9, silence = 12
+            decoded = 469, starved = 3, underrun = 2, maxRecoverMs = 45, queue = 9, silence = 12,
+            padIdle = 7,
         )
         assertEquals(
-            "[AudioPlayer] decoded=469 starved=3 underrun=2 maxRecoverMs=45 queue=9 silence=12",
+            "[AudioPlayer] decoded=469 starved=3 underrun=2 maxRecoverMs=45 queue=9 silence=12 padIdle=7",
             line,
         )
     }
@@ -35,12 +36,15 @@ class AudioPlayerPolicyTest {
     fun `stat line starts with the greppable prefix`() {
         val line = audioPlayerStatLine(0, 0, 0, 0, 0, 0)
         assertTrue(line.startsWith(contractPrefix))
-        assertEquals("[AudioPlayer] decoded=0 starved=0 underrun=0 maxRecoverMs=0 queue=0 silence=0", line)
+        assertEquals(
+            "[AudioPlayer] decoded=0 starved=0 underrun=0 maxRecoverMs=0 queue=0 silence=0 padIdle=0",
+            line,
+        )
     }
 
     @Test
     fun `field names are stable and space separated`() {
-        val line = audioPlayerStatLine(1, 2, 3, 4, 5, 6)
+        val line = audioPlayerStatLine(1, 2, 3, 4, 5, 6, 7)
         // 逐字段核对：字段名一旦改名，S6 的 assert 会静默失配
         assertTrue(line.contains(" decoded="))
         assertTrue(line.contains(" starved="))
@@ -48,12 +52,24 @@ class AudioPlayerPolicyTest {
         assertTrue(line.contains(" maxRecoverMs="))
         assertTrue(line.contains(" queue="))
         assertTrue(line.contains(" silence="))
+        // issue #164 新增的归因字段，必须钉住：没有它下次还是分不清 starved / 空输出拍
+        assertTrue(line.contains(" padIdle="))
     }
 
     @Test
     fun `silence default argument is zero`() {
         val line = audioPlayerStatLine(10, 0, 0, 0, 1)
-        assertEquals("[AudioPlayer] decoded=10 starved=0 underrun=0 maxRecoverMs=0 queue=1 silence=0", line)
+        assertEquals(
+            "[AudioPlayer] decoded=10 starved=0 underrun=0 maxRecoverMs=0 queue=1 silence=0 padIdle=0",
+            line,
+        )
+    }
+
+    @Test
+    fun `padIdle default argument is zero`() {
+        // 老调用点（不传 padIdle）仍要产出与原契约等价的尾部，只多一个 padIdle=0
+        val line = audioPlayerStatLine(1, 2, 3, 4, 5, 6)
+        assertTrue(line.endsWith(" silence=6 padIdle=0"))
     }
 
     @Test
