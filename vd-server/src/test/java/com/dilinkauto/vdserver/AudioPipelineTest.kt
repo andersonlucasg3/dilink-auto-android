@@ -251,6 +251,38 @@ class AudioPipelineTest {
         pipeline.close()
     }
 
+    // ── issue #165：音频投喂闸门 ──
+
+    @Test
+    fun captureKeepsFeedingOnlyWhileAllThreeGatesAreHealthy() {
+        assertTrue(shouldContinueCapture(sessionRunning = true, pipelineRunning = true, sinkFailed = false))
+    }
+
+    @Test
+    fun captureStopsAsSoonAsTheSessionIsTearingDown() {
+        // cleanup() 第一行就把 PipelineServer.running 置 false，不能等到 cleanup 末尾的
+        // AudioPipeline.close()：中间是 5~10s 的 shell 恢复阶段，正是收尾期
+        // CodecException 的窗口（issue #165）。
+        assertFalse(shouldContinueCapture(sessionRunning = false, pipelineRunning = true, sinkFailed = false))
+    }
+
+    @Test
+    fun captureStopsWhenTheAudioSinkIsAlreadyDead() {
+        // `AudioSend: write failed, audio disabled` 之后必须停采集：接收端已经没了。
+        assertFalse(shouldContinueCapture(sessionRunning = true, pipelineRunning = true, sinkFailed = true))
+    }
+
+    @Test
+    fun captureStopsWhenCloseWasRequested() {
+        assertFalse(shouldContinueCapture(sessionRunning = true, pipelineRunning = false, sinkFailed = false))
+    }
+
+    @Test
+    fun sinkDefaultsToNotFailed() {
+        // 内存/测试 sink 不实现 isFailed 时不能把采集线程误停。
+        assertFalse(RecordingSink().isFailed())
+    }
+
     /** 记录收到的 CONFIG / FRAME，用于纯 JVM 上的降级路径断言。 */
     private class RecordingSink : AudioPipeline.Sink {
         var configCount = 0

@@ -221,6 +221,14 @@ class PipelineServer(
          */
         private const val AUDIO_ACCEPT_TIMEOUT_MS = 3000
 
+        /**
+         * issue #165：cleanup 阶段诊断日志开关（默认开，每会话约 18 行）。
+         *
+         * FORTIFY 只有一行地址、没有调用栈；这些 step 行把收尾切成可对账的阶段。
+         * 启动引擎时带 `DILINK_TEARDOWN_TRACE=0` 可关闭（默认开是为了下一次现场就能二分）。
+         */
+        private val TEARDOWN_TRACE_ENABLED: Boolean = System.getenv("DILINK_TEARDOWN_TRACE") != "0"
+
         /** S-L2：把任意 fps（含 0/负数/荒谬值）钳进 [VideoConfig.MIN_FPS]..[VideoConfig.MAX_FPS]。 */
         fun coerceFps(fps: Int): Int = fps.coerceIn(VideoConfig.MIN_FPS, VideoConfig.MAX_FPS)
 
@@ -489,7 +497,9 @@ class PipelineServer(
      */
     private fun startAudio(carAudio: SocketChannel) {
         val sink = SocketAudioSink(carAudio).also { it.start() }
-        val pipeline = AudioPipeline(sink = sink)
+        // issue #165：采集闸门接会话状态。cleanup() 第一行 `running=false` 后，采集线程
+        // 立即停止投喂，不再横跨整个 shell 恢复阶段继续向编码器 queueInputBuffer。
+        val pipeline = AudioPipeline(sink = sink, sessionRunning = { running })
         if (!pipeline.start()) {
             err("Audio: pipeline start failed (${pipeline.startFailure ?: "unknown"}), channel closed")
             runCatching { sink.close() }
@@ -713,30 +723,57 @@ class PipelineServer(
 
     private fun cleanup() {
         if (!cleanupStarted.compareAndSet(false, true)) return
+        val teardownStartNanos = System.nanoTime()
+        var teardownStep: TeardownStep? = null
+        /**
+         * issue #165：把 cleanup 切成可对账的阶段。
+         *
+         * 只记日志、不改变任何步骤本身；顺序由 [isTeardownStepForward] 在运行时校验
+         * （被改坏只记 err，绝不中断收尾 —— 面板恢复比日志正确更重要）。
+         */
+        fun mark(next: TeardownStep) {
+            if (!isTeardownStepForward(teardownStep, next)) {
+                err("[teardown-step] order violation: ${teardownStep?.label} -> ${next.label}")
+            }
+            teardownStep = next
+            if (TEARDOWN_TRACE_ENABLED) {
+                val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - teardownStartNanos)
+                log("[teardown-step] ${(next.ordinal + 1).toString().padStart(2, '0')}/${TeardownStep.entries.size} ${next.label} (+${elapsedMs}ms)")
+            }
+        }
+        mark(TeardownStep.BEGIN)
         running = false
         // issue #64：先停窗口采样线程，后面的 shell 恢复命令与 close 才不会被 dumpsys 插队。
         windowMonitor.stop()
+        mark(TeardownStep.WINDOW_MONITOR_STOPPED)
         // 1. Global state first — these outlive this process if we die.
         // issue #48：letterbox 残留会被用户描述成「显示尺寸/比例不对」；带读回校验 + 一次重试。
         try { resetLetterboxStyle() } catch (e: Exception) {
             err("[teardown-display] reset-letterbox-style failed: ${e.message}")
         }
+        mark(TeardownStep.LETTERBOX_RESET)
         if (displayId >= 0) {
             try { shell.exec("wm user-rotation -d $displayId free") } catch (_: Exception) {}
         }
+        mark(TeardownStep.ROTATION_FREE)
         // 2. 先把前台 app 搬回，再把 VD 上**所有**残留 task 搬回并 resize（issue #48）；
         //    只搬顶层会让 quickSwitch 历史任务带着 VD 的 density/bounds 留在物理屏。
         carCommands.moveTopApp(displayId, 0)
         carCommands.moveAllTasksToDisplay(displayId, 0)
+        mark(TeardownStep.APPS_MOVED)
         // 3. Restore screen BEFORE killing shell (order matters: shell.exec needs the shell alive)
         displayController.setPhysicalDisplayPower(true)
         try { shell.exec("input keyevent 224") } catch (_: Exception) {}
+        mark(TeardownStep.PANEL_RESTORED)
         displayController.restoreIme()
+        mark(TeardownStep.IME_RESTORED)
         // 3b. issue #48 取证：面板/IME 已恢复后再读快照，避免 dumpsys 拖慢恢复顺序。
         // 只读：显示 display#0 的 init/cur 与仍留在 VD 上的 task id，不改任何状态。
         carCommands.logTeardownDisplaySnapshot(displayId)
+        mark(TeardownStep.DISPLAY_SNAPSHOT)
         // 4. Stop the LifeWriter thread before killing the shell — it may be mid-write.
         lifecycle.stop()
+        mark(TeardownStep.LIFECYCLE_STOPPED)
         // 4b. 屏障（2026-10-10，MI 9 实测）：上面的恢复命令是 fire-and-forget 写进
         // 常驻 sh 的 stdin，而 close() 的 destroy() 会立刻 SIGTERM 掉它 —— 最后
         // 几条命令还没被 sh 读走就随进程死了。实测丢的正是
@@ -744,8 +781,10 @@ class PipelineServer(
         // Cleanup complete"，但会话结束后值仍停在 2147483647 哨兵。echo 一个唯一
         // 标记并等排水线程回显（stdin/stdout 双 FIFO）⇒ 此前命令都已执行完。
         shell.awaitIdle()
+        mark(TeardownStep.SHELL_DRAINED)
         // Now kill the shell
         shell.close()
+        mark(TeardownStep.SHELL_CLOSED)
         // S3-PA（issue #73）决策 4：先停音频、再停视频。
         //
         // 音频必须在 signalPipelineStop() 之前关：AudioPipeline.close() 自己有 1.5s 的有界
@@ -766,19 +805,26 @@ class PipelineServer(
             log("Audio: sink closed (sent=${s.sentFrames}, configs=${s.sentConfigs}, dropped=${s.droppedFrames}, failed=${s.failed})")
         }
         audioSink = null
+        mark(TeardownStep.AUDIO_CLOSED)
         // S-M8/S-06: ask the pipeline thread to exit (running=false + unpark) and wait for it
         // (bounded) BEFORE touching the encoder — the render loop may still be inside a
         // native dequeueOutputBuffer/eglSwapBuffers call, which is what used to race
         // cleanup() here.
         signalPipelineStop()
+        mark(TeardownStep.PIPELINE_JOINED)
         encoder?.let { try { it.stop() } catch (_: Exception) {}; try { it.release() } catch (_: Exception) {} }
+        mark(TeardownStep.ENCODER_RELEASED)
         // S-M8: the encoder's input Surface used to be leaked — releasing the codec does not
         // release the Surface we handed it, so every session burned one for nothing.
         encoderSurface?.let { try { it.release() } catch (_: Exception) {} }
+        mark(TeardownStep.ENCODER_SURFACE_RELEASED)
         // S-M8: EGL/GL is torn down by the pipeline thread itself (releaseGlResources);
         // signalPipelineStop above is how this thread asks for it.
         releaseGlResources()
+        mark(TeardownStep.GL_RELEASED)
         virtualDisplay?.let { try { it.release() } catch (_: Exception) {} }
+        mark(TeardownStep.VIRTUAL_DISPLAY_RELEASED)
+        mark(TeardownStep.COMPLETE)
         log("Cleanup complete")
         cleanupFinished.set(true)
     }
@@ -799,3 +845,41 @@ internal fun isPeerDisconnect(e: Throwable): Boolean {
         m.contains("Connection reset", ignoreCase = true) ||
         m.contains("Socket closed", ignoreCase = true)
 }
+
+/**
+ * issue #165：`cleanup()` 的阶段序列（诊断 + 顺序契约）。
+ *
+ * FORTIFY 现场只有一行地址、没有调用栈。`[teardown-step]` 把收尾切成可对账的阶段：
+ * 下一次现场只要看 FORTIFY 落在哪个 step 之后，就能把「destroyed mutex」收窄到那一段
+ * 的 release 操作。枚举顺序同时是可执行版约定 —— 设备恢复在前、线程停止在中间、
+ * native 对象释放在最后（`virtualDisplay.release()` 仍是最后一步）。
+ */
+internal enum class TeardownStep(val label: String) {
+    BEGIN("begin"),
+    WINDOW_MONITOR_STOPPED("window-monitor-stopped"),
+    LETTERBOX_RESET("letterbox-reset"),
+    ROTATION_FREE("rotation-free"),
+    APPS_MOVED("apps-moved"),
+    PANEL_RESTORED("panel-restored"),
+    IME_RESTORED("ime-restored"),
+    DISPLAY_SNAPSHOT("display-snapshot"),
+    LIFECYCLE_STOPPED("lifecycle-stopped"),
+    SHELL_DRAINED("shell-drained"),
+    SHELL_CLOSED("shell-closed"),
+    AUDIO_CLOSED("audio-closed"),
+    PIPELINE_JOINED("pipeline-joined"),
+    ENCODER_RELEASED("encoder-released"),
+    ENCODER_SURFACE_RELEASED("encoder-surface-released"),
+    GL_RELEASED("gl-released"),
+    VIRTUAL_DISPLAY_RELEASED("virtual-display-released"),
+    COMPLETE("complete")
+}
+
+/**
+ * issue #165：cleanup 阶段必须单调前进（纯函数，单测见 `TeardownOrderTest`）。
+ *
+ * 返回 false 表示顺序被改坏（跳回/重复）。`cleanup()` 对它只记一行 err、**不中断收尾** ——
+ * 面板恢复与 VD 释放的优先级高于日志正确性。
+ */
+internal fun isTeardownStepForward(current: TeardownStep?, next: TeardownStep): Boolean =
+    current == null || next.ordinal > current.ordinal

@@ -352,7 +352,19 @@ internal class GlPipeline(
         // may still be posting from. Fallback for the path where pipelineLoop
         // never ran (its own finally is the primary stopper); quitSafely is
         // idempotent, so the double call is safe.
-        cbThread?.quitSafely(); cbThread = null
+        //
+        // issue #165：原先是 `quitSafely()` 后立刻 release —— quitSafely 只是投递退出消息，
+        // 回调 looper 仍可能在 native 回调里 lock 这块 SurfaceTexture 的 mutex。现在先解绑
+        // listener，再对 looper 做**有界 join**，最后才释放 native 对象。
+        stTexture?.setOnFrameAvailableListener(null, null)
+        cbThread?.let { t ->
+            t.quitSafely()
+            try { t.join(CB_THREAD_JOIN_TIMEOUT_MS) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+            if (t.isAlive) {
+                PipeLog.err("GL: PipeCB thread still alive after ${CB_THREAD_JOIN_TIMEOUT_MS}ms — releasing SurfaceTexture anyway")
+            }
+        }
+        cbThread = null
         vdInputSurface?.release(); vdInputSurface = null
         stTexture?.release(); stTexture = null
     }
@@ -369,6 +381,14 @@ internal class GlPipeline(
     // issue #75 / #163。这里刻意不再保留手机端私有的间隔常量：两端各写一个私有值正是死区的成因。
 
     companion object {
+        /**
+         * issue #165：cleanup 等帧回调 looper（PipeCB）退出的上限。
+         *
+         * looper 只消费「一帧到达」的消息（回调体是两次 Atomic 操作），正常 <1ms 即可退出；
+         * 500ms 是「给一次正在执行的 native 回调留时间」与「不拖慢收尾」的折中。
+         */
+        internal const val CB_THREAD_JOIN_TIMEOUT_MS = 500L
+
         internal const val VERTEX_SHADER_SRC =
             "uniform mat4 uTexMatrix;\n" +
             "attribute vec4 aPosition;\n" +

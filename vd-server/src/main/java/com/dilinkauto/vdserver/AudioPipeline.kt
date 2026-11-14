@@ -41,6 +41,15 @@ import java.util.concurrent.locks.LockSupport
 internal class AudioPipeline(
     private val spec: AudioSpec = AudioSpec.DEFAULT,
     private val sink: Sink,
+    /**
+     * issue #165：会话是否仍在运行（由 [PipelineServer] 传 `{ running }`）。
+     *
+     * 本类自己的 `running` 只在 [close] 里翻 false，而 `close()` 位于 cleanup 的**最末段**；
+     * cleanup 开头置 `PipelineServer.running=false` 后，采集线程原本还要在「letterbox 复位 /
+     * 搬 app / 恢复面板 IME / shell 屏障」这几秒里继续 read REMOTE_SUBMIX 并投喂编码器。
+     * 把它接进采集闸门后，收尾一开始就停止投喂。
+     */
+    private val sessionRunning: () -> Boolean = { true },
     private val log: (String) -> Unit = { PipeLog.log(it) },
     private val logErr: (String) -> Unit = { PipeLog.err(it) },
     private val clockNanos: () -> Long = { System.nanoTime() }
@@ -53,6 +62,15 @@ internal class AudioPipeline(
 
         /** 一帧裸 AAC-LC。 */
         fun onFrame(frame: AudioPayload.Frame)
+
+        /**
+         * issue #165：写端是否已经判死（Broken pipe / connection abort 等）。
+         *
+         * 默认 false（内存/测试 sink 不会失败）；[SocketAudioSink] 用写线程的 `failed` 覆写。
+         * 一旦为 true，采集侧必须停止投喂 —— 接收端已经没了，继续编码只会制造
+         * `queueInputBuffer failed: CodecException` 噪声。
+         */
+        fun isFailed(): Boolean = false
     }
 
     private val running = AtomicBoolean(false)
@@ -166,6 +184,12 @@ internal class AudioPipeline(
             // 有界 join：与 VideoFrameSender.CLOSE_JOIN_TIMEOUT_MS 同一预算口径，必须
             // 小于 PipelineServer.cleanup() 给管线线程的 2s。
             runCatching { t.join(CLOSE_JOIN_TIMEOUT_MS) }
+            // issue #165：join 超时后下面仍会释放 AudioRecord/MediaCodec —— 若采集线程还活着，
+            // 那就是明确的 use-after-release。至少把这一个事实落到日志里（FORTIFY 现场只有
+            // 一行地址，没有调用栈，超时告警是唯一可对账的时间线）。
+            if (t.isAlive) {
+                logErr("Audio: capture thread still alive after ${CLOSE_JOIN_TIMEOUT_MS}ms — releasing AudioRecord/encoder anyway")
+            }
         }
         record?.safeRelease()
         record = null
@@ -238,7 +262,7 @@ internal class AudioPipeline(
         var frameIndex = 0L
 
         try {
-            while (running.get()) {
+            while (shouldContinueCapture(sessionRunning(), running.get(), sink.isFailed())) {
                 val read = rec.read(chunk, 0, chunk.size, AudioRecord.READ_NON_BLOCKING)
                 var didWork = false
 
@@ -283,6 +307,10 @@ internal class AudioPipeline(
 
                 // 一轮什么都没做就别空转烧 CPU：静音期非阻塞读会立刻返回 0。
                 if (!didWork) LockSupport.parkNanos(IDLE_SLEEP_NANOS)
+            }
+            // issue #165：写端判死后主动停采集，现场能直接看到「是谁先停的」。
+            if (sink.isFailed()) {
+                logErr("Audio: capture stopped on sink failure (frames=$frameIndex)")
             }
         } catch (e: Exception) {
             logErr("Audio: capture loop died: ${e.describe()}")
@@ -433,6 +461,26 @@ internal class AudioPipeline(
         private const val CLOSE_JOIN_TIMEOUT_MS = 1500L
     }
 }
+
+/**
+ * issue #165：音频采集的投喂闸门（纯函数，单测见 `AudioPipelineTest`）。
+ *
+ * 三个来源任一为 false 都必须停止向编码器投喂：
+ * - [sessionRunning]：会话整体是否还在跑。`PipelineServer.cleanup()` 第一行置 false，
+ *   采集线程不必等到 cleanup 末尾的 `AudioPipeline.close()` 才停 —— 中间那几秒的
+ *   shell 恢复步骤正是 `Pipeline exited` 之后仍出现 `queueInputBuffer failed` 的窗口。
+ * - [pipelineRunning]：`AudioPipeline.close()` 已请求停止。
+ * - [sinkFailed]：9640 写线程判死（`AudioSend: write failed, audio disabled`）。
+ *   接收端已经没了，继续编码既无意义，也只会在收尾期制造 CodecException 噪声。
+ *
+ * 抽成纯函数是为了让「收尾 / 写端失败必须停采集」这条契约能在纯 JVM 上被单测钉住，
+ * 而不必依赖真机 REMOTE_SUBMIX + MediaCodec。
+ */
+internal fun shouldContinueCapture(
+    sessionRunning: Boolean,
+    pipelineRunning: Boolean,
+    sinkFailed: Boolean
+): Boolean = sessionRunning && pipelineRunning && !sinkFailed
 
 /** 释放 `AudioRecord`，任何异常都不穿透。 */
 private fun AudioRecord.safeRelease() {
