@@ -1,6 +1,7 @@
 package com.dilinkauto.desktop
 
 import com.dilinkauto.protocol.PROTOCOL_VERSION
+import com.dilinkauto.protocol.VdAreaTier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,7 +19,8 @@ class HandshakeFactoryTest {
             phoneHost = "10.0.0.5",
             viewportWidth = 1281, viewportHeight = 721,
             screenDpi = 213, targetFps = 30, bitrate = 6_000_000,
-            dpiOverride = 240, appVersionCode = 7, deviceName = "MyDesk"
+            dpiOverride = 240, appVersionCode = 7, deviceName = "MyDesk",
+            vdAreaTier = VdAreaTier.COMPAT_2560
         )
         val req = HandshakeFactory.build(cfg)
         assertEquals("MyDesk", req.deviceName)
@@ -30,6 +32,13 @@ class HandshakeFactoryTest {
         assertEquals(240, req.dpiOverride)
         assertEquals(7, req.appVersionCode)
         assertEquals(PROTOCOL_VERSION, req.protocolVersion)
+        assertEquals(VdAreaTier.COMPAT_2560, req.vdAreaTier)
+    }
+
+    @Test
+    fun `build defaults the VD area tier to AUTO`() {
+        val cfg = DesktopConfig(phoneHost = "1.2.3.4", viewportWidth = 1280, viewportHeight = 720)
+        assertEquals(VdAreaTier.AUTO, HandshakeFactory.build(cfg).vdAreaTier)
     }
 
     @Test

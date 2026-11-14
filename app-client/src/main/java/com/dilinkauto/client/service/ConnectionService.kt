@@ -568,8 +568,13 @@ class ConnectionService : Service() {
         // in VdDimensions (protocol-core); see it for the rationale. The phone
         // side MUST be the real physical size — see [realDisplaySize].
         val (phoneRealW, phoneRealH) = realDisplaySize()
-        val (vdWidth, vdHeight, displayDpi) = VdDimensions.compute(request, phoneRealW, phoneRealH)
-        FileLog.i(TAG, "VD: ${vdWidth}x${vdHeight} @${displayDpi}dpi (car ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi, phone real ${phoneRealW}x${phoneRealH}, override=${request.dpiOverride})")
+        // issue #153 PB：档位随握手下发，手机在这一次建屏时取用；不在会话中 resize。
+        // 老车机不带该尾字段 → decode 出 0 = VdAreaTier.AUTO（默认档）。
+        val areaTier = VdAreaTier.normalize(request.vdAreaTier)
+        val (vdWidth, vdHeight, displayDpi) = VdDimensions.compute(
+            request, phoneRealW, phoneRealH, areaTier
+        )
+        FileLog.i(TAG, "VD: ${vdWidth}x${vdHeight} @${displayDpi}dpi (car ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi, phone real ${phoneRealW}x${phoneRealH}, override=${request.dpiOverride}, areaTier=$areaTier)")
 
         // Open lifecycle channel if not already open (survives re-handshakes).
         // A-03: created under vdLock so a concurrent handshake cannot double-bind.

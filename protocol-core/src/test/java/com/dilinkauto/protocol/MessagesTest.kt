@@ -21,7 +21,8 @@ class MessagesTest {
             targetFps = 60,
             appVersionName = "1.0.0",
             dpiOverride = 213,
-            bitrate = 3_000_000
+            bitrate = 3_000_000,
+            vdAreaTier = VdAreaTier.COMPAT_2560
         )
         val encoded = original.encode()
         val decoded = HandshakeRequest.decode(encoded)
@@ -38,6 +39,36 @@ class MessagesTest {
         assertEquals(original.appVersionName, decoded.appVersionName)
         assertEquals(original.dpiOverride, decoded.dpiOverride)
         assertEquals(original.bitrate, decoded.bitrate)
+        assertEquals(original.vdAreaTier, decoded.vdAreaTier)
+    }
+
+    @Test
+    fun testHandshakeRequest_AreaTierTailIsBackwardCompatible() {
+        // 新 peer 编码带 vdAreaTier 的尾字段；老手机会忽略它不认识的尾部 4B，
+        // 等价于把最后 4B 砍掉再按老布局解码 —— 其余字段必须完好。
+        val full = HandshakeRequest(
+            deviceName = "TestPhone", screenWidth = 1080, screenHeight = 2400,
+            screenDpi = 440, appVersionCode = 100, dpiOverride = 213,
+            bitrate = 3_000_000, vdAreaTier = VdAreaTier.COMPAT_2560
+        ).encode()
+        val asSeenByOldPhone = full.copyOfRange(0, full.size - 4)
+        val decoded = HandshakeRequest.decode(asSeenByOldPhone)
+        assertEquals("TestPhone", decoded.deviceName)
+        assertEquals(213, decoded.dpiOverride)
+        assertEquals(3_000_000, decoded.bitrate)
+        assertEquals(VdAreaTier.AUTO, decoded.vdAreaTier)
+
+        // 新 peer 完整解码拿到档位；老车机不带该字段时同样解出 AUTO。
+        assertEquals(VdAreaTier.COMPAT_2560, HandshakeRequest.decode(full).vdAreaTier)
+        val newPeer = HandshakeRequest(
+            deviceName = "old-car", screenWidth = 1080, screenHeight = 1920,
+            appVersionCode = 1
+        ).encode()
+        // 砍掉尾字段 = 老车机从未下发过该字段 → 手机必须回落默认档。
+        assertEquals(
+            VdAreaTier.AUTO,
+            HandshakeRequest.decode(newPeer.copyOfRange(0, newPeer.size - 4)).vdAreaTier
+        )
     }
 
     @Test
@@ -61,6 +92,9 @@ class MessagesTest {
 
         val decoded = HandshakeRequest.decode(buf.array())
         assertEquals(0, decoded.dpiOverride)
+        assertEquals(0, decoded.bitrate)
+        // 缺 vdAreaTier 尾字段也必须回落默认档，而不是误用兼容档把面积放回去。
+        assertEquals(VdAreaTier.AUTO, decoded.vdAreaTier)
     }
 
     @Test

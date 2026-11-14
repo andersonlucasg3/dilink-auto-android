@@ -1,6 +1,7 @@
 package com.dilinkauto.desktop
 
 import com.dilinkauto.protocol.Ports
+import com.dilinkauto.protocol.VdAreaTier
 import com.dilinkauto.protocol.VideoConfig
 
 /**
@@ -23,6 +24,11 @@ data class DesktopConfig(
     val bitrate: Int = VideoConfig.DEFAULT_BITRATE,
     /** 0 = 手机自动标定 DPI；非 0 则强制使用（透传）。 */
     val dpiOverride: Int = 0,
+    /**
+     * VD 合成面积档位（issue #153 PB）。桌面端没有档位设置 UI，这里保留程序化
+     * 逃生口：默认 [VdAreaTier.AUTO]，需要完整 IME 时可显式传 [VdAreaTier.COMPAT_2560]。
+     */
+    val vdAreaTier: Int = VdAreaTier.AUTO,
     /** 报给手机的"接收端版本号"，仅信息用；手机握手不据此做版本门控。 */
     val appVersionCode: Int = DESKTOP_APP_VERSION_CODE,
     val deviceName: String = DEFAULT_DEVICE_NAME,

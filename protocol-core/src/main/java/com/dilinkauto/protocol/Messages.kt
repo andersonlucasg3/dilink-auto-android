@@ -145,12 +145,21 @@ data class HandshakeRequest(
      * Car-side requested video bitrate in bps (e.g. 2_000_000, 3_000_000, 4_000_000).
      * 0 = default (4 Mbps). Trailing field for backward compatibility.
      */
-    val bitrate: Int = 0
+    val bitrate: Int = 0,
+    /**
+     * Car-side VD composite-area tier ([VdAreaTier]), issue #153 分节 PB.
+     * `0` = [VdAreaTier.AUTO] (default), `1` = [VdAreaTier.COMPAT_2560].
+     *
+     * Session-scoped: the phone reads it once when building the VirtualDisplay.
+     * It is **not** a runtime resize command. Trailing field — older phones
+     * ignore the extra 4 bytes, and older cars that omit it decode as AUTO.
+     */
+    val vdAreaTier: Int = VdAreaTier.AUTO
 ) {
     fun encode(): ByteArray {
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
         val verNameBytes = appVersionName.toByteArray(Charsets.UTF_8)
-        val buf = ByteBuffer.allocate(4 + 2 + nameBytes.size + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 2 + verNameBytes.size + 4 + 4)
+        val buf = ByteBuffer.allocate(4 + 2 + nameBytes.size + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 2 + verNameBytes.size + 4 + 4 + 4)
             .order(ByteOrder.BIG_ENDIAN)
         buf.putInt(protocolVersion)
         buf.putUtf8(deviceName)
@@ -164,6 +173,7 @@ data class HandshakeRequest(
         buf.putUtf8(appVersionName)
         buf.putInt(dpiOverride)
         buf.putInt(bitrate)
+        buf.putInt(vdAreaTier)
         return buf.array()
     }
 
@@ -188,7 +198,8 @@ data class HandshakeRequest(
                 targetFps = if (buf.remaining() >= 4) buf.getInt() else VideoConfig.TARGET_FPS,
                 appVersionName = if (buf.remaining() >= 2) buf.readShortLengthPrefixed() else "",
                 dpiOverride = if (buf.remaining() >= 4) buf.getInt() else 0,
-                bitrate = if (buf.remaining() >= 4) buf.getInt() else 0
+                bitrate = if (buf.remaining() >= 4) buf.getInt() else 0,
+                vdAreaTier = if (buf.remaining() >= 4) buf.getInt() else VdAreaTier.AUTO
             )
             return request
         }
@@ -224,6 +235,7 @@ data class HandshakeRequest(
             private var appVersionName: String = ""
             private var dpiOverride: Int = 0
             private var bitrate: Int = 0
+            private var vdAreaTier: Int = VdAreaTier.AUTO
 
             fun deviceName(value: String) = apply { deviceName = value }
             fun screenSize(width: Int, height: Int) = apply { screenWidth = width; screenHeight = height }
@@ -236,6 +248,8 @@ data class HandshakeRequest(
             fun appVersionName(value: String) = apply { appVersionName = value }
             fun dpiOverride(value: Int) = apply { dpiOverride = value }
             fun bitrate(value: Int) = apply { bitrate = value }
+            /** Car-only VD area tier; the desktop keeps [VdAreaTier.AUTO] unless configured. */
+            fun vdAreaTier(value: Int) = apply { vdAreaTier = value }
 
             fun build() = HandshakeRequest(
                 deviceName = deviceName,
@@ -247,7 +261,8 @@ data class HandshakeRequest(
                 targetFps = targetFps,
                 appVersionName = appVersionName,
                 dpiOverride = dpiOverride,
-                bitrate = bitrate
+                bitrate = bitrate,
+                vdAreaTier = vdAreaTier
             )
         }
     }
