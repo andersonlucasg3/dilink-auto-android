@@ -204,23 +204,29 @@ class CarConnectionService : Service() {
         videoDecoder.logSink = { msg -> carLogSend(msg) }
         audioPlayer.logSink = { msg -> carLogSend(msg) }
 
-        // issue #9 / issue #75：两端共用 VideoConfig.SYNC_FRAME_REQUEST_MIN_INTERVAL_MS 与 VideoConfig.syncFrameRequestAllowed
+        // issue #9 / #75 / #163：两端共用 protocol-core 的 SyncRequestGate（滑动窗口：1s 内最多 2 次）
         videoDecoder.onNeedsSyncFrame = {
             val now = SystemClock.elapsedRealtime()
-            var prev = sessionCoordinator.lastSyncFrameRequestMs.get()
             var granted = false
-            while (VideoConfig.syncFrameRequestAllowed(now, prev)) {
-                if (sessionCoordinator.lastSyncFrameRequestMs.compareAndSet(prev, now)) {
+            while (true) {
+                val current = sessionCoordinator.syncRequestGate.get()
+                // 窗口已满：拒绝；放行则 CAS 换上新状态，CAS 失败说明有并发请求，重读再判。
+                val next = current.tryAcquire(now) ?: break
+                if (sessionCoordinator.syncRequestGate.compareAndSet(current, next)) {
                     granted = true
                     break
                 }
-                prev = sessionCoordinator.lastSyncFrameRequestMs.get()
             }
             if (granted) {
                 carLogSend("[VideoDecoder] requesting IDR from phone (reference chain broken)")
                 sessionCoordinator.sendCommandToVd(ControlMsg.REQUEST_SYNC_FRAME)
             } else {
-                carLogSend("[VideoDecoder] IDR request throttled (last request ${now - prev}ms ago, min ${VideoConfig.SYNC_FRAME_REQUEST_MIN_INTERVAL_MS}ms)")
+                val lastGrant = sessionCoordinator.syncRequestGate.get().grantsMs.lastOrNull()
+                carLogSend(
+                    "[VideoDecoder] IDR request throttled (window ${VideoConfig.SYNC_FRAME_REQUEST_WINDOW_MS}ms, " +
+                        "max ${VideoConfig.SYNC_FRAME_REQUEST_MAX_PER_WINDOW} grants, " +
+                        "last grant ${lastGrant?.let { now - it } ?: -1L}ms ago)"
+                )
             }
         }
 

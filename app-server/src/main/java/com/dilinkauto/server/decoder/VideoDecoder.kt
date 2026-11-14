@@ -52,7 +52,8 @@ class VideoDecoder {
     private var feedThread: Thread? = null
     internal val running = AtomicBoolean(false)
     val isRunning: Boolean get() = running.get()
-    private val frameQueue = ArrayBlockingQueue<FrameData>(4) // small buffer, drop on overflow
+    // 容量见 FRAME_QUEUE_CAPACITY（issue #163：与 FeedBurst.MAX_FRAMES_PER_ROUND 对齐）。
+    private val frameQueue = ArrayBlockingQueue<FrameData>(FRAME_QUEUE_CAPACITY)
 
     /**
      * Guards start()/stop() as whole critical sections (audit S-07/S-08).
@@ -727,6 +728,18 @@ class VideoDecoder {
 
 companion object {
         private const val TAG = "VideoDecoder"
+
+        /**
+         * 解码输入队列容量（issue #163）。
+         *
+         * 必须覆盖 [FeedBurst.MAX_FRAMES_PER_ROUND]（=8）：喂帧线程单轮最多连喂 8 帧，
+         * 队列只有 4 槽时一次关键帧突发就必然 `offer` 失败 → `noteGap()` → 断链重同步，
+         * 现场 8 分钟出现 9 次重同步、最长冻结 2.9s（跳过 87 个 P 帧）。
+         *
+         * 代价可控：单会话最多多占 4 帧内存（1204x660 的 IDR ≈160KB，P 帧 1–10KB）。
+         * 守护测试见 `VideoDecoderQueueCapacityTest`。
+         */
+        internal const val FRAME_QUEUE_CAPACITY = 8
 
         /**
          * How long the stream must stay black before [onSustainedBlackScreen]

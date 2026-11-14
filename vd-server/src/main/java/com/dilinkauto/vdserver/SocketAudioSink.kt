@@ -107,6 +107,15 @@ internal class SocketAudioSink internal constructor(
     }
 
     /**
+     * issue #165：写线程判死（Broken pipe / connection abort）后为 true。
+     *
+     * [AudioPipeline] 的采集闸门据此停止投喂 —— 原先 `onWriteFailed` 只打一行
+     * `audio disabled`，采集线程仍继续向音频编码器 `queueInputBuffer`，收尾期的
+     * `CodecException` 全部来自这里。
+     */
+    override fun isFailed(): Boolean = sender.failed
+
+    /**
      * 入队一帧。返回 true 表示已入队；false 表示被丢弃或队列已关闭。
      *
      * 不做任何 socket I/O，对采集线程是常数级开销（仅一次加锁 + 至多一次驱逐）。

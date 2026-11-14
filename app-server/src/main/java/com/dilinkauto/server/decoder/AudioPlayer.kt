@@ -31,8 +31,10 @@ import java.util.concurrent.locks.LockSupport
  * 1. **按 21.333 ms / 46.875 fps 的节拍消费，不是 20 ms**。AAC-LC 48 kHz 每帧 1024
  *    samples = 21.333 ms，这是硬约束：按 20 ms 走会每秒多播 7~8 帧、队列膨胀
  *    （#13 §2.5 R13 实测）。
- * 2. **队列空补静音 PCM 并计 `starved`**：音频丢一帧就是 21.333 ms 空洞，不像视频
- *    能靠 IDR 重建，所以没有丢帧策略，只有「队列空 → 写一帧静音」兜底。
+ * 2. **两条补静音的路**：①队列空（没数据可解）→ 写一帧静音并计 `starved`；②有输入但
+ *    解码器本拍没吐 PCM（`INFO_TRY_AGAIN_LATER`）→ 按低水位补静音并计 `padIdle`
+ *    （issue #164）。音频丢一帧就是 21.333 ms 空洞，不像视频能靠 IDR 重建，所以没有
+ *    丢帧策略，只有「补静音」兜底。
  * 3. **`AudioTrack.getUnderrunCount()` 单独计 `underrun`**（底层欠载），与 `starved`
  *    （应用层队列空）是两个不同口径，e2e 两个都要看。
  *
@@ -103,6 +105,14 @@ class AudioPlayer(
     private val silenceFrames = AtomicLong(0)
     private val maxRecoverMsValue = AtomicLong(0)
 
+    /**
+     * 累计由「有输入但本拍无输出」这条路径补的静音帧（issue #164）。
+     *
+     * 与 [starvedFrames] 分开计数：`starved` 是队列空（没数据），这里是有数据但解码器
+     * 本拍没吐出来 —— 下次 `underrun` 再涨时靠这个字段区分是网络供不上还是节拍对不齐。
+     */
+    private val padIdleFrames = AtomicLong(0)
+
     /** 最近一次读到的 `AudioTrack.getUnderrunCount()`。 */
     @Volatile
     private var underrunValue = 0
@@ -127,6 +137,9 @@ class AudioPlayer(
 
     /** 累计解码出的全零静音帧数（issue #84 / Refs #79）。 */
     val silence: Long get() = silenceFrames.get()
+
+    /** 累计「有输入但本拍无输出」补的静音帧数（issue #164）。 */
+    val padIdle: Long get() = padIdleFrames.get()
 
     /** `AudioTrack.getUnderrunCount()` 的最新值。 */
     val underrun: Int get() = underrunValue
@@ -195,6 +208,7 @@ class AudioPlayer(
             starvedFrames.set(0)
             silenceFrames.set(0)
             maxRecoverMsValue.set(0)
+            padIdleFrames.set(0)
             underrunValue = 0
             queueDepthValue = 0
             droppedOldestValue = 0
@@ -219,7 +233,7 @@ class AudioPlayer(
     fun stop() {
         synchronized(lifecycleLock) {
             if (!running.getAndSet(false)) return
-            log("Stopping: decoded=${decodedFrames.get()} starved=${starvedFrames.get()} silence=${silenceFrames.get()} underrun=$underrunValue maxRecoverMs=${maxRecoverMsValue.get()} queue=$queueDepthValue")
+            log("Stopping: decoded=${decodedFrames.get()} starved=${starvedFrames.get()} silence=${silenceFrames.get()} underrun=$underrunValue maxRecoverMs=${maxRecoverMsValue.get()} queue=$queueDepthValue padIdle=${padIdleFrames.get()}")
             emitStatLine()
             jitter?.clear()
             jitter = null
@@ -270,6 +284,12 @@ class AudioPlayer(
             // 一帧的节拍：1024 samples / 采样率。48 kHz → 21 333 333 ns（不是 20 ms）。
             val frameNanos = PCM_SAMPLES_PER_FRAME.toLong() * 1_000_000_000L / firstConfig.sampleRate
             val silence = ByteArray(pcmFrameBytes)
+            // AudioTrack 的**实际**容量（帧）。ROM 会把请求值向上取整，水位必须按实际值算，
+            // 否则「已满不补」的闸门会提前或延后失效（issue #164）。
+            val trackBufferFrames = track.bufferSizeInFrames.coerceAtLeast(1)
+            // 累计写进 track 的帧数；与 playbackHeadPosition 求差 = 还没播出去的积压。
+            // 只用于给补静音封顶，**不用来校准写入节奏**（那是 issue #164 的候选 C，未做）。
+            var writtenTrackFrames = 0L
 
             primeUp(buf)
 
@@ -304,13 +324,16 @@ class AudioPlayer(
                 val trk = track
 
                 val frame = buf.poll()
+                var wroteFramesThisTick = 0
                 if (frame == null) {
                     starvedFrames.incrementAndGet()
                     if (!recovering) {
                         recovering = true
                         starveStartMs = SystemClock.elapsedRealtime()
                     }
-                    writePcm(trk, silence)
+                    // 队列空：沿用 #73 的「一拍补一帧」语义（口径不动，只计 starved）。
+                    if (writePcm(trk, silence) > 0) wroteFramesThisTick = 1
+                    writtenTrackFrames += wroteFramesThisTick
                 } else {
                     if (feedDecoder(dec, frame, ptsUs)) {
                         ptsUs += frameNanos / 1000L
@@ -318,11 +341,31 @@ class AudioPlayer(
                     } else {
                         inputDropValue++
                     }
-                    drainDecoder(dec, trk, info)
+                    wroteFramesThisTick = drainDecoder(dec, trk, info) / pcmFrameBytes
+                    writtenTrackFrames += wroteFramesThisTick
                     if (recovering && buf.size >= buf.targetFrames) {
                         recovering = false
                         val r = SystemClock.elapsedRealtime() - starveStartMs
                         if (r > maxRecoverMsValue.get()) maxRecoverMsValue.set(r)
+                    }
+                }
+
+                // issue #164 候选 B：有输入、但解码器本拍没吐出任何 PCM（INFO_TRY_AGAIN_LATER），
+                // 这一拍 track 一个字节都拿不到，只能吃老本。原来只有「队列空」才补，
+                // 于是 85 ms 缓冲被一拍一拍啃到 0 —— 实车 22.6 次/秒 underrun 的直接来源。
+                // 与上面的 `starved` 路互斥且口径不同：那条是「没数据可解」，这条是
+                // 「有数据、但本拍解不出来」，所以单独计 `padIdle`，别混成一个数。
+                if (wroteFramesThisTick == 0) {
+                    val pad = audioPadSilenceFrames(
+                        bufferFrames = trackBufferFrames,
+                        pendingFrames = trackPendingFrames(trk, writtenTrackFrames, trackBufferFrames),
+                        wroteFramesThisTick = 0,
+                    )
+                    if (pad > 0) {
+                        var padded = 0
+                        repeat(pad) { if (writePcm(trk, silence) > 0) padded++ }
+                        writtenTrackFrames += padded
+                        padIdleFrames.addAndGet(padded.toLong())
                     }
                 }
 
@@ -423,6 +466,14 @@ class AudioPlayer(
             t.release()
             null
         } else {
+            // 打出实际分配值：ROM 的 minBufferSize / 混音周期会把请求值向上取整，
+            // 归因 underrun 时要按实际容量算，别拿请求值当真相（issue #164）。
+            val frames = t.bufferSizeInFrames
+            val actualMs = frames * PCM_SAMPLES_PER_FRAME.toLong() * 1000L / config.sampleRate
+            log(
+                "AudioTrack buffer: ${frames} frames ≈ ${actualMs}ms " +
+                    "(${frames * frameBytes}B; requested=${bufferBytes}B/${bufferBytes / frameBytes} frames, min=$minBytes)"
+            )
             t
         }
     } catch (e: Exception) {
@@ -451,14 +502,15 @@ class AudioPlayer(
         false
     }
 
-    /** 排空解码输出并把 PCM 写进 AudioTrack。 */
-    private fun drainDecoder(codec: MediaCodec, track: AudioTrack, info: MediaCodec.BufferInfo) {
+    /** 排空解码输出并把 PCM 写进 AudioTrack；返回本拍**实际写入的字节数**（issue #164）。 */
+    private fun drainDecoder(codec: MediaCodec, track: AudioTrack, info: MediaCodec.BufferInfo): Int {
+        var wrote = 0
         while (true) {
             val outId = try {
                 codec.dequeueOutputBuffer(info, 0)
             } catch (e: Exception) {
                 logE("dequeueOutputBuffer failed: ${e.message}")
-                return
+                return wrote
             }
             if (outId >= 0) {
                 val outBuf = try { codec.getOutputBuffer(outId) } catch (_: Exception) { null }
@@ -470,24 +522,41 @@ class AudioPlayer(
                     if (isPcmSilent(pcm)) {
                         silenceFrames.incrementAndGet()
                     }
-                    writePcm(track, pcm)
+                    wrote += writePcm(track, pcm)
                 }
                 try { codec.releaseOutputBuffer(outId, false) } catch (_: Exception) {}
             } else if (outId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 log("Output format changed: ${codec.outputFormat}")
             } else {
-                // INFO_TRY_AGAIN_LATER 等
-                return
+                // INFO_TRY_AGAIN_LATER 等：本拍没有更多输出。返回已写字节数，
+                // 调用方据此判断要不要补静音（issue #164）。
+                return wrote
             }
         }
     }
 
-    private fun writePcm(track: AudioTrack, pcm: ByteArray) {
-        try {
-            track.write(pcm, 0, pcm.size)
-        } catch (e: Exception) {
-            logE("AudioTrack.write failed: ${e.message}")
-        }
+    /** 写一段 PCM 进 track；返回实际写入的字节数（`write` 出错返回负数时按 0 计）。 */
+    private fun writePcm(track: AudioTrack, pcm: ByteArray): Int = try {
+        val n = track.write(pcm, 0, pcm.size)
+        if (n > 0) n else 0
+    } catch (e: Exception) {
+        logE("AudioTrack.write failed: ${e.message}")
+        0
+    }
+
+    /**
+     * track 里「已写入但还没播出去」的帧数（issue #164）。
+     *
+     * `getPlaybackHeadPosition()` 是硬件播放头（单位：帧），`writtenFrames` 是本进程累计写入量。
+     * 拿不到播放头（track 已释放/未初始化）时按「已满」返回 —— 让补静音的闸门关上，
+     * 宁可少补也不无界堆延迟。
+     */
+    private fun trackPendingFrames(track: AudioTrack, writtenFrames: Long, bufferFrames: Int): Int = try {
+        // 播放头在 Int 上回绕，按无符号扩展后再算差值。
+        val head = track.playbackHeadPosition.toLong() and 0xFFFF_FFFFL
+        audioTrackPendingFrames(writtenFrames, head, bufferFrames)
+    } catch (_: Exception) {
+        bufferFrames
     }
 
     private fun emitStatLine() {
@@ -499,6 +568,7 @@ class AudioPlayer(
                 maxRecoverMs = maxRecoverMsValue.get(),
                 queue = queueDepthValue,
                 silence = silenceFrames.get(),
+                padIdle = padIdleFrames.get(),
             )
         )
     }
@@ -510,8 +580,31 @@ class AudioPlayer(
         private const val PCM_SAMPLES_PER_FRAME = 1024
         private const val BYTES_PER_SAMPLE = 2
 
-        /** `AudioTrack` 缓冲至少装 4 帧，给调度抖动留余量。 */
-        private const val TRACK_BUFFER_FRAMES = 4
+        /**
+         * `AudioTrack` 缓冲的**请求下限**（帧）。12 帧 = 12 × 21.333 ms ≈ **256 ms**（issue #164）。
+         *
+         * 注意「下限」是相对 `buildTrack` 的 `maxOf(minBufferSize, 12 帧)` 说的：ROM 会把请求值
+         * 向上取整，**实际分配容量可能更大**，`buildTrack` 的 `AudioTrack buffer: N frames ≈ Mms`
+         * 那行日志打的是实际值，归因时看那行。
+         *
+         * 原来是 4 帧（85 ms），实车 `underrun` 涨到 22.6 次/秒：主循环每 21.333 ms 只写一次
+         * PCM，解码器一次 `INFO_TRY_AGAIN_LATER` 就有一拍不写，85 ms 只够扛 4 拍。
+         *
+         * **为什么要 12 而不是 8**：实测 `maxRecoverMs=218`（最长一次「欠载 → 回到目标水位」
+         * 的耗时），12 帧给这段最坏停顿留 38 ms 余量；16 帧只多付 85 ms 延迟、没有对应收益。
+         *
+         * **延迟从哪扣**：256 ms 是**容量上限**（写满会阻塞），不是稳态水位。
+         * [AUDIO_TRACK_LOW_WATER_FRAMES] = 3 帧（64 ms）是**补静音的触发阈值，不是容量上限**：
+         * 补帧最多把水位顶到 3 帧就停，真实 PCM 的突发（2~4 帧）会临时把水位抬到
+         * 「3 + 突发帧数」，之后随播放自然回落 —— 无论哪种情况都不会无界增长。
+         * 所以稳态新增的端到端延迟约 64 ms，不是 256 ms。放大容量上限换到的是两件事：
+         * ①一次突发写 2~4 帧不会写满而让阻塞式 `write` 卡住节拍；
+         * ②播放线程被调度走 200 ms 时不至于立刻见底。
+         *
+         * 不动 `AUDIO_JITTER_BUFFER_DEFAULT_MS`（150 ms）：`queue` 已长期满仓，放大抖动缓冲
+         * 只会同时放大延迟与 `droppedOldest`，是掩盖不是修复（issue #164）。
+         */
+        private const val TRACK_BUFFER_FRAMES = 12
 
         /** 等第一份 CONFIG 的上限；超时则播放线程退出（音频静默降级）。 */
         private const val CONFIG_WAIT_TIMEOUT_MS = 3000L

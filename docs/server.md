@@ -153,7 +153,7 @@ H.264 decoder using `MediaCodec` with Surface output (GPU-direct rendering). Int
 - Peer-supplied width/height reach `MediaFormat.createVideoFormat` and the rotation guard. Zero/negative/absurd values crash the codec or suppress rotation recovery forever, so the service clamps them through `sanitizePeerDimension` (2..4096, falling back to the car's own viewport) before they get here (audit S-M4).
 - Codec lifecycle (create / configure / start / stop) runs on the service's single `decoderExecutor`, never on the main thread that delivers `surfaceCreated`/`surfaceDestroyed`; serial execution also keeps a queued stop from interleaving with a start (audit S-M3).
 - `start()` / `stop()` are whole critical sections under `lifecycleLock`, and the feed thread owns the release of the codec instance it captured — releasing it from `stop()` while the thread is parked in a native `dequeueOutputBuffer` is the documented SIGSEGV pattern (audit S-07/S-08).
-- Frame queue: 4 frames — small buffer, drop on overflow
+- Frame queue: `VideoDecoder.FRAME_QUEUE_CAPACITY` = 8 frames — sized to `FeedBurst.MAX_FRAMES_PER_ROUND`, drop-oldest on overflow (issue #163: the old 4-slot queue dropped a frame on every burst)
 - `onFrameReceived()`: queues frames even before `start()` is called; CONFIG and keyframes are cached separately
 - `start()`: feeds cached CONFIG first, then the cached IDR keyframe (so the codec has a reference frame immediately), then drains the queue
 - Drop-oldest on queue full: prefers dropping P-frames, evicts queued P-frames for keyframes/CONFIG

@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 负责多通道（9636/9638/9639/9640）连接生命周期、握手与视口/黑屏自愈重握手编排、
@@ -87,7 +87,11 @@ internal class CarSessionCoordinator(
     @Volatile private var blackScreenRecoveryInFlight = false
     private var videoFrameCount = 0L
 
-    val lastSyncFrameRequestMs = AtomicLong(0L)
+    /**
+     * IDR 补帧请求闸门状态（issue #75 / #163）：与手机端共用 protocol-core 的 [SyncRequestGate]，
+     * 滑动窗口「1s 内最多 2 次」。用 [AtomicReference] 承载不可变状态，靠 CAS 保证并发下不超发。
+     */
+    val syncRequestGate = AtomicReference(SyncRequestGate())
 
     val decoderExecutor: ExecutorService =
         Executors.newSingleThreadExecutor { r ->
