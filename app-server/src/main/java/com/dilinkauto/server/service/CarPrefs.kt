@@ -110,13 +110,16 @@ internal class CarPrefs(context: Context) {
             _startupBitrate.value = value
         }
 
-    // ─── 天气（issue #41）───
+    // ─── 天气（issue #41 / #154）───
     //
-    // 60s API 的 base URL 必须可配置（官方主域名部署在 Deno Deploy，「部分地区可能被墙」，
-    // 追评一要求默认官方、不硬编码到 UI）。缓存字段（city/condition/temperature/updated_at）
-    // 让冷启动先渲染上次成功值再异步刷新，断网时保留旧值（验收标准 2）。
+    // 60s API 的 base URL 必须可配置。默认用自建镜像：官方 `60s.viki.moe` 的 Cloudflare
+    // 对单 IP 限流很紧（连续请求即 `429 / error code: 1015 / Retry-After: 8`，2026-11-14 实测），
+    // 镜像同源同构且实测不限流。要改回官方只需把 DEFAULT_WEATHER_API_BASE_URL 换回
+    // `https://60s.viki.moe/v2/weather`（issue #154）。
+    // 缓存字段（city/condition/temperature/updated_at）让冷启动先渲染上次成功值再异步刷新，
+    // 断网时保留旧值（验收标准 2）。
 
-    /** 60s 天气 API base URL，默认官方。可换成自部署实例。 */
+    /** 60s 天气 API base URL，默认自建镜像（官方限流，见上方注释）。可换成任意同构实例。 */
     var weatherApiBaseUrl: String
         get() = prefs.getString(WEATHER_API_BASE_URL, DEFAULT_WEATHER_API_BASE_URL)
             ?: DEFAULT_WEATHER_API_BASE_URL
@@ -145,7 +148,7 @@ internal class CarPrefs(context: Context) {
     companion object {
         // CarPrefs 是 internal，但 prefs key 跨实例共享同一个文件，放 companion 让测试可引用。
         internal const val WEATHER_API_BASE_URL = "weather_api_base_url"
-        internal const val DEFAULT_WEATHER_API_BASE_URL = "https://60s.viki.moe/v2/weather"
+        internal const val DEFAULT_WEATHER_API_BASE_URL = "https://60s.yuuverne.site/v2/weather"
         internal const val WEATHER_CITY = "weather_city"
         internal const val WEATHER_CONDITION = "weather_condition"
         internal const val WEATHER_TEMPERATURE = "weather_temperature"

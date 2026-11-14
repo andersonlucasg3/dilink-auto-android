@@ -45,8 +45,10 @@ data class WeatherUiState(
  *   scope 绑 `Dispatchers.Main`，留在主线程会被 `BlockGuard` 抛 `NetworkOnMainThreadException`）；
  *   `AndroidManifest.xml` 已是 `usesCleartextTraffic=false`，接口必须 HTTPS，不做 HTTP 回退。
  * - 解析：委托 [WeatherParser]（protocol-core，Gson，单测覆盖正常/code!=200/字段缺失/异常）。
- * - 调度：冷启动立即拉一次，随后每 [WeatherFormat.REFRESH_INTERVAL_MS]（15 分钟）轮询；
- *   失败按 [WeatherFormat.nextBackoffMs]（30s→2m→5m→15m）退避，不形成请求风暴。
+ * - 调度：冷启动立即拉一次，成功后每 [WeatherFormat.REFRESH_INTERVAL_MS]（15 分钟）轮询；
+ *   失败按 [WeatherFormat.resolveBackoffMs]（`nextBackoffMs` 30s→2m→5m→15m 与
+ *   服务端 `Retry-After` 取较大值）退避，不形成请求风暴；无网走
+ *   [WeatherFormat.NO_NETWORK_RETRY_MS]（60s）短重试且不计失败。
  * - 缓存：成功后写入 [CarPrefs]（city/condition/temperature/updated_at）；冷启动先渲染缓存
  *   再异步刷新，断网保留旧值（验收标准 2）。
  * - 离线空转防护：拉取前自查 [hasNetwork]，无网不拉、不递增失败计数（避免退避被离线拉满）。
@@ -80,22 +82,29 @@ internal class WeatherProvider(
         }
         refreshJob = scope.launch {
             var failures = 0
-            // 冷启动立即拉一次。
+            // 冷启动首轮立即拉；此后按「成功 15 分钟 / 失败退避 / 无网 60s」间隔循环。
             while (isActive) {
-                val delayMs = if (failures == 0) {
-                    // 首次或上次成功后：正常 15 分钟周期。首次循环先拉再等。
-                    refreshOnceAndOnSuccess { failures = 0 }
-                    WeatherFormat.REFRESH_INTERVAL_MS
-                } else {
-                    // 上次失败：按退避等待后重试。先等再拉。
-                    val backoff = WeatherFormat.nextBackoffMs(failures)
-                    delay(backoff)
-                    refreshOnceAndOnSuccess { failures = 0 }
-                    // 拉完仍失败则继续退避（failures 已在内部自增），下一轮顶部走 else 分支再等。
-                    if (failures > 0) WeatherFormat.nextBackoffMs(failures)
-                    else WeatherFormat.REFRESH_INTERVAL_MS
+                if (!hasNetwork()) {
+                    // 无网不计失败（避免离线把退避拉满），保留旧值并标 stale，60s 后再看。
+                    markStaleIfCached()
+                    delay(WeatherFormat.NO_NETWORK_RETRY_MS)
+                    continue
                 }
-                delay(delayMs)
+                when (val result = fetch()) {
+                    is FetchResult.Success -> {
+                        failures = 0
+                        apply(result.data)
+                        delay(WeatherFormat.REFRESH_INTERVAL_MS)
+                    }
+                    is FetchResult.Failure -> {
+                        // 之前这里漏了递增：failures 恒为 0，退避序列是死代码，失败后一律干等 15 分钟（issue #154）。
+                        failures++
+                        markStaleIfCached()
+                        val waitMs = WeatherFormat.resolveBackoffMs(failures, result.retryAfterMs)
+                        Log.i(TAG, "refresh failed (#$failures), retry in ${waitMs}ms")
+                        delay(waitMs)
+                    }
+                }
             }
         }
     }
@@ -105,25 +114,8 @@ internal class WeatherProvider(
         refreshJob = null
     }
 
-    /**
-     * 拉一次；成功则清零失败计数（回调 [onSuccess]）、写缓存、更新 sink；
-     * 失败则递增失败计数（通过返回 false 让调用方走退避）。
-     *
-     * @param onSuccess 上次成功时调用（重置调用方的 failures 计数）。
-     * @return true 成功，false 失败。
-     */
-    private suspend fun refreshOnceAndOnSuccess(onSuccess: () -> Unit): Boolean {
-        if (!hasNetwork()) {
-            // 无网：不拉、不递增失败计数（避免离线把退避拉满），但若已有缓存则标 stale。
-            markStaleIfCached()
-            return false
-        }
-        val data = fetch()
-        if (data == null) {
-            markStaleIfCached()
-            return false
-        }
-        // 成功：写缓存 + 更新 sink + 清零计数。
+    /** 成功路径：写缓存 + 更新 sink + 记一行日志。 */
+    private fun apply(data: WeatherData) {
         carPrefs.weatherCity = data.city
         carPrefs.weatherCondition = data.condition
         carPrefs.weatherTemperature = data.temperature
@@ -136,18 +128,18 @@ internal class WeatherProvider(
             isStale = false
         )
         Log.i(TAG, "weather ok: city=${data.city} cond=${data.condition} temp=${data.temperature} updatedAt=${data.updatedAtMs}")
-        onSuccess()
-        return true
     }
 
     /**
-     * 拉取并解析；网络/解析失败返回 null，不抛。失败原因写 logcat，避免静默吞掉（issue #41）。
+     * 拉取并解析。成功返回 [FetchResult.Success]；失败返回 [FetchResult.Failure]，
+     * 其中 `retryAfterMs` 来自 `429` 的 `Retry-After`（issue #154：限流要按服务端要求等待，
+     * 不能按普通失败的退避硬等 30s+）。
      *
      * **必须切到 [Dispatchers.IO]**：服务的 scope 绑在 `Dispatchers.Main`
      * （`CarConnectionService.kt:38`），阻塞的 `HttpURLConnection` 若留在主线程会被
      * `BlockGuard` 抛 `NetworkOnMainThreadException`（issue #41 回签「天气恒 `—`」的真因）。
      */
-    private suspend fun fetch(): WeatherData? = withContext(Dispatchers.IO) {
+    private suspend fun fetch(): FetchResult = withContext(Dispatchers.IO) {
         try {
             val conn = (URL(carPrefs.weatherApiBaseUrl).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 5_000
@@ -157,19 +149,33 @@ internal class WeatherProvider(
                 setRequestProperty("User-Agent", "DiLinkAuto/1.0 (car)")
             }
             conn.use {
-                if (conn.responseCode != 200) {
-                    Log.w(TAG, "fetch failed: HTTP ${conn.responseCode} url=${carPrefs.weatherApiBaseUrl}")
-                    return@withContext null
+                val code = conn.responseCode
+                if (code != 200) {
+                    val retryAfterMs = WeatherFormat.parseRetryAfterMs(conn.getHeaderField("Retry-After"))
+                    Log.w(TAG, "fetch failed: HTTP $code retryAfterMs=${retryAfterMs ?: "-"} url=${carPrefs.weatherApiBaseUrl}")
+                    return@withContext FetchResult.Failure(retryAfterMs)
                 }
-                conn.inputStream.bufferedReader().use { reader ->
+                val data = conn.inputStream.bufferedReader().use { reader ->
                     WeatherParser.parse(reader.readText())
+                }
+                if (data == null) {
+                    Log.w(TAG, "fetch failed: parse returned null url=${carPrefs.weatherApiBaseUrl}")
+                    FetchResult.Failure(null)
+                } else {
+                    FetchResult.Success(data)
                 }
             }
         } catch (e: Exception) {
             // 关键：这里曾静默吞掉 NetworkOnMainThreadException，导致回签时无线索（issue #41）。
             Log.w(TAG, "fetch failed: ${e.javaClass.simpleName} url=${carPrefs.weatherApiBaseUrl}", e)
-            null
+            FetchResult.Failure(null)
         }
+    }
+
+    /** 一次拉取的结果：成功携带数据；失败携带服务端 `Retry-After`（若有，毫秒）。 */
+    private sealed class FetchResult {
+        class Success(val data: WeatherData) : FetchResult()
+        class Failure(val retryAfterMs: Long?) : FetchResult()
     }
 
     /** 若已有缓存，把 sink 标 stale（断网/失败时保留旧值并提示过时）；无缓存则保持 null。 */

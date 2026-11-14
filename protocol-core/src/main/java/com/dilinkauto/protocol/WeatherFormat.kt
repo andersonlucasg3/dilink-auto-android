@@ -61,4 +61,43 @@ object WeatherFormat {
         consecutiveFailures == 3 -> 300_000L
         else -> MAX_BACKOFF_MS
     }
+
+    /**
+     * 无网时的短重试间隔（毫秒）：60s。
+     *
+     * 与退避分开：断网不算失败（不计入 `failures`），但要尽快在恢复联网后刷到数据，
+     * 不能像失败那样干等 15 分钟。
+     */
+    const val NO_NETWORK_RETRY_MS = 60_000L
+
+    /**
+     * 实际等待时长（毫秒）= max(退避序列, 服务端 `Retry-After`)。
+     *
+     * 上游 60s 官方实例被 Cloudflare 限流时返回 `429 + Retry-After: 8`（2026-11-14 实测），
+     * 只按退避等 30s 会白等；反之服务端要求更久时也不能提前打。
+     *
+     * @param consecutiveFailures 连续失败次数（`>=1`）。
+     * @param retryAfterMs 服务端 `Retry-After` 换算出的毫秒（null = 头缺失或不可解析）。
+     *   超过 [MAX_BACKOFF_MS] 的值按上限截断，避免异常值（如 86400）把刷新挂死。
+     */
+    fun resolveBackoffMs(consecutiveFailures: Int, retryAfterMs: Long?): Long {
+        val backoff = nextBackoffMs(consecutiveFailures)
+        val retryAfter = (retryAfterMs ?: 0L).coerceIn(0L, MAX_BACKOFF_MS)
+        return maxOf(backoff, retryAfter)
+    }
+
+    /**
+     * 解析 `Retry-After` 响应头（秒数形式）为毫秒。
+     *
+     * 只认秒数（60s 官方实例实测返回 `8`）；HTTP-date 形式（`Wed, 21 Oct 2015 07:28:00 GMT`）
+     * 与非法/负值一律返回 null（调用方回落到退避序列，不做日期解析——YAGNI）。
+     */
+    fun parseRetryAfterMs(header: String?): Long? {
+        val raw = header?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        val seconds = raw.toLongOrNull() ?: return null
+        if (seconds < 0L) return null
+        // 秒 → 毫秒，溢出保护：按上限截断。
+        return if (seconds > MAX_BACKOFF_MS / 1_000L) MAX_BACKOFF_MS else seconds * 1_000L
+    }
 }

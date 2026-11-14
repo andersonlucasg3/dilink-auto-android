@@ -148,4 +148,55 @@ class WeatherFormatTest {
         assertEquals(900_000L, WeatherFormat.nextBackoffMs(5))
         assertEquals(900_000L, WeatherFormat.nextBackoffMs(100))
     }
+
+    // ─── WeatherFormat.resolveBackoffMs（退避 vs Retry-After 取大，issue #154）───
+
+    @Test
+    fun resolveBackoffWithoutRetryAfterUsesSequence() {
+        assertEquals(30_000L, WeatherFormat.resolveBackoffMs(1, null))
+        assertEquals(120_000L, WeatherFormat.resolveBackoffMs(2, null))
+        assertEquals(900_000L, WeatherFormat.resolveBackoffMs(9, null))
+    }
+
+    @Test
+    fun resolveBackoffHonoursLongerRetryAfter() {
+        // 服务端要求 60s，退避只有 30s → 听服务端的。
+        assertEquals(60_000L, WeatherFormat.resolveBackoffMs(1, 60_000L))
+    }
+
+    @Test
+    fun resolveBackoffKeepsOwnBackoffWhenRetryAfterShorter() {
+        // 官方实例 429 实测 Retry-After: 8（8s），退避 30s 更长 → 按 30s，避免打得太密。
+        assertEquals(30_000L, WeatherFormat.resolveBackoffMs(1, 8_000L))
+    }
+
+    @Test
+    fun resolveBackoffClampsAbsurdRetryAfter() {
+        // 异常大值按 15 分钟上限截断，不把刷新挂死。
+        assertEquals(900_000L, WeatherFormat.resolveBackoffMs(1, 86_400_000L))
+    }
+
+    // ─── WeatherFormat.parseRetryAfterMs ───
+
+    @Test
+    fun parsesRetryAfterSeconds() {
+        assertEquals(8_000L, WeatherFormat.parseRetryAfterMs("8"))
+        assertEquals(8_000L, WeatherFormat.parseRetryAfterMs(" 8 "))
+        assertEquals(0L, WeatherFormat.parseRetryAfterMs("0"))
+    }
+
+    @Test
+    fun rejectsRetryAfterOutsideSecondsForm() {
+        // HTTP-date 形式不解析（60s 只发秒数），非法值与负值一律 null。
+        assertNull(WeatherFormat.parseRetryAfterMs("Wed, 21 Oct 2015 07:28:00 GMT"))
+        assertNull(WeatherFormat.parseRetryAfterMs("-5"))
+        assertNull(WeatherFormat.parseRetryAfterMs("abc"))
+        assertNull(WeatherFormat.parseRetryAfterMs(""))
+        assertNull(WeatherFormat.parseRetryAfterMs(null))
+    }
+
+    @Test
+    fun parseRetryAfterClampsHugeValue() {
+        assertEquals(900_000L, WeatherFormat.parseRetryAfterMs("86400"))
+    }
 }
