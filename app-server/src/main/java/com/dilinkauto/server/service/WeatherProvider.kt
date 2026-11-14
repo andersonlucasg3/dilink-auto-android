@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
+import com.dilinkauto.protocol.CityFormat
 import com.dilinkauto.protocol.WeatherData
 import com.dilinkauto.protocol.WeatherFormat
 import com.dilinkauto.protocol.WeatherParser
@@ -67,6 +68,9 @@ internal class WeatherProvider(
     val state: StateFlow<WeatherUiState?> = sink.asStateFlow()
 
     private var refreshJob: Job? = null
+
+    /** 城市解析（GPS 反查优先 + IP 兜底，issue #157）；内部自带 6h 缓存。 */
+    private val cityResolver = CityResolver(context, carPrefs)
 
     fun start() {
         // 冷启动先渲染缓存（若有），再异步刷新。缓存有效（updated_at > 0）时按其是否过期标 stale。
@@ -140,8 +144,12 @@ internal class WeatherProvider(
      * `BlockGuard` 抛 `NetworkOnMainThreadException`（issue #41 回签「天气恒 `—`」的真因）。
      */
     private suspend fun fetch(): FetchResult = withContext(Dispatchers.IO) {
+        // 城市解析（issue #157）：GPS 坐标 → 高德反查，失败回落 IP 城市；都失败时 url 不带 query，
+        // 由 60s 按请求方 IP 定位（旧行为，不阻断天气）。
+        val city = cityResolver.resolve()
+        val url = CityFormat.buildWeatherUrl(carPrefs.weatherApiBaseUrl, city)
         try {
-            val conn = (URL(carPrefs.weatherApiBaseUrl).openConnection() as HttpURLConnection).apply {
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 5_000
                 readTimeout = 8_000
                 requestMethod = "GET"
@@ -152,14 +160,14 @@ internal class WeatherProvider(
                 val code = conn.responseCode
                 if (code != 200) {
                     val retryAfterMs = WeatherFormat.parseRetryAfterMs(conn.getHeaderField("Retry-After"))
-                    Log.w(TAG, "fetch failed: HTTP $code retryAfterMs=${retryAfterMs ?: "-"} url=${carPrefs.weatherApiBaseUrl}")
+                    Log.w(TAG, "fetch failed: HTTP $code retryAfterMs=${retryAfterMs ?: "-"} url=$url")
                     return@withContext FetchResult.Failure(retryAfterMs)
                 }
                 val data = conn.inputStream.bufferedReader().use { reader ->
                     WeatherParser.parse(reader.readText())
                 }
                 if (data == null) {
-                    Log.w(TAG, "fetch failed: parse returned null url=${carPrefs.weatherApiBaseUrl}")
+                    Log.w(TAG, "fetch failed: parse returned null url=$url")
                     FetchResult.Failure(null)
                 } else {
                     FetchResult.Success(data)
@@ -167,7 +175,7 @@ internal class WeatherProvider(
             }
         } catch (e: Exception) {
             // 关键：这里曾静默吞掉 NetworkOnMainThreadException，导致回签时无线索（issue #41）。
-            Log.w(TAG, "fetch failed: ${e.javaClass.simpleName} url=${carPrefs.weatherApiBaseUrl}", e)
+            Log.w(TAG, "fetch failed: ${e.javaClass.simpleName} url=$url", e)
             FetchResult.Failure(null)
         }
     }

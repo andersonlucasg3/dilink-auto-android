@@ -13,6 +13,23 @@ android {
         targetSdk = 34
         versionCode = project.property("app.versionCode").toString().toInt()
         versionName = project.property("app.versionName").toString()
+
+        // 高德 Web 服务 key（天气城市反查用，issue #157）。来源优先级：
+        // `-Pamap.key=` > `local.properties` 的 `amap.key` > 环境变量 `AMAP_KEY`。
+        // 缺省空串 → 城市解析只走 IP 兜底；真实 key 不入库（与 keystore 同规矩）。
+        val localPropsFile = rootProject.file("local.properties")
+        val amapKeyFromLocal = if (localPropsFile.exists()) {
+            localPropsFile.readLines()
+                .firstOrNull { it.trimStart().startsWith("amap.key=") }
+                ?.substringAfter("amap.key=")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        } else null
+        val amapKey = (project.findProperty("amap.key") as String?)
+            ?: amapKeyFromLocal
+            ?: System.getenv("AMAP_KEY")
+            ?: ""
+        buildConfigField("String", "AMAP_KEY", "\"$amapKey\"")
     }
 
     signingConfigs {

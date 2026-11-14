@@ -3,6 +3,7 @@ package com.dilinkauto.server.service
 import android.content.Context
 import com.dilinkauto.protocol.AppPrefs
 import com.dilinkauto.protocol.VideoConfig
+import com.dilinkauto.server.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -145,6 +146,39 @@ internal class CarPrefs(context: Context) {
         get() = prefs.getLong(WEATHER_UPDATED_AT, 0L)
         set(value) = prefs.edit().putLong(WEATHER_UPDATED_AT, value).apply()
 
+    // ─── 天气城市定位（issue #157）───
+
+    /**
+     * 高德 Web 服务 key（逆地理编码用）。
+     *
+     * 默认取构建期注入的 `BuildConfig.AMAP_KEY`（`local.properties` 的 `amap.key` 或环境变量
+     * `AMAP_KEY`），运行期可用本属性覆盖。为空表示未配置 → 城市解析只走 IP 兜底。
+     * 真实 key 不入库（与 keystore 同规矩）。
+     */
+    var amapKey: String
+        get() = prefs.getString(AMAP_KEY, BuildConfig.AMAP_KEY) ?: BuildConfig.AMAP_KEY
+        set(value) = prefs.edit().putString(AMAP_KEY, value).apply()
+
+    /** 已解析的城市名（经 [com.dilinkauto.protocol.CityFormat.normalizeCity] 归一化，如「广州」）。 */
+    var weatherQueryCity: String
+        get() = prefs.getString(WEATHER_QUERY_CITY, "") ?: ""
+        set(value) = prefs.edit().putString(WEATHER_QUERY_CITY, value).apply()
+
+    /** 城市解析时间戳（ms）；配合 `CityFormat.CITY_TTL_MS` 判过期。 */
+    var weatherQueryCityAtMs: Long
+        get() = prefs.getLong(WEATHER_QUERY_CITY_AT, 0L)
+        set(value) = prefs.edit().putLong(WEATHER_QUERY_CITY_AT, value).apply()
+
+    /** 城市解析时的纬度（float 足够做 50km 位移判定）；0 表示未记录。 */
+    var weatherQueryLat: Float
+        get() = prefs.getFloat(WEATHER_QUERY_LAT, 0f)
+        set(value) = prefs.edit().putFloat(WEATHER_QUERY_LAT, value).apply()
+
+    /** 城市解析时的经度（同上）。 */
+    var weatherQueryLon: Float
+        get() = prefs.getFloat(WEATHER_QUERY_LON, 0f)
+        set(value) = prefs.edit().putFloat(WEATHER_QUERY_LON, value).apply()
+
     companion object {
         // CarPrefs 是 internal，但 prefs key 跨实例共享同一个文件，放 companion 让测试可引用。
         internal const val WEATHER_API_BASE_URL = "weather_api_base_url"
@@ -153,5 +187,10 @@ internal class CarPrefs(context: Context) {
         internal const val WEATHER_CONDITION = "weather_condition"
         internal const val WEATHER_TEMPERATURE = "weather_temperature"
         internal const val WEATHER_UPDATED_AT = "weather_updated_at"
+        internal const val AMAP_KEY = "amap_key"
+        internal const val WEATHER_QUERY_CITY = "weather_query_city"
+        internal const val WEATHER_QUERY_CITY_AT = "weather_query_city_at"
+        internal const val WEATHER_QUERY_LAT = "weather_query_lat"
+        internal const val WEATHER_QUERY_LON = "weather_query_lon"
     }
 }
