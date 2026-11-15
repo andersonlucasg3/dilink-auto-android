@@ -90,6 +90,7 @@
 
     <!-- Connection Status -->
     <string name="status_ready_to_connect">就绪，等待连接</string>
+    <string name="reconnect_button">重新连接</string>
     <string name="status_connecting">正在连接…</string>
     <string name="status_connected">已连接</string>
     <string name="status_streaming">正在投屏</string>

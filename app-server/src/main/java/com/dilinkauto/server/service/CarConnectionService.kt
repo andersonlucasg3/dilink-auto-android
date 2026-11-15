@@ -179,6 +179,9 @@ class CarConnectionService : Service() {
     fun clearAppInfoData() = appListReceiver.clearAppInfoData()
     fun onLocationPermissionGranted() = altitudeProvider?.onPermissionResult()
     fun disconnectFromPhone() = sessionCoordinator.disconnectFromPhone()
+
+    /** 用户点「重新连接」（issue #183）：从断开态重新发起发现/连接。 */
+    fun reconnect() = sessionCoordinator.reconnect()
     fun sendMediaAction(action: MediaAction) = sessionCoordinator.sendMediaAction(action)
     internal fun carLogSend(msg: String, level: String = "I") = logWriter.send(msg, level)
     internal fun setStatusMessage(resId: Int, vararg formatArgs: Any) = sessionCoordinator.setStatusMessage(resId, *formatArgs)
