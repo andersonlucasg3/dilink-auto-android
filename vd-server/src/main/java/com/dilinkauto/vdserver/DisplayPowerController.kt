@@ -42,7 +42,8 @@ internal class DisplayPowerController(
     @Volatile
     private var deepOffAttempted = false
 
-    /** [canDeepPowerOff] 的进程内结论：null = 未探测。 */
+    /** [canDeepPowerOff] 的进程内结论：null = 未探测（主线程与命令线程都会读）。 */
+    @Volatile
     private var deepOffRecoverable: Boolean? = null
 
     /** `cmd display` 对 `power-reset` 的支持程度（三态，见 [powerResetCapability]）。 */

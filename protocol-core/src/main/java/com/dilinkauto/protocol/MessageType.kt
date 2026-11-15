@@ -27,7 +27,7 @@ object ControlMsg {
      * Car/PC → Phone: 开关手机**物理**屏（payload: 1 字节，0=熄屏 1=亮屏）。
      *
      * 走输入口 9639 的 CONTROL 通道，由 vd-server 的 `handleCarCommand` 用
-     * `DisplayPowerController.setPhysicalDisplayPower` 执行 —— 与 GO_HOME 同一条路径，
+     * `DisplayPowerController.powerOffPanel / restorePanel` 执行 —— 与 GO_HOME 同一条路径，
      * app-client 无需参与。
      *
      * 背景：vd-server 在接收端握住 video+input 两条通道后会**自动**熄屏，断开时自动恢复。
