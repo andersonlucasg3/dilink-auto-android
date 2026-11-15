@@ -462,12 +462,14 @@ class AudioPlayer(
     /**
      * 致命退出：置 [playbackFailed]、放掉 [running]，并显式上报会话层（issue #181）。
      *
-     * 必须同时 `running.set(false)`：否则同一连接下再次 `start()` 会被
-     * `start() called but already running` 早退，[playbackFailed] 永远不会复位。
+     * 顺序不能反：先置 [playbackFailed] 再 `running.set(false)`。若并发 `start()`
+     * 插在中间，它先看到 running=false 会复位 playbackFailed=false，旧线程再置 true
+     * 就会误关新线程的喂帧闸门。先置失败标记可让最坏情况变成「新线程已启动后被标记失败」，
+     * 由下一次 `start()` 正常复位（评审建议）。
      */
     private fun reportFatal(reason: String) {
-        running.set(false)
         playbackFailed = true
+        running.set(false)
         logE(reason)
         onFatal?.invoke(reason)
     }
