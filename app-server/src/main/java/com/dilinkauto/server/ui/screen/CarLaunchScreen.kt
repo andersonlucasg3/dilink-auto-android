@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -136,22 +137,39 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
                     }
 
                     // Right: status + action
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    // issue #182：横屏右列原先只有 weight(1f)（只约束宽度，高度
+                    // wrap-content）且没有滚动容器，1204x660 上 4 个 SettingSection +
+                    // 开关 + 手动连接远超一屏，底部选项恒被裁到屏幕外点不到。
+                    // 外层 Box 用 fillMaxHeight 给出确定高度，verticalScroll 才不会落进
+                    // 无界测量；内容不足一屏时 Column 高度=内容高，Box 居中保留原观感，
+                    // 超一屏时 Column 被夹到视口高度独立滚动。imePadding 与窄屏一致，
+                    // 保证键盘弹出时底部输入框仍可滚到。
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .imePadding(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        statusCard()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState()),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            statusCard()
 
-                        if (devMode && (state == CarConnectionService.State.IDLE ||
-                                    state == CarConnectionService.State.CONNECTING)) {
-                            Spacer(Modifier.height(16.dp))
-                            WifiAdbSetupCard()
-                        }
+                            if (devMode && (state == CarConnectionService.State.IDLE ||
+                                        state == CarConnectionService.State.CONNECTING)) {
+                                Spacer(Modifier.height(16.dp))
+                                WifiAdbSetupCard()
+                            }
 
-                        if (state != CarConnectionService.State.STREAMING &&
-                            state != CarConnectionService.State.CONNECTED) {
-                            Spacer(Modifier.height(24.dp))
-                            ManualConnectBox(onConnect = { ip -> service.connectManual(ip) })
+                            if (state != CarConnectionService.State.STREAMING &&
+                                state != CarConnectionService.State.CONNECTED) {
+                                Spacer(Modifier.height(24.dp))
+                                ManualConnectBox(onConnect = { ip -> service.connectManual(ip) })
+                            }
                         }
                     }
                 }

@@ -7,7 +7,9 @@ import org.junit.Test
 import java.io.File
 
 /**
- * issue #173 PA 的源码级回归钉子：车机启动页的**窄屏内容列必须可滚动**。
+ * issue #173 PA 的源码级回归钉子：车机启动页的**窄屏内容列必须可滚动**；
+ * issue #182 把同一约束扩展到**宽屏右列**（横屏 1204x660 下 4 个 SettingSection +
+ * 开关 + 手动连接远超一屏，原先右列只有 weight(1f)、无滚动容器，底部选项点不到）。
  *
  * 缺陷形态（S19 真机实证）：MI 9 竖屏 1080x2152 上，Branding + statusCard
  * （3 个 SettingSection + 3 个 Switch）+ [WifiAdbSetupCard] 已占满到 y≈2048，
@@ -100,16 +102,29 @@ class CarLaunchScreenScrollTest {
     }
 
     @Test
-    fun `wide two-column layout is not pulled into an unbounded scroll`() {
-        // Row(fillMaxSize) + Column(weight(1f)) + CenterVertically 与无限高滚动约束耦合；
-        // issue #173 的实证阻塞只在竖屏，无真机验证前不动横屏主形态。
-        assertFalse(
-            "宽屏分支不应引入 verticalScroll（会把产品横屏主形态变成无界测量）",
-            wide.contains("verticalScroll("),
+    fun `wide right column is vertically scrollable with a bounded height`() {
+        // issue #182：车机 1204x660 横屏下右列（4 个 SettingSection + 4 个 Switch +
+        // 可选的 WifiAdbSetupCard + ManualConnectBox）远超一屏。原先右列只有
+        // weight(1f) —— 只约束宽度，高度 wrap-content，且没有任何滚动容器，
+        // 底部选项恒被裁到屏幕外点不到（issue 证据链）。
+        // #173 PA 曾断言「横屏不得有 verticalScroll」，理由是 Row(fillMaxSize) +
+        // weight(1f) 与无限高约束耦合；本修复用 fillMaxHeight 的 Box 给出有界高度，
+        // 该理由不再成立，断言随之反转。
+        assertTrue(
+            "宽屏右列必须挂 .verticalScroll(rememberScrollState())，否则底部选项永远点不到",
+            wide.contains(".verticalScroll(rememberScrollState())"),
+        )
+        assertTrue(
+            "宽屏滚动列必须有 fillMaxHeight 的有界父容器，否则 verticalScroll 会落进无界测量",
+            wide.contains(".fillMaxHeight()"),
+        )
+        assertTrue(
+            "宽屏滚动列必须挂 .imePadding()，否则软键盘弹出时底部「手动连接」输入框不可达",
+            wide.contains(".imePadding()"),
         )
         assertEquals(
-            "整文件应只有窄屏一处 verticalScroll",
-            1,
+            "整文件应有两处 verticalScroll（横屏右列 + 窄屏单列）",
+            2,
             Regex("""\.verticalScroll\(""").findAll(src).count(),
         )
     }
