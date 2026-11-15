@@ -90,6 +90,7 @@
 
     <!-- Connection Status -->
     <string name="status_ready_to_connect">Ready to connect</string>
+    <string name="reconnect_button">Reconnect</string>
     <string name="status_connecting">Connecting…</string>
     <string name="status_connected">Connected</string>
     <string name="status_streaming">Streaming</string>

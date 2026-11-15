@@ -94,7 +94,8 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
             startupBitrate = startupBitrate,
             onStartupBitrateChange = { service.carPrefs.startupBitrate = it },
             vdAreaTier = vdAreaTier,
-            onVdAreaTierChange = { service.carPrefs.vdAreaTier = it }
+            onVdAreaTierChange = { service.carPrefs.vdAreaTier = it },
+            onReconnect = { service.reconnect() }
         )
     }
 
@@ -251,7 +252,8 @@ private fun ConnectionStatusCard(
     startupBitrate: Int,
     onStartupBitrateChange: (Int) -> Unit,
     vdAreaTier: Int,
-    onVdAreaTierChange: (Int) -> Unit
+    onVdAreaTierChange: (Int) -> Unit,
+    onReconnect: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -298,14 +300,27 @@ private fun ConnectionStatusCard(
                         )
                     }
                 }
-                if (state == CarConnectionService.State.CONNECTING ||
-                    state == CarConnectionService.State.IDLE
-                ) {
+                // issue #183：IDLE 下不再转圈 —— 该状态现在有显式的「重新连接」按钮，
+                // 「就绪」却一直转圈会让人误以为仍在连接中。
+                if (state == CarConnectionService.State.CONNECTING) {
                     CircularProgressIndicator(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp),
                         strokeWidth = 2.dp
                     )
+                }
+            }
+
+            // issue #183：断开后（IDLE）给一个显式重连入口。此前 userDisconnected 抑制了
+            // 自动重连，UI 只剩需要手输 IP 的 ManualConnectBox，用户被迫「杀后台再打开」。
+            // 横屏右列与竖屏单列共用本卡片，两套布局一次覆盖。
+            if (state == CarConnectionService.State.IDLE) {
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = onReconnect,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.reconnect_button))
                 }
             }
 

@@ -706,8 +706,29 @@ internal class CarSessionCoordinator(
         carPrefs.userDisconnected = true
         scope.launch(Dispatchers.IO) {
             try { controlConnection?.sendControl(ControlMsg.DISCONNECT) } catch (_: Exception) {}
-            disconnectAllConnections()
+            // issue #183：显式走统一拆除路径，不再依赖 Connection.performTeardown 的
+            // disconnectListener 副作用 —— 该连接此前若已 disconnect 过（connected 的
+            // CAS 失败），listener 就不会再回调，`_state` 会停在 STREAMING、三处 Job
+            // 仍 active，而 userDisconnected 又抑制了自动重连，表现为「必须杀后台」。
+            // handleDisconnect() 自带 teardownGuard 防重入，并发路径同样会推到 IDLE。
+            //
+            // 拆除必须回到 service scope（Main）执行：handleDisconnect 内读写的
+            // connectionScope/connectJob/discoveryJob/blackScreenRebuilds 都不是
+            // volatile，既有口径是 Main（listener 也是 scope.launch{}），
+            // 直接在 IO 上调会把它们变成跨线程竞争。
+            scope.launch { handleDisconnect() }
         }
+    }
+
+    /**
+     * 用户点「重新连接」（issue #183）：复用 [startConnection] 的完整启动流程 ——
+     * 它会取消旧 Job、重置 teardownGuard、把 userDisconnected 清回 false 并置
+     * CONNECTING。仅在 IDLE 等非会话态可用（STREAMING/CONNECTED 时 [startConnection]
+     * 自身会直接返回）。
+     */
+    fun reconnect() {
+        carLogSend("User requested reconnect")
+        startConnection()
     }
 
     fun sendCommandToVd(msgType: Byte, payload: ByteArray = ByteArray(0)) {
