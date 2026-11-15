@@ -77,6 +77,14 @@ class PipelineServer(
     // still resolves to the constructor parameter (uncoerced), which would reintroduce
     // the divide-by-zero this guard exists to prevent.
     private val frameIntervalNanos = 1_000_000_000L / this.fps
+
+    /**
+     * issue #180：本会话（进程）启动时刻，watchdog 据此判断停止哨兵的会话归属。
+     *
+     * 必须在 [watchdog] 之前初始化（属性按声明顺序求值）。哨兵是全局固定文件名，
+     * 早于这个时刻的 mtime 一律是上一轮会话的残留。
+     */
+    private val sessionStartedAtMs = System.currentTimeMillis()
     @Volatile private var running = true
     private val cleanupStarted = AtomicBoolean(false)
     private val cleanupFinished = AtomicBoolean(false)
@@ -146,7 +154,8 @@ class PipelineServer(
             try { displayController.restoreIme() } catch (_: Exception) {}
         },
         log = { log(it) },
-        err = { err(it) }
+        err = { err(it) },
+        sessionStartedAtMs = sessionStartedAtMs
     )
     private val carCommands = CarCommandRouter(
         exec = { shell.exec(it) },
@@ -261,10 +270,6 @@ class PipelineServer(
 
     fun run() {
         Runtime.getRuntime().addShutdownHook(Thread({ cleanup() }, "ShutdownHook"))
-        // 删除上一轮可能残留的停止哨兵（见 [VdDeploy.gracefulStopCommand] 的协议）：
-        // 场景——外部写了请求、引擎未及消费即被强杀，文件残留；下一次 launch
-        // 的新引擎必须忽略它，否则会"一启动就被上一轮的旧信号误杀"。
-        runCatching { File(VdDeploy.STOP_REQUEST_PATH).delete() }
         try {
             touchInjector.initInputManager()
             shell.start()
@@ -298,6 +303,20 @@ class PipelineServer(
             }
             // S-M9: arm the watchdog only now, i.e. after the main thread is guaranteed to
             // be unblocked. Armed before the await it could only observe running=true.
+            //
+            // issue #180：清场必须紧跟武装之前，而不是 run() 开头。
+            //
+            // 清场放在 run() 开头时，它与 `startWatchdog()` 之间隔着一整段
+            // setupEncoder + EGL/GL 初始化（上限 10s）；上一轮会话的收尾
+            // （`vdStopEngine` / `PhoneDisplayRestorer`）若与本次 launch 并发，哨兵就
+            // 会落进这段「已清过场、watchdog 还没开始读」的窗口，被新引擎当成自己的
+            // 停止请求（现场日志：`EGL/GL ready, VD input surface created` 的下一行就是
+            // `Stop request detected ... graceful shutdown`，整段会话不足 1 秒）。
+            //
+            // watchdog 开始轮询之前，本进程还没有任何可被停止的会话，因此此刻盘上的
+            // 哨兵一律清掉。代价：用户在 ≤10s 初始化窗口里按停止会被这里吞掉，由部署端
+            // 12s 等待超时后的 -9 兜底——与既有的强杀兜底同代价，接受。
+            clearStartupStopRequest()
             startWatchdog()
             if (!createVirtualDisplay()) { running = false; err("Fatal: failed to create VD"); return }
             val conns = bindAndAccept() ?: run { running = false; return }
@@ -654,6 +673,20 @@ class PipelineServer(
         daemonThread("TouchReader", start = true) {
             try { readTouchAndCommands(carInput) } catch (e: Exception) { err("Touch: ${e.message}") }
         }
+    }
+
+    /**
+     * issue #180：watchdog 武装前的清场——删掉盘上一切停止哨兵。
+     *
+     * 调用点必须紧邻 [startWatchdog]（见 `run()` 里的说明）。此前的会话收尾请求
+     * 一律属于上一轮；在 watchdog 开始轮询之后写入的哨兵才交给
+     * [ProcessWatchdog] 按 mtime 判定会话归属。
+     */
+    private fun clearStartupStopRequest() {
+        val f = File(VdDeploy.STOP_REQUEST_PATH)
+        if (!f.exists()) return
+        val removed = runCatching { f.delete() }.getOrDefault(false)
+        log("Startup: dropped pre-arm stop-request (deleted=$removed)")
     }
 
     /**
