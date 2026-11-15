@@ -20,6 +20,8 @@ import android.util.Log
  * 设计约束：
  * - 全反射，不依赖 `framework.jar`（`byd_api/readme.txt:3` 明确它不能当普通 jar 依赖）；
  * - 任何异常都必须就地吞掉并记录，绝不能让车机端崩溃；
+ * - **必须在 IO 线程执行**：`sleepMs` 内部是阻塞 `Thread.sleep`，调用方不能是
+ *   `Dispatchers.Main`（车机会卡 UI 3 秒）；
  * - 反射入口可注入，单测可以在 JVM 上覆盖「类缺失 / 类存在但调用失败」两条路径。
  */
 internal class BydVehicleProbe(

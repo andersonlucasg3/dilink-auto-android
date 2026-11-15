@@ -196,7 +196,8 @@ internal class CarSessionCoordinator(
         if (BydVehicleProbe.ENABLED) {
             // 探针必须回传：release 包默认关闭诊断日志，这里临时打开，跑完恢复默认值。
             logWriter.setEnabled(true)
-            scope.launch(parent) {
+            // `scope` 是 Dispatchers.Main，探针内部有阻塞 sleep，必须切到 IO。
+            scope.launch(parent + Dispatchers.IO) {
                 _state.first {
                     it == CarConnectionService.State.CONNECTED || it == CarConnectionService.State.STREAMING
                 }
