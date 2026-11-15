@@ -7,6 +7,7 @@ import com.dilinkauto.server.R
 import com.dilinkauto.server.adb.WifiGatewayProbe
 import com.dilinkauto.server.decoder.AudioPlayer
 import com.dilinkauto.server.decoder.VideoDecoder
+import com.dilinkauto.server.probe.BydVehicleProbe
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.concurrent.ExecutorService
@@ -187,6 +188,24 @@ internal class CarSessionCoordinator(
         scope.launch(parent) {
             startWifiTrack()
             adbTracker.startUsbTrack(trackScope())
+        }
+
+        // issue #188 探针：连上后自动在车机侧读一次 BYDAuto 车辆数据，结果经 CAR_LOG 回传手机。
+        // 临时诊断代码 —— `BydVehicleProbe.ENABLED = false` 即整体失效；结论落定后连同本段与
+        // `probe/BydVehicleProbe.kt` 一起删除（清理条件写在 issue #188 里）。
+        if (BydVehicleProbe.ENABLED) {
+            // 探针必须回传：release 包默认关闭诊断日志，这里临时打开，跑完恢复默认值。
+            logWriter.setEnabled(true)
+            scope.launch(parent) {
+                _state.first {
+                    it == CarConnectionService.State.CONNECTED || it == CarConnectionService.State.STREAMING
+                }
+                try {
+                    BydVehicleProbe(context = context, sink = { carLogSend(it, "I") }).run()
+                } finally {
+                    logWriter.setEnabled(com.dilinkauto.server.BuildConfig.DEBUG)
+                }
+            }
         }
     }
 
