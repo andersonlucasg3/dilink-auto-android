@@ -136,8 +136,18 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
                     }
 
                     // Right: status + action
+                    // issue #182：横屏右列原先只有 weight(1f)，高度 wrap-content 且没有
+                    // 滚动容器；1204x660 上 statusCard（3 个 SettingSection + 3 个 Switch）
+                    // + 可选 WifiAdbSetupCard + ManualConnectBox 远超一屏，底部选项恒被裁
+                    // 到屏幕外点不到。Row 给了有界 maxHeight，直接挂 verticalScroll 即可：
+                    // 不足一屏时 Column 高度=内容高、由 Row.CenterVertically 居中（原观感），
+                    // 超一屏时被夹到视口高度独立滚动。imePadding 与窄屏一致，保证键盘
+                    // 弹出时底部输入框仍可滚到。
                     Column(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .imePadding()
+                            .verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         statusCard()
