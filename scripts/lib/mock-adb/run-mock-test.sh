@@ -61,6 +61,11 @@ bash scripts/lib/test-car-state-now.sh > /dev/null 2>&1 \
 bash scripts/lib/test-asserts.sh > /dev/null 2>&1 \
   && ok "E2E 判据单测通过" || bad "E2E 判据单测失败"
 
+# 连接原语单测（issue #173 PA 回归钉子）：ManualConnectBox 不可达 → 重启兜底；
+# 可达时仍走 UI 主路径（mock 回放的 S01 靠它建流）；收敛超时 rc/记账语义不变。
+bash scripts/lib/test-op-connect.sh > /dev/null 2>&1 \
+  && ok "op_connect 接缝单测通过" || bad "op_connect 接缝单测失败"
+
 step "2/4 层②构造：--list / --dry-run"
 bash scripts/e2e-dual-device.sh --list > /dev/null 2>&1 && ok "--list 通过" || bad "--list 失败"
 bash scripts/e2e-dual-device.sh --phone mockA --car mockB --scenario S01 --dry-run > /dev/null 2>&1 \

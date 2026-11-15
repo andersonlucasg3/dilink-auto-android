@@ -55,6 +55,17 @@ exec_shell() {
         *sed*) echo "$_ip" ;;
         *) echo "    inet $_ip/24 brd 192.168.3.255 scope global wlan0" ;;
       esac ;;
+    ip\ -4\ route\ show\ table\ all*)
+      # devices.sh active_wifi_iface 优先读默认路由（issue #104 后不再写死网卡名）。
+      # mock 固定走 wlan0；缺这条分支会让 preflight 拿不到活动 WiFi IP，
+      # 整个层③回放在 3/9 就 abort，S01 的 op_connect 路径根本跑不到。
+      echo "default via 192.168.3.1 dev wlan0 proto static" ;;
+    ip\ -4\ addr\ show*)
+      # active_wifi_iface 的 fallback（无默认路由时枚举 wlan*）；放在 wlan0 分支之后，
+      # 精确匹配优先，不影响上面的 per-iface 查询。
+      if [ "$SERIAL" = "$PHONE" ] || is_phone_tcp "$SERIAL"; then _ip=192.168.3.12; else _ip=192.168.3.20; fi
+      echo "3: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500"
+      echo "    inet $_ip/24 brd 192.168.3.255 scope global wlan0" ;;
     "wm size")
       if [ "$(flag session)" = "1" ]; then echo "Physical size: 1080x1920"; else echo "Physical size: 1080x2340"; fi ;;
     wm\ size\ -d*)

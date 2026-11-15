@@ -82,7 +82,7 @@
     {
       "id": "connect",
       "target": "car",
-      "desc": "A 上输入 B 的 IP 并点「连接」（uiautomator 定位 EditText/Connect + input tap/text + 授权框轮询代点）",
+      "desc": "A 上输入 B 的 IP 并点「连接」（uiautomator 定位 EditText/Connect + input tap/text + 授权框轮询代点）；ManualConnectBox 不可达时降级为重启 app 原语（issue #173 PA）",
       "settle_s": 15,
       "weight": 20,
       "class": "normal",
@@ -93,7 +93,7 @@
         "rc": "ok",
         "state_after_any": ["STREAMING", "CONNECTING"],
         "invariants": "full",
-        "note": "op_connect 的 rc 只覆盖 UI 驱动链路，产品级成败看 settle 后的状态收敛；settle 结束仍 CONNECTING = settle-timeout 违规；回 ERROR = 产品缺陷"
+        "note": "op_connect 的 rc 只覆盖 UI 驱动链路 + ManualConnectBox 不可达时的重启兜底，产品级成败看 settle 后的状态收敛；settle 结束仍 CONNECTING = settle-timeout 违规；回 ERROR = 产品缺陷。兜底只做重启动作，不在收敛超时后二次重启（避免掩盖产品侧断连）"
       },
       "l1_refs": ["S01", "S08", "S21", "S22"]
     },
