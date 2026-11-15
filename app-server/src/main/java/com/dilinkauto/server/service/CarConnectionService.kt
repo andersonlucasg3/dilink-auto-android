@@ -206,9 +206,12 @@ class CarConnectionService : Service() {
         logWriter.start()
         videoDecoder.logSink = { msg -> carLogSend(msg) }
         audioPlayer.logSink = { msg -> carLogSend(msg) }
-        // issue #181：播放线程因 CONFIG 永不到达等原因退出时，用 E 级日志显式上报，
-        // 避免会话层以为「音频只是没声音」而不知道播放侧已经死了。
-        audioPlayer.onFatal = { reason -> carLogSend("Audio: playback unavailable — $reason", "E") }
+        // issue #181：播放线程因 CONFIG 永不到达 / 解码器创建失败等原因退出时，用
+        // sendUnconditional 上报（release 下 send 会被 enabled=false 丢掉），保证
+        // logcat 与手机侧 client.log 都能 grep 到 `[AudioPlayer][E]`。
+        audioPlayer.onFatal = { reason ->
+            logWriter.sendUnconditional("[AudioPlayer][E] $reason", "E")
+        }
 
         // issue #9 / #75 / #163：两端共用 protocol-core 的 SyncRequestGate（滑动窗口：1s 内最多 2 次）
         videoDecoder.onNeedsSyncFrame = {

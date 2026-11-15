@@ -130,6 +130,24 @@ internal fun isPcmSilent(pcm: ByteArray): Boolean {
     return true
 }
 
+/**
+ * 喂帧侧是否该把这一帧交给 jitter 缓冲（issue #181）。
+ *
+ * 三个闸门任一关闭都必须丢弃：
+ * - [running]：播放器未启动 / 已 stop；
+ * - [playbackFailed]：播放线程已判死（CONFIG 硬超时、解码器或 `AudioTrack` 创建失败）。
+ *   原来这里只判 `running`，于是致命退出后喂帧侧继续填队列、持续刷「Jitter queue full」，
+ *   而播放侧早已不存在；
+ * - [hasConfig]：裸 AAC 缺 `csd-0` 解不了，CONFIG 之前只能丢（原有语义）。
+ *
+ * 只决定「是否入队」，**不改**队列满时的丢最旧帧策略（属 #179）。
+ */
+internal fun audioShouldEnqueueFrame(
+    running: Boolean,
+    playbackFailed: Boolean,
+    hasConfig: Boolean,
+): Boolean = running && !playbackFailed && hasConfig
+
 /** 等第一份 CONFIG 的结果（issue #181）。 */
 internal sealed class AudioConfigWaitResult {
     /** CONFIG 已到，可以建解码器/`AudioTrack` 起播。 */
