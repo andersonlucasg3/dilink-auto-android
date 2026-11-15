@@ -102,6 +102,33 @@ class AudioPlayerFatalWiringTest {
     }
 
     @Test
+    fun `start after fatal rebuilds and clears failed state`() {
+        val player = AudioPlayer()
+        player.logSink = { }
+        val clock = FakeClock()
+        // 先真的进入运行态；再注入时钟走一遍 CONFIG 硬超时（生产路径）。
+        player.start()
+        try {
+            player.awaitFirstConfig(
+                configSource = { null },
+                runningSource = { player.isRunning },
+                clockMs = clock::clock,
+                parkNanos = clock::park,
+            )
+            assertTrue(player.isPlaybackFailed)
+            // 致命退出必须同时放掉 running，否则同一连接再次 start() 会被
+            // `start() called but already running` 早退，playbackFailed 永不复位。
+            assertFalse("致命后 running 仍为 true，下一次 start() 会早退", player.isRunning)
+
+            player.start()
+            assertTrue(player.isRunning)
+            assertFalse(player.isPlaybackFailed)
+        } finally {
+            player.stop()
+        }
+    }
+
+    @Test
     fun `playback failed closes the frame gate without touching drop policy`() {
         // running / playbackFailed / hasConfig 三个闸门的表
         assertTrue(audioShouldEnqueueFrame(running = true, playbackFailed = false, hasConfig = true))

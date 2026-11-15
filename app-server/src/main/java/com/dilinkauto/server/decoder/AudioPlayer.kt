@@ -459,8 +459,14 @@ class AudioPlayer(
         }
     }
 
-    /** 致命退出：置 [playbackFailed]、留 E 日志，并显式上报会话层（issue #181）。 */
+    /**
+     * 致命退出：置 [playbackFailed]、放掉 [running]，并显式上报会话层（issue #181）。
+     *
+     * 必须同时 `running.set(false)`：否则同一连接下再次 `start()` 会被
+     * `start() called but already running` 早退，[playbackFailed] 永远不会复位。
+     */
     private fun reportFatal(reason: String) {
+        running.set(false)
         playbackFailed = true
         logE(reason)
         onFatal?.invoke(reason)
