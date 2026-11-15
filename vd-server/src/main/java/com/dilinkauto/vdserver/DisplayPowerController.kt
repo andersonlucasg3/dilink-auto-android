@@ -24,8 +24,21 @@ internal class DisplayPowerController(
     private var displayControlClass: Class<*>? = null
     private var displayControlLoaded = false
 
-    /** `cmd display` 是否支持 `power-reset`：null = 未探测；见 [powerResetSupported]。 */
-    private var powerResetSupportedCached: Boolean? = null
+    /** `cmd display help` 的能力：null = 未探测；见 [powerResetCapability]。 */
+    private var powerResetCapabilityCached: PowerResetCapability? = null
+
+    /**
+     * 本会话是否**尝试过**深熄屏（issue #66）。
+     *
+     * 记「尝试」而不是「成功」：反射调用可能在已经生效之后才抛异常
+     * （现场就是 `setDisplayPowerMode failed: null` 而屏幕确实黑了），
+     * 所以只要发出过熄屏请求就必须在收尾时走点亮链。
+     */
+    @Volatile
+    private var deepOffAttempted = false
+
+    /** `cmd display` 对 `power-reset` 的支持程度（三态，见 [powerResetCapability]）。 */
+    private enum class PowerResetCapability { SUPPORTED, UNSUPPORTED, UNKNOWN }
 
     var savedDefaultIme: String? = null
         private set
@@ -76,10 +89,48 @@ internal class DisplayPowerController(
      *    `Unknown command: power-reset`，旧实现完全看不见）。
      *  - 该 ROM 是否支持 `power-reset` 用 `cmd display help` 探测一次并缓存；
      *    探测失败（拿不到 help）时仍然尝试，避免把可用 ROM 误判为不支持。
+     *
+     * 2026-11-15（issue #66）：
+     *  - 熄屏前先证明「熄得掉也点得亮」，见 [canDeepPowerOff]。本 ROM 的
+     *    `cmd display` 既没有 `power-off` 也没有 `power-reset`，屏幕上真正变黑的是
+     *    反射那次「抛异常前已生效」的深熄屏 —— 闸门必须加在反射**之前**，
+     *    加在 [shellPowerOff] 前面拦不住。
+     *  - 本次会话没尝试过熄屏时，点亮分支直接短路，不再刷一串必然失败的恢复日志。
      */
     fun setPhysicalDisplayPower(on: Boolean) {
-        if (applyDisplayControlPower(on)) return
-        if (on) shellPowerOn() else shellPowerOff()
+        if (on) {
+            if (!deepOffAttempted) {
+                PipeLog.log("skip panel restore: no deep power-off attempted this session")
+                return
+            }
+            if (applyDisplayControlPower(true)) return
+            shellPowerOn()
+            return
+        }
+        if (!canDeepPowerOff()) {
+            logErr(
+                "skip deep power-off: no recoverable path on this ROM " +
+                    "(DisplayControl unusable and `cmd display help` has no power-reset) — leaving the panel on"
+            )
+            return
+        }
+        deepOffAttempted = true
+        if (applyDisplayControlPower(false)) return
+        shellPowerOff()
+    }
+
+    /**
+     * 熄屏是否**可逆**：只有确定能把面板再点亮，才允许深熄屏（issue #66）。
+     *
+     * 任一条件成立即视为可逆：
+     *  1. `DisplayControl.setDisplayPowerMode(2)` 调用成功 —— 同一个方法也能把面板点亮；
+     *  2. `cmd display help` **明确**列出 `power-reset`（[shellPowerOn] 的兜底路径）。
+     *
+     * help 拿不到时按不可逆处理：宁可投屏期间屏幕常亮，也不要把面板熄成单向门。
+     */
+    private fun canDeepPowerOff(): Boolean {
+        if (applyDisplayControlPower(true)) return true
+        return powerResetCapability() == PowerResetCapability.SUPPORTED
     }
 
     /** 反射路径：完全成功返回 true；任何一步失败（含类加载）返回 false。 */
@@ -107,7 +158,10 @@ internal class DisplayPowerController(
             }
             true
         } catch (e: Exception) {
-            logErr("DisplayControl setDisplayPowerMode failed: ${e.message}")
+            // issue #66：Flyme 现场只有 `failed: null`，看不出 NPE 出在 token 为 null
+            // 还是框架调用内部；补上异常类型与 cause，后续现场可直接定位。
+            val cause = e.cause?.let { " (cause=${it.javaClass.simpleName}: ${it.message})" } ?: ""
+            logErr("DisplayControl setDisplayPowerMode failed: ${e.javaClass.simpleName}: ${e.message}$cause")
             false
         }
     }
@@ -146,20 +200,31 @@ internal class DisplayPowerController(
     }
 
     /**
-     * 该 ROM 的 `cmd display` 是否支持 `power-reset`，探测一次并缓存。
+     * 该 ROM 的 `cmd display` 对 `power-reset` 的支持程度，探测一次并缓存。
      *
-     * `null` = 还没探测过；探测拿不到 help 输出时返回 true 且不缓存（仍然尝试，
-     * 免得把能用的 ROM 误跳过）。
+     * 三态（issue #66）：help 拿不到时是 [PowerResetCapability.UNKNOWN] 且**不缓存**。
+     * 点亮链（[powerResetSupported]）对 UNKNOWN 仍然尝试，免得把能用的 ROM 误跳过；
+     * 熄屏闸门（[canDeepPowerOff]）对 UNKNOWN 按不可逆处理。
      */
-    private fun powerResetSupported(): Boolean {
-        powerResetSupportedCached?.let { return it }
+    private fun powerResetCapability(): PowerResetCapability {
+        powerResetCapabilityCached?.let { return it }
         val help = execShellOutput("cmd display help")?.trim().orEmpty()
-        if (help.isEmpty()) return true
-        val supported = help.contains("power-reset")
-        powerResetSupportedCached = supported
-        if (!supported) logErr("cmd display help has no power-reset on this ROM — skipping shell fallback")
-        return supported
+        val capability = when {
+            help.isEmpty() -> PowerResetCapability.UNKNOWN
+            help.contains("power-reset") -> PowerResetCapability.SUPPORTED
+            else -> PowerResetCapability.UNSUPPORTED
+        }
+        if (capability == PowerResetCapability.UNKNOWN) return capability
+        powerResetCapabilityCached = capability
+        if (capability == PowerResetCapability.UNSUPPORTED) {
+            logErr("cmd display help has no power-reset on this ROM — skipping shell fallback")
+        }
+        return capability
     }
+
+    /** 点亮链的 fail-open 视图：UNKNOWN（help 拿不到）仍然尝试。 */
+    private fun powerResetSupported(): Boolean =
+        powerResetCapability() != PowerResetCapability.UNSUPPORTED
 
     /**
      * Restore the previously-saved IME and screen settings.
