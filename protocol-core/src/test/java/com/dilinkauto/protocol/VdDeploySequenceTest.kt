@@ -47,14 +47,19 @@ class VdDeploySequenceTest {
         }
     }
 
-    private fun plan() = VdDeploy.DeployPlan(
+    private fun plan(sessionToken: String = "") = VdDeploy.DeployPlan(
         args = "dummy-args",
         launchCommand = "launch-command",
+        sessionToken = sessionToken,
     )
 
-    private fun run(executor: FakeExecutor, clock: FakeClock = FakeClock()): VdDeployOutcome =
+    private fun run(
+        executor: FakeExecutor,
+        clock: FakeClock = FakeClock(),
+        plan: VdDeploy.DeployPlan = plan()
+    ): VdDeployOutcome =
         runBlocking {
-            vdRunDeploySequence(plan(), executor, now = clock::now, sleep = { clock.sleep(it) })
+            vdRunDeploySequence(plan, executor, now = clock::now, sleep = { clock.sleep(it) })
         }
 
     /**
@@ -72,12 +77,14 @@ class VdDeploySequenceTest {
     }
 
     @Test
-    fun `clean exit runs graceful stop, two gone probes, then launch`() {
+    fun `clean exit runs the any-session stop, two gone probes, then launch`() {
         val executor = FakeExecutor(ArrayDeque(listOf(VdProbeResult.GONE, VdProbeResult.GONE)))
 
         val outcome = run(executor)
 
-        assertEquals(listOf(VdDeploy.gracefulStopCommand, "launch-command"), executor.commands)
+        // 启动前置清场停的是"当前在跑的引擎"（token 未知），所以用读会话文件的命令；
+        // 写本次 plan 的 token 会让新引擎启动后立刻读到自己的停止请求。
+        assertEquals(listOf(VdDeploy.gracefulStopAnyCommand, "launch-command"), executor.commands)
         assertEquals("连续两次 GONE 确认退出", 2, executor.probeCount)
         assertFalse("正常退出不应触发兜底强杀", outcome.forcedKill)
         assertTrue(outcome.launched)
@@ -93,7 +100,7 @@ class VdDeploySequenceTest {
 
         assertEquals("存活一次后需再确认两次", 3, executor.probeCount)
         assertFalse(outcome.forcedKill)
-        assertEquals(listOf(VdDeploy.gracefulStopCommand, "launch-command"), executor.commands)
+        assertEquals(listOf(VdDeploy.gracefulStopAnyCommand, "launch-command"), executor.commands)
     }
 
     @Test
@@ -120,7 +127,7 @@ class VdDeploySequenceTest {
         assertTrue("graceful 超时后必须补 -9 兜底", outcome.forcedKill)
         assertEquals("两轮等待各耗尽预算", expectedStopElapsedMs(), clock.millis)
         assertEquals(
-            listOf(VdDeploy.gracefulStopCommand, VdDeploy.killCommandForce, "launch-command"),
+            listOf(VdDeploy.gracefulStopAnyCommand, VdDeploy.killCommandForce, "launch-command"),
             commands,
         )
     }
@@ -133,7 +140,7 @@ class VdDeploySequenceTest {
 
         assertEquals("无法探测时立即放行，不轮询", 1, executor.probeCount)
         assertFalse(outcome.forcedKill)
-        assertEquals(listOf(VdDeploy.gracefulStopCommand, "launch-command"), executor.commands)
+        assertEquals(listOf(VdDeploy.gracefulStopAnyCommand, "launch-command"), executor.commands)
     }
 
     @Test
@@ -161,8 +168,38 @@ class VdDeploySequenceTest {
         }
 
         assertFalse("干净退出不应触发强杀", forcedKill)
-        assertEquals("收尾路径只停不启", listOf(VdDeploy.gracefulStopCommand), executor.commands)
+        assertEquals("收尾路径只停不启", listOf(VdDeploy.gracefulStopCommand()), executor.commands)
         assertEquals(2, executor.probeCount)
+    }
+
+    /** issue #180 第三版：收尾必须用调用方记住的 token，写本会话专属哨兵。 */
+    @Test
+    fun `stop engine writes the caller's own session sentinel`() {
+        val executor = FakeExecutor(ArrayDeque(listOf(VdProbeResult.GONE, VdProbeResult.GONE)))
+        val clock = FakeClock()
+
+        runBlocking {
+            vdStopEngine(executor, sessionToken = "T-self", now = clock::now, sleep = { clock.sleep(it) })
+        }
+
+        assertEquals(
+            listOf(VdDeploy.gracefulStopCommand("T-self")),
+            executor.commands,
+        )
+        assertTrue(
+            "必须写到本会话专属文件: ${executor.commands}",
+            executor.commands.single().contains(VdDeploy.stopRequestPath("T-self"))
+        )
+    }
+
+    /** 部署序列的 outcome 必须带回本次会话 token，供调用方收尾使用。 */
+    @Test
+    fun `deploy outcome carries the session token`() {
+        val executor = FakeExecutor(ArrayDeque(listOf(VdProbeResult.GONE, VdProbeResult.GONE)))
+
+        val outcome = run(executor, plan = plan(sessionToken = "T-new"))
+
+        assertEquals("T-new", outcome.sessionToken)
     }
 
     @Test
@@ -185,7 +222,7 @@ class VdDeploySequenceTest {
 
         assertTrue(forcedKill)
         assertEquals(
-            listOf(VdDeploy.gracefulStopCommand, VdDeploy.killCommandForce),
+            listOf(VdDeploy.gracefulStopCommand(), VdDeploy.killCommandForce),
             stubborn.commands,
         )
         assertEquals("两轮等待各耗尽预算", expectedStopElapsedMs(), clock.millis)

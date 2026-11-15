@@ -17,7 +17,8 @@ neutral_verified() {
   [ "$(listening_on "$PHONE_SERIAL" 9637)" != "Y" ] || { log_err "中立核验：B 9637 仍 LISTEN"; bad=1; }
   [ "$(dphone 'settings get system screen_off_timeout' 2>/dev/null | tr -d '\r\n ')" = "$BASELINE_SCREEN_OFF_TIMEOUT" ] \
     || { log_err "中立核验：screen_off_timeout 非基线"; bad=1; }
-  [ -z "$(dphone 'ls /sdcard/DiLinkAuto/stop-request 2>/dev/null' 2>/dev/null | tr -d '\r\n ')" ] \
+  # issue #180 第三版：哨兵按会话分文件（`stop-request-<token>`），残留检查必须用通配。
+  [ -z "$(dphone 'ls /sdcard/DiLinkAuto/stop-request* 2>/dev/null' 2>/dev/null | tr -d '\r\n ')" ] \
     || { log_err "中立核验：stop-request 残留"; bad=1; }
   [ "$(car_state_now)" = "IDLE" ]   || { log_err "中立核验：car 状态 $(car_state_now)≠IDLE"; bad=1; }
   [ "$(phone_state_now)" = "IDLE" ] || { log_err "中立核验：phone 状态 $(phone_state_now)≠IDLE"; bad=1; }

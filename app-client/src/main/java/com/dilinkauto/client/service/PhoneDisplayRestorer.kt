@@ -78,7 +78,7 @@ internal class PhoneDisplayRestorer(
     private val inFlight = AtomicBoolean(false)
 
     @android.annotation.SuppressLint("BlockedPrivateApi")
-    fun restore(savedIme: String?) {
+    fun restore(savedIme: String?, sessionToken: String? = null) {
         if (!inFlight.compareAndSet(false, true)) {
             FileLog.d(TAG, "Restore already in flight — skipping duplicate request")
             return
@@ -88,7 +88,7 @@ internal class PhoneDisplayRestorer(
             // power-reset too. A cancellation in the middle leaves the panel off.
             withContext(NonCancellable) {
                 try {
-                    restoreInternal(savedIme)
+                    restoreInternal(savedIme, sessionToken)
                 } finally {
                     inFlight.set(false)
                 }
@@ -96,7 +96,7 @@ internal class PhoneDisplayRestorer(
         }
     }
 
-    private suspend fun restoreInternal(savedIme: String?) {
+    private suspend fun restoreInternal(savedIme: String?, sessionToken: String?) {
         try {
             FileLog.i(TAG, "Force-waking physical display")
 
@@ -106,9 +106,15 @@ internal class PhoneDisplayRestorer(
             // 走正常退出路径、把 cleanup 完整跑完（面板/letterbox/IME/
             // screen_off_timeout 恢复 + VD 释放），再轮询等它退出；超时才
             // -9 兜底（强杀路径接受 cleanup 被跳过的代价）。
+            //
+            // issue #180 第三版：哨兵必须写**本次会话**那一份（token 来自部署时的
+            // 计划）。回读设备上的 `vd-server.session` 会在"新引擎先启动、旧会话后
+            // 收尾"时读到新 token，把新会话杀掉。
             if (ShizukuManager.isAvailable) {
                 try {
-                    ShizukuManager.execAndWait(VdDeploy.gracefulStopCommand)
+                    val sentinel = VdDeploy.stopRequestPath(sessionToken)
+                    FileLog.d(TAG, "Graceful stop sentinel: $sentinel")
+                    ShizukuManager.execAndWait(VdDeploy.gracefulStopCommand(sessionToken))
                     var engineExited = false
                     val engineDeadline = System.currentTimeMillis() + ENGINE_EXIT_WAIT_MS
                     while (System.currentTimeMillis() < engineDeadline) {

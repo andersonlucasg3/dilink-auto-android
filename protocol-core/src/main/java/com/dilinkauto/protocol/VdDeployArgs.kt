@@ -25,6 +25,9 @@ package com.dilinkauto.protocol
  *                 的白名单），`-` = 不下传（引擎不做白名单过滤）。引擎侧用它约束
  *                 [com.dilinkauto.protocol.RecentsParser.pickQuickSwitchTarget] 的
  *                 建屏恢复目标，避免把私有应用拉到车机屏。
+ *   - SESSION   — issue #180 第三版: 本次会话的 token（`[A-Za-z0-9_-]{1,64}`），
+ *                 `-` = 未传。引擎只监听自己的 `stop-request-<token>` 哨兵，
+ *                 没有 token 时回退同目录下的固定名 `stop-request` + mtime 判定。
  */
 object VdDeployArgs {
     const val MAX_ENCODE_WIDTH = 1920
@@ -35,6 +38,9 @@ object VdDeployArgs {
 
     /** Sentinel for "no allowlist handed down" in the ALLOWED argv slot（issue #21）. */
     const val ALLOWED_ANY = "-"
+
+    /** Sentinel for "no session token" in the SESSION slot（issue #180 第三版）. */
+    const val SESSION_TOKEN_ANY = "-"
 
     /** Dotted-quad IPv4 or a DNS hostname — nothing a shell could break out of. */
     private val HOST_REGEX = Regex("^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
@@ -53,7 +59,8 @@ object VdDeployArgs {
         fps: Int,
         bitrate: Int = VideoConfig.DEFAULT_BITRATE,
         carHost: String = CAR_HOST_ANY,
-        allowedPackages: Collection<String> = emptyList()
+        allowedPackages: Collection<String> = emptyList(),
+        sessionToken: String? = null
     ): String {
         // 等比缩放到编码上限内：此前宽高分开 clamp 会把竖屏 1080x2152 压成方形
         // 1080x1080，导致车机端画面比例失真；等比缩放保持车机 viewport 原始宽高比。
@@ -66,7 +73,26 @@ object VdDeployArgs {
             bitrate
         } else VideoConfig.DEFAULT_BITRATE
         val safeCarHost = sanitizeCarHost(carHost)
-        return "$vdWidth $vdHeight $dpi $phoneHost $ew $eh $fps $br $safeCarHost ${formatAllowedPackages(allowedPackages)}"
+        return "$vdWidth $vdHeight $dpi $phoneHost $ew $eh $fps $br $safeCarHost " +
+            "${formatAllowedPackages(allowedPackages)} ${sanitizeSessionToken(sessionToken)}"
+    }
+
+    /**
+     * 把会话 token 编码进 argv 的 SESSION 槽位（issue #180 第三版）。
+     *
+     * 这个字符串会进设备侧 shell 行，也会被拼成哨兵文件名，所以只放行
+     * [VdDeploy.isValidSessionToken] 认可的字符集；非法/缺省一律退化为
+     * [SESSION_TOKEN_ANY]，引擎据此走旧格式固定名。
+     */
+    fun sanitizeSessionToken(sessionToken: String?): String {
+        val token = sessionToken?.trim().orEmpty()
+        return if (VdDeploy.isValidSessionToken(token)) token else SESSION_TOKEN_ANY
+    }
+
+    /** 解析引擎侧的 SESSION 槽位：[sanitizeSessionToken] 的逆操作，`-`/非法 → 空串。 */
+    fun parseSessionToken(arg: String?): String {
+        val token = arg?.trim().orEmpty()
+        return if (VdDeploy.isValidSessionToken(token)) token else ""
     }
 
     /**

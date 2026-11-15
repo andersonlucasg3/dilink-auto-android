@@ -62,6 +62,17 @@ class AdbDeployer(
     private var lastSerial: String? = null
 
     /**
+     * 最近一次 [deploy] 启动的会话 token（issue #180 第三版）。
+     *
+     * [gracefulStop] 必须用**这一次**的 token 写哨兵：回读设备上的 `vd-server.session`
+     * 可能已经是下一代引擎的标识（"应用并重连"时新引擎先起、旧收尾后到），那样会
+     * 把新会话杀掉 —— 这正是 issue #180 的原始症状。
+     */
+    @Volatile
+    internal var lastSessionToken: String? = null
+        private set
+
+    /**
      * 部署一次 VD server。返回 false 时上层应提示用户走 Shizuku 或检查 adb 环境；
      * 但**不要**反复重试 —— 失败原因（没装 adb / 没开无线调试 / 不同网段）重试也不会变。
      *
@@ -104,8 +115,10 @@ class AdbDeployer(
             val plan = AdbDeploy.plan(config, jarPath = jarPath, phoneVdWidth = phoneVdWidth, phoneVdHeight = phoneVdHeight)
             log("ADB 部署：优雅停止旧引擎")
 
-            // 记录 serial：收尾（closeSession）时的 gracefulStop 需要它 —— 见本方法注释。
+            // 记录 serial + 会话 token：收尾（closeSession）时的 gracefulStop 需要它们
+            // —— 见本方法注释与 [lastSessionToken]。
             lastSerial = serial
+            lastSessionToken = plan.sessionToken
             val executor = executorFor(serial, log)
 
             // 直接挂起驱动共享序列（audit D-M6）：等旧引擎退出的轮询等待走 [sleep]
@@ -150,9 +163,11 @@ class AdbDeployer(
         log: (String) -> Unit,
     ): Boolean {
         val serial = lastSerial ?: return false
+        // 本会话的 token（部署时记下的）；null = 老路径，回退固定名 + mtime。
+        val token = lastSessionToken
         deployMutex.lock()
         try {
-            log("ADB 收尾：优雅停止设备侧引擎（哨兵 ${VdDeploy.STOP_REQUEST_PATH}）")
+            log("ADB 收尾：优雅停止设备侧引擎（哨兵 ${VdDeploy.stopRequestPath(token)}）")
             val t0 = now()
             // 探针跃迁日志：这条路径上"等不到引擎退出"有两种完全不同的成因 ——
             // 引擎真的还在跑 cleanup（探针一路 ALIVE），还是探针本身没认账
@@ -172,6 +187,7 @@ class AdbDeployer(
             }
             val forcedKill = vdStopEngine(
                 traced,
+                sessionToken = token,
                 gracefulTimeoutMs = gracefulTimeoutMs,
                 now = now,
                 sleep = sleep,

@@ -62,20 +62,71 @@ class VdDeployConstantsTest {
     fun `stop request path lives under the deploy dir`() {
         assertEquals("/sdcard/DiLinkAuto/stop-request", VdDeploy.STOP_REQUEST_PATH)
         assertTrue(VdDeploy.STOP_REQUEST_PATH.startsWith(VdDeploy.DIR_PATH))
+        // issue #180 第三版：token 决定各自的哨兵文件名，旧格式固定名保持同名兼容。
+        assertEquals("stop-request", VdDeploy.stopRequestName(null))
+        assertEquals("stop-request", VdDeploy.stopRequestName("-"))
+        assertEquals("/sdcard/DiLinkAuto/stop-request-AbC123", VdDeploy.stopRequestPath("AbC123"))
+        assertEquals(VdDeploy.STOP_REQUEST_PATH, VdDeploy.stopRequestPath("a/b"))
+        assertTrue(VdDeploy.isValidSessionToken("AbC123_-xyz"))
+        assertFalse(VdDeploy.isValidSessionToken(""))
+        assertFalse(VdDeploy.isValidSessionToken("-"))
+        assertFalse(VdDeploy.isValidSessionToken("a".repeat(65)))
+        assertFalse(VdDeploy.isValidSessionToken("a b"))
     }
 
     @Test
-    fun `graceful stop command writes the sentinel and returns immediately`() {
-        assertTrue(
-            "必须先 rm 清残留再 touch，保证文件属于本次请求",
-            VdDeploy.gracefulStopCommand.indexOf("rm -f") < VdDeploy.gracefulStopCommand.indexOf("touch")
+    fun `generated session tokens are unique and shell safe`() {
+        val tokens = (1..64).map { VdDeploy.newSessionToken() }
+        assertEquals("token 必须互不相同（旧会话哨兵才不可能命中新会话）", 64, tokens.toSet().size)
+        assertTrue("token 必须落在允许的字符集内", tokens.all { VdDeploy.isValidSessionToken(it) })
+    }
+
+    @Test
+    fun `graceful stop command writes the session sentinel atomically and returns immediately`() {
+        val cmd = VdDeploy.gracefulStopCommand("AbC123")
+        assertTrue("必须写本会话专属文件: $cmd", cmd.contains("p=${VdDeploy.stopRequestPath("AbC123")}"))
+        assertTrue("必须用同目录 temp + mv 原子替换: $cmd", cmd.contains("mv -f \"\$tmp\" \"\$p\""))
+        assertFalse(
+            "不得直接重定向进哨兵（会让并发读者读到空半成品）: $cmd",
+            cmd.contains("> ${VdDeploy.stopRequestPath("AbC123")}")
         )
-        assertTrue(VdDeploy.gracefulStopCommand.contains("touch ${VdDeploy.STOP_REQUEST_PATH}"))
-        assertTrue(VdDeploy.gracefulStopCommand.endsWith("exit 0"))
+        assertTrue(cmd.endsWith("exit 0"))
         // 瞬时契约：不得含任何等待——transport 的 shell 超时最紧只有 5s，
         // 命令内等待会被超时截断、请求半途而废。
-        assertFalse(VdDeploy.gracefulStopCommand.contains("sleep"))
-        assertFalse(VdDeploy.gracefulStopCommand.contains("pkill"))
+        assertFalse(cmd.contains("sleep"))
+        assertFalse(cmd.contains("pkill"))
+    }
+
+    /** 无 token（老客户端/老脚本）回退旧格式固定名 + 内容寻址。 */
+    @Test
+    fun `graceful stop command falls back to the legacy sentinel without a token`() {
+        val cmd = VdDeploy.gracefulStopCommand()
+        assertTrue("无 token 必须写固定名: $cmd", cmd.contains("p=${VdDeploy.STOP_REQUEST_PATH}"))
+        assertEquals("/sdcard/DiLinkAuto/vd-server.pid", VdDeploy.PID_PATH)
+        assertTrue(
+            "必须把 pid 文件内容抄进哨兵（旧格式内容寻址）: $cmd",
+            cmd.contains("cat ${VdDeploy.PID_PATH} > \"\$tmp\"")
+        )
+        assertFalse("不得再出现 `cat pid > 哨兵`（非原子）", cmd.contains("cat ${VdDeploy.PID_PATH} > ${VdDeploy.STOP_REQUEST_PATH}"))
+    }
+
+    /**
+     * 启动前置清场用 `gracefulStopAnyCommand`：读设备上的会话文件（新引擎）或回退固定名
+     * （老引擎）。它只允许用在"新引擎还没启动"的位置。
+     */
+    @Test
+    fun `graceful stop any command reads the session file and falls back to the legacy path`() {
+        val cmd = VdDeploy.gracefulStopAnyCommand
+        assertTrue("必须读会话 token: $cmd", cmd.contains("head -c 64 ${VdDeploy.SESSION_TOKEN_PATH}"))
+        assertTrue("token 必须做字符集校验（会拼进文件名）: $cmd", cmd.contains("*[!A-Za-z0-9_-]*"))
+        assertTrue(
+            "token 合法时写会话哨兵: $cmd",
+            cmd.contains("p=${VdDeploy.DIR_PATH}/${VdDeploy.STOP_REQUEST_PREFIX}-\$t")
+        )
+        assertTrue("token 缺失时回退固定名: $cmd", cmd.contains("p=${VdDeploy.STOP_REQUEST_PATH}"))
+        assertTrue("同样是原子替换: $cmd", cmd.contains("mv -f \"\$tmp\" \"\$p\""))
+        assertTrue(cmd.endsWith("exit 0"))
+        assertFalse(cmd.contains("sleep"))
     }
 
     @Test

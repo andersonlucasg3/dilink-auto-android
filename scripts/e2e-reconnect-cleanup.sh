@@ -549,7 +549,7 @@ if wait_engine_gone 30; then
 else
   bad "引擎仍在（pid=$(engine_pid)）"
 fi
-if [ "$(dev 'ls /sdcard/DiLinkAuto/stop-request 2>/dev/null | head -1' | tr -d '\r\n ')" != "" ]; then
+if [ "$(dev 'ls /sdcard/DiLinkAuto/stop-request* 2>/dev/null | head -1' | tr -d '\r\n ')" != "" ]; then
   info "哨兵文件残留（关窗路径不消费它，属已知无害残留；引擎下次启动自清）"
 fi
 
