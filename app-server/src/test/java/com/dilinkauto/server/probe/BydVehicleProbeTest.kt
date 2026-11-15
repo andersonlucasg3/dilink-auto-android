@@ -1,6 +1,7 @@
 package com.dilinkauto.server.probe
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -40,6 +41,28 @@ class BydVehicleProbeTest {
 
         assertTrue("类可用时必须先报 class=ok：$lines", lines.any { it.contains("dev engine class=ok") })
         assertTrue("没有 Context 时只报 no-context，不得抛异常：$lines", lines.any { it.contains("dev engine instance=no-context") })
+    }
+
+    /**
+     * 前缀判定的假绿面：前缀写错一个字母，SDK 所有 getter 都会抛 `SecurityException`，
+     * 实车日志看起来与「服务端拒绝」一模一样（这正是探针要回答的问题），必须先钉死。
+     */
+    @Test
+    fun `only BYDAUTO permissions are granted by the wrapper`() {
+        assertTrue(
+            "engine getter 的权限必须放行，否则探针结论全部无效",
+            shouldGrantBydPermission("android.permission.BYDAUTO_ENGINE_GET"),
+        )
+        assertTrue(
+            "AC/statistic 等其它 BYDAUTO 权限也必须放行",
+            shouldGrantBydPermission("android.permission.BYDAUTO_AC_COMMON"),
+        )
+        assertFalse(
+            "非 BYDAUTO 权限一律不得放行，否则 wrapper 越权",
+            shouldGrantBydPermission("android.permission.CAMERA"),
+        )
+        assertFalse("null 不得放行", shouldGrantBydPermission(null))
+        assertFalse("空串不得放行", shouldGrantBydPermission(""))
     }
 
     @Test

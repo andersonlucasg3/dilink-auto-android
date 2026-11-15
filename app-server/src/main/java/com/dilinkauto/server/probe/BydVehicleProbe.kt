@@ -37,6 +37,7 @@ internal class BydVehicleProbe(
 
     fun run() {
         emit("start pkg=${context?.packageName ?: "-"} uid=${runCatching { context?.applicationInfo?.uid }.getOrNull() ?: -1} sdk=${Build.VERSION.SDK_INT} debug=${com.dilinkauto.server.BuildConfig.DEBUG}")
+        emit("note rpm 8191/65535 = invalid sentinel; speed raw unit varies by model")
         reportPermission()
         probeEngine()
         probeStatistic()
@@ -72,7 +73,8 @@ internal class BydVehicleProbe(
 
     private fun probeSpeed() {
         val device = obtainDevice(SPEED_DEVICE, "speed") ?: return
-        emit("speed kmh=${callDouble(device, "getCurrentSpeed")}")
+        // 标签写 raw：`getCurrentSpeed()` 的原始单位随车型/固件而异，别写成 km/h 误导判读。
+        emit("speed raw=${callDouble(device, "getCurrentSpeed")}")
     }
 
     /** 更高门槛的对照：AC 设备初始化要求 `BYDAUTO_AC_COMMON`，比 engine 的 `_GET` 更严。 */
@@ -100,7 +102,8 @@ internal class BydVehicleProbe(
         return try {
             val factory = cls.getMethod("getInstance", Context::class.java)
             val instance = factory.invoke(null, BydPermissionContext(ctx))
-            emit("dev $label instance=ok")
+            // getInstance 可能返回 null：那与「实例化成功但 getter 全挂」是两件事，必须区分。
+            emit("dev $label instance=${if (instance == null) "null" else "ok"}")
             instance
         } catch (e: Throwable) {
             emit("dev $label instance=err ${describe(e)}")
@@ -154,29 +157,47 @@ internal class BydVehicleProbe(
 }
 
 /**
+ * 是否应该对这条权限放行（只放 BYDAUTO_ 前缀的客户端检查）。
+ *
+ * 抽成顶层纯函数的唯一目的：`BYDAUTO_PREFIX` 写错一个字母，所有 getter 会抛
+ * `SecurityException`，而实车上看起来和「服务端拒绝」一模一样 —— 必须有单测钉住。
+ */
+internal fun shouldGrantBydPermission(permission: String?): Boolean =
+    permission != null && permission.startsWith(BYDAUTO_PERMISSION_PREFIX)
+
+private const val BYDAUTO_PERMISSION_PREFIX = "android.permission.BYDAUTO_"
+
+/**
  * 绕过 BYDAUTO 客户端权限检查的 ContextWrapper（借自 `BYD-dev/TripLogger` 验证过的做法）。
  *
  * 只影响**客户端**的 `checkPermission` / `enforce*`；服务端 binder 侧的校验不受影响，
  * 这正是探针要区分的东西 —— 如果调用仍然抛 `SecurityException`，说明校验在服务端。
+ *
+ * 四个入口都要覆盖（`checkPermission` / `checkCallingOrSelfPermission` / `enforce*`），
+ * 只拦一个的话 SDK 换个调用点就失效。
+ *
+ * 参数声明为不可空：SDK stub 上这些参数标了 `@NonNull`，Kotlin 不接受可空覆盖签名
+ * （`'checkPermission' overrides nothing`）。放行判定本身在 [shouldGrantBydPermission]
+ * 里对 null 做了保护，供非反射调用方复用。
  */
 internal class BydPermissionContext(base: Context) : ContextWrapper(base) {
     override fun checkPermission(permission: String, pid: Int, uid: Int): Int =
-        if (permission.startsWith(BYDAUTO_PREFIX)) PackageManager.PERMISSION_GRANTED
+        if (shouldGrantBydPermission(permission)) PackageManager.PERMISSION_GRANTED
         else super.checkPermission(permission, pid, uid)
 
     override fun checkCallingOrSelfPermission(permission: String): Int =
-        if (permission.startsWith(BYDAUTO_PREFIX)) PackageManager.PERMISSION_GRANTED
+        if (shouldGrantBydPermission(permission)) PackageManager.PERMISSION_GRANTED
         else super.checkCallingOrSelfPermission(permission)
 
     override fun enforcePermission(permission: String, pid: Int, uid: Int, message: String?) {
-        if (!permission.startsWith(BYDAUTO_PREFIX)) super.enforcePermission(permission, pid, uid, message)
+        if (!shouldGrantBydPermission(permission)) {
+            super.enforcePermission(permission, pid, uid, message)
+        }
     }
 
     override fun enforceCallingOrSelfPermission(permission: String, message: String?) {
-        if (!permission.startsWith(BYDAUTO_PREFIX)) super.enforceCallingOrSelfPermission(permission, message)
-    }
-
-    private companion object {
-        const val BYDAUTO_PREFIX = "android.permission.BYDAUTO_"
+        if (!shouldGrantBydPermission(permission)) {
+            super.enforceCallingOrSelfPermission(permission, message)
+        }
     }
 }

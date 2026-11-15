@@ -52,6 +52,9 @@ internal class CarLogWriter(
     /** Release builds default to off; the phone toggles via LOG_TOGGLE. */
     fun setEnabled(value: Boolean) { enabled = value }
 
+    /** 当前开关状态（issue #188 探针需要保存/恢复，避免覆盖手机端下发的 LOG_TOGGLE）。 */
+    fun isEnabled(): Boolean = enabled
+
     /**
      * Start of a new session: drop anything buffered from the previous one.
      *

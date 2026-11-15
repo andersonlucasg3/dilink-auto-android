@@ -190,22 +190,41 @@ internal class CarSessionCoordinator(
             adbTracker.startUsbTrack(trackScope())
         }
 
-        // issue #188 探针：连上后自动在车机侧读一次 BYDAuto 车辆数据，结果经 CAR_LOG 回传手机。
-        // 临时诊断代码 —— `BydVehicleProbe.ENABLED = false` 即整体失效；结论落定后连同本段与
-        // `probe/BydVehicleProbe.kt` 一起删除（清理条件写在 issue #188 里）。
-        if (BydVehicleProbe.ENABLED) {
-            // 探针必须回传：release 包默认关闭诊断日志，这里临时打开，跑完恢复默认值。
-            logWriter.setEnabled(true)
-            // `scope` 是 Dispatchers.Main，探针内部有阻塞 sleep，必须切到 IO。
-            scope.launch(parent + Dispatchers.IO) {
+        // issue #188 探针（临时诊断代码，见 armBydVehicleProbe 的注释）
+        armBydVehicleProbe(parent)
+    }
+
+    /**
+     * issue #188：连接建立后在车机侧读一次 BYDAuto 车辆数据，结果经 `CAR_LOG` 回传手机。
+     *
+     * 临时诊断代码 —— `BydVehicleProbe.ENABLED = false` 即整体失效，结论落定后连同
+     * `probe/BydVehicleProbe.kt` 与测试一起删除（清理条件写在 issue #188 里）。
+     *
+     * 几个必须守住的点：
+     * - **握手之后再打开 logWriter**：手机端在握手后会下发 `LOG_TOGGLE`（release 手机默认关），
+     *   太早打开会被覆盖，探针行会被 `CarLogWriter.send` 的 `if (!enabled) return` 静默丢弃；
+     * - **跑完恢复原值**，不能把用户手动打开的日志关掉；
+     * - **IO 线程**：`scope` 是 `Dispatchers.Main`，探针内部有阻塞 sleep；
+     * - 会话在 `CONNECTED` 之前就结束时补一行 skipped，避免把「没跑」误读成「读不到」。
+     */
+    private fun armBydVehicleProbe(parent: Job) {
+        if (!BydVehicleProbe.ENABLED) return
+        scope.launch(parent + Dispatchers.IO) {
+            try {
                 _state.first {
                     it == CarConnectionService.State.CONNECTED || it == CarConnectionService.State.STREAMING
                 }
-                try {
-                    BydVehicleProbe(context = context, sink = { carLogSend(it, "I") }).run()
-                } finally {
-                    logWriter.setEnabled(com.dilinkauto.server.BuildConfig.DEBUG)
-                }
+            } catch (e: CancellationException) {
+                carLogSend("[BydProbe] skipped: session ended before CONNECTED", "W")
+                throw e
+            }
+            val wasEnabled = logWriter.isEnabled()
+            logWriter.setEnabled(true)
+            try {
+                runCatching { BydVehicleProbe(context = context, sink = { carLogSend(it, "I") }).run() }
+                    .onFailure { carLogSend("[BydProbe] crashed: ${it.javaClass.simpleName}: ${it.message}", "E") }
+            } finally {
+                logWriter.setEnabled(wasEnabled)
             }
         }
     }
@@ -217,6 +236,7 @@ internal class CarSessionCoordinator(
         scope.launch(parent) {
             adbTracker.startUsbTrack(trackScope())
         }
+        armBydVehicleProbe(parent)
         connectToPhone(host, port)
     }
 
