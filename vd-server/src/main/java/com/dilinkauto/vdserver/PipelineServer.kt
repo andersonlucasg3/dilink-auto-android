@@ -85,6 +85,14 @@ class PipelineServer(
      * 早于这个时刻的 mtime 一律是上一轮会话的残留。
      */
     private val sessionStartedAtMs = System.currentTimeMillis()
+
+    /**
+     * issue #180：本进程 pid —— 停止哨兵的内容寻址标识。
+     *
+     * 启动时写进 [VdDeploy.PID_PATH]，停止方把它抄进哨兵；引擎只受理内容等于自己
+     * pid 的请求，mtime 只作为旧格式（空/非数字）的回退判据。
+     */
+    private val sessionPid: String = android.os.Process.myPid().toString()
     @Volatile private var running = true
     private val cleanupStarted = AtomicBoolean(false)
     private val cleanupFinished = AtomicBoolean(false)
@@ -155,7 +163,8 @@ class PipelineServer(
         },
         log = { log(it) },
         err = { err(it) },
-        sessionStartedAtMs = sessionStartedAtMs
+        sessionStartedAtMs = sessionStartedAtMs,
+        sessionPid = sessionPid
     )
     private val carCommands = CarCommandRouter(
         exec = { shell.exec(it) },
@@ -270,6 +279,9 @@ class PipelineServer(
 
     fun run() {
         Runtime.getRuntime().addShutdownHook(Thread({ cleanup() }, "ShutdownHook"))
+        // issue #180：第一步就发布本进程 pid，让停止方能把请求寻址到具体引擎。
+        // 放在 EGL/编码器初始化之前——初始化窗口内的真停止请求也能被识别。
+        publishPidFile()
         try {
             touchInjector.initInputManager()
             shell.start()
@@ -314,10 +326,12 @@ class PipelineServer(
             // `Stop request detected ... graceful shutdown`，整段会话不足 1 秒）。
             //
             // watchdog 开始轮询之前，本进程还没有任何可被停止的会话，因此此刻盘上的
-            // 哨兵一律清掉。代价：用户在 ≤10s 初始化窗口里按停止会被这里吞掉，由部署端
-            // 12s 等待超时后的 -9 兜底——与既有的强杀兜底同代价，接受。
-            clearStartupStopRequest()
-            startWatchdog()
+            // 哨兵一律清掉 —— 但**内容写给本进程 pid** 的除外（那是初始化窗口里用户
+            // 按下的真停止，见 [shouldDropStartupStopRequest]）。
+            armWatchdogWithStartupCleanup(
+                clearStartupStopRequest = { clearStartupStopRequest() },
+                armWatchdog = { startWatchdog() }
+            )
             if (!createVirtualDisplay()) { running = false; err("Fatal: failed to create VD"); return }
             val conns = bindAndAccept() ?: run { running = false; return }
             startLifecycleReader(conns.phoneChannel)
@@ -676,15 +690,32 @@ class PipelineServer(
     }
 
     /**
-     * issue #180：watchdog 武装前的清场——删掉盘上一切停止哨兵。
+     * issue #180：把本进程 pid 发布到 [VdDeploy.PID_PATH]。
      *
-     * 调用点必须紧邻 [startWatchdog]（见 `run()` 里的说明）。此前的会话收尾请求
-     * 一律属于上一轮；在 watchdog 开始轮询之后写入的哨兵才交给
-     * [ProcessWatchdog] 按 mtime 判定会话归属。
+     * 停止方的 [VdDeploy.gracefulStopCommand] 会把它抄进哨兵，实现"请求内容到会话"
+     * 的绑定。写失败不致命：哨兵退化成空文件，两边都回落到 mtime + 启动时刻的旧判定。
+     */
+    private fun publishPidFile() {
+        val ok = runCatching { File(VdDeploy.PID_PATH).writeText(sessionPid) }.isSuccess
+        if (!ok) {
+            err("Startup: failed to publish ${VdDeploy.PID_PATH} — stop requests fall back to legacy mtime mode")
+        }
+    }
+
+    /**
+     * issue #180：watchdog 武装前的清场——删掉不属于本会话的停止哨兵。
+     *
+     * 调用点必须紧跟 [startWatchdog]（顺序由 [armWatchdogWithStartupCleanup] 锁定）。
+     * 内容写成本进程 pid 的哨兵**保留**：那是初始化窗口内用户按下的真停止。
      */
     private fun clearStartupStopRequest() {
         val f = File(VdDeploy.STOP_REQUEST_PATH)
         if (!f.exists()) return
+        val content = runCatching { f.readText() }.getOrNull()
+        if (!shouldDropStartupStopRequest(content, sessionPid)) {
+            log("Startup: kept stop-request addressed to this pid ($sessionPid)")
+            return
+        }
         val removed = runCatching { f.delete() }.getOrDefault(false)
         log("Startup: dropped pre-arm stop-request (deleted=$removed)")
     }
@@ -919,3 +950,17 @@ internal enum class TeardownStep(val label: String) {
  */
 internal fun isTeardownStepForward(current: TeardownStep?, next: TeardownStep): Boolean =
     current == null || next.ordinal > current.ordinal
+
+/**
+ * issue #180：watchdog 武装前的启动编排——**先清场、再 arm**，顺序不能交换。
+ *
+ * 抽成 top-level 函数是为了让纯 JVM 单测能锁住这条顺序契约（[PipelineServer]
+ * 依赖 Android 运行环境，进不了单测）。清场本身见 `PipelineServer.clearStartupStopRequest`。
+ */
+internal fun armWatchdogWithStartupCleanup(
+    clearStartupStopRequest: () -> Unit,
+    armWatchdog: () -> Unit
+) {
+    clearStartupStopRequest()
+    armWatchdog()
+}

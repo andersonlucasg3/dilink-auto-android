@@ -78,6 +78,23 @@ class VdDeployConstantsTest {
         assertFalse(VdDeploy.gracefulStopCommand.contains("pkill"))
     }
 
+    /**
+     * issue #180：哨兵改为**内容寻址**——命令把引擎 pid 文件的内容抄进哨兵，
+     * pid 文件缺失时退化成空文件（老引擎/老脚本仍按 mtime 判定）。
+     */
+    @Test
+    fun `graceful stop command addresses the running engine by pid with an empty fallback`() {
+        assertEquals("/sdcard/DiLinkAuto/vd-server.pid", VdDeploy.PID_PATH)
+        assertTrue(
+            "必须把 pid 文件内容抄进哨兵: ${VdDeploy.gracefulStopCommand}",
+            VdDeploy.gracefulStopCommand.contains("cat ${VdDeploy.PID_PATH} > ${VdDeploy.STOP_REQUEST_PATH}")
+        )
+        assertTrue(
+            "pid 文件缺失时必须留空文件回退（老客户端兼容）: ${VdDeploy.gracefulStopCommand}",
+            VdDeploy.gracefulStopCommand.contains("|| touch ${VdDeploy.STOP_REQUEST_PATH}")
+        )
+    }
+
     @Test
     fun `probe command prints Y and N not exit codes`() {
         assertTrue(VdDeploy.probeCommand.contains("echo Y"))

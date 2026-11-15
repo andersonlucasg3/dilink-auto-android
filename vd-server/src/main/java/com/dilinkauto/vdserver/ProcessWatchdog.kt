@@ -27,10 +27,12 @@ internal class ProcessWatchdog(
     private val onForceCleanup: () -> Unit,
     private val stopRequestPath: String = VdDeploy.STOP_REQUEST_PATH,
     /**
-     * issue #180：本会话（进程）启动时刻。只有 mtime 不早于它（含
-     * [STOP_REQUEST_MTIME_TOLERANCE_MS] 容差）的哨兵才被当成写给本会话的请求。
+     * issue #180：本会话（进程）启动时刻——旧格式（空/非数字）哨兵的 mtime 回退
+     * 判据。内容带 pid 的哨兵走内容寻址，不看时间。
      */
     private val sessionStartedAtMs: Long = System.currentTimeMillis(),
+    /** issue #180：本进程 pid —— 停止哨兵内容寻址的标识。 */
+    private val sessionPid: String = "",
     private val gracePeriodMs: Long = WATCHDOG_GRACE_MS,
     private val pollIntervalMs: Long = POLL_INTERVAL_MS,
     private val cleanupCheckIntervalMs: Long = CLEANUP_CHECK_INTERVAL_MS,
@@ -57,7 +59,7 @@ internal class ProcessWatchdog(
             // hook，cleanup 会被整体跳过（2026-10-10 MI 9 实测，见 VdDeploy 类头）。
             // 这里置 running=false 后各等待点（accept 轮询 / park 切片 / bind 重试）
             // 会在 ≤100ms 内退出，run() 走到 finally，cleanup 完整执行。
-            if (consumeStopRequest(stopRequestPath, sessionStartedAtMs)) {
+            if (consumeStopRequest(stopRequestPath, sessionStartedAtMs, sessionPid)) {
                 log("Stop request detected ($stopRequestPath) — graceful shutdown")
                 onStopRequested()
                 break
@@ -96,40 +98,73 @@ internal class ProcessWatchdog(
 internal const val STOP_REQUEST_MTIME_TOLERANCE_MS = 1_000L
 
 /**
+ * 解析哨兵的**内容寻址**目标（issue #180）：纯数字内容 = 目标引擎 pid；其余
+ * （空文件、无法解析）= `null`，走 mtime 回退。
+ */
+internal fun stopRequestTargetPid(content: String?): Long? {
+    val t = content?.trim().orEmpty()
+    if (t.isEmpty() || t.any { it !in '0'..'9' }) return null
+    return t.toLongOrNull()
+}
+
+/**
  * 停止哨兵的「会话归属」判定（issue #180）。
  *
- * 哨兵是**全局固定文件名**（`/sdcard/DiLinkAuto/stop-request`），而上一轮会话的
- * 收尾（`vdStopEngine` / `PhoneDisplayRestorer`）可能与本次 launch 并发，请求落在
- * 新引擎「已清场、watchdog 未武装」的初始化窗口里，就会被新引擎当成自己的停止
- * 请求而秒退。因此：mtime 早于本会话启动（扣掉 [STOP_REQUEST_MTIME_TOLERANCE_MS]
- * 的 FUSE 秒级精度容差）的哨兵一律属于上一轮，不是写给本进程的。
- *
- * `fileMtimeMs <= 0`（读不到时间戳）保持引入前的契约——存在即受理：宁可多停一次，
- * 也不要让真停止请求被静默吞掉（那会退化成 12s 后的 -9 强杀、cleanup 被跳过）。
+ * 两级判定，**内容优先**：
+ *  1. 内容寻址（主）：哨兵内容是某个 pid 时，只有等于本进程 pid 才受理。写入方每次
+ *     都 `rm -f; touch`，mtime 永远是新值——旧会话的停止命令晚到（落在
+ *     `createVirtualDisplay`/`bindAndAccept` 期间）只有靠内容才能识别出"不是写给我的"。
+ *  2. mtime + 启动时刻（回退）：内容为空/非数字（老客户端、老脚本、pid 文件写失败）
+ *     时，mtime 早于本会话启动（扣 [STOP_REQUEST_MTIME_TOLERANCE_MS] 容差）判为残留；
+ *     `fileMtimeMs <= 0`（读不到时间戳）按引入前的契约"存在即受理"——宁可多停一次，
+ *     也不要让真停止请求被静默吞掉。
  */
-internal fun isStopRequestForSession(fileMtimeMs: Long, sessionStartedAtMs: Long): Boolean =
-    fileMtimeMs <= 0L || fileMtimeMs + STOP_REQUEST_MTIME_TOLERANCE_MS >= sessionStartedAtMs
+internal fun isStopRequestForSession(
+    content: String?,
+    fileMtimeMs: Long,
+    sessionStartedAtMs: Long,
+    sessionPid: String
+): Boolean {
+    val target = stopRequestTargetPid(content)
+    if (target != null) return target.toString() == sessionPid.trim()
+    return fileMtimeMs <= 0L || fileMtimeMs + STOP_REQUEST_MTIME_TOLERANCE_MS >= sessionStartedAtMs
+}
+
+/**
+ * 启动清场时是否丢弃该哨兵（issue #180）。
+ *
+ * 只有「内容写成本进程 pid」的哨兵才保留——那是初始化窗口内用户按下的真停止；
+ * 其余（空/非数字/写给别的 pid）都是跨会话信号，一律丢弃。
+ */
+internal fun shouldDropStartupStopRequest(content: String?, sessionPid: String): Boolean =
+    stopRequestTargetPid(content)?.toString() != sessionPid.trim()
 
 /**
  * 消费停止哨兵（协议见 [VdDeploy.gracefulStopCommand]）：文件存在**且属于本会话**
  * 则删除并返回 true——删除是给外部的"已受理"信号（可选观察），删不掉也不影响
- * 停止（残留由下一次启动的清场兜底）。不存在、或是上一轮残留都返回 false；残留
- * 顺手删掉，避免它在下一轮再被读到。
+ * 停止（残留由下一次启动的清场兜底）。不存在、或是别人的请求都返回 false。
  *
- * Top-level 且路径/会话起点可注入：vd-server 的单测在纯 JVM 上跑，用临时目录验证
- * "不存在→false / 本会话→true 且被删除 / 上一轮残留→false / 二次调用→false"的契约；
- * watchdog 的线程集成不在单测范围内。
+ * 删除规则（issue #180 评审的 TOCTOU 项）：
+ *  - 受理（本会话）：受理后立即停，此时删掉"更新一点的重复请求"也无副作用；
+ *  - 残留（旧格式 + 早于本进程启动）：删前重读内容，内容变了说明写入方刚重写过
+ *    （`rm -f; touch`），不再删除，留给下一轮判定；
+ *  - 写给**别的 pid**：不删——目标引擎可能还在读。
  */
 internal fun consumeStopRequest(
     path: String = VdDeploy.STOP_REQUEST_PATH,
-    sessionStartedAtMs: Long
+    sessionStartedAtMs: Long,
+    sessionPid: String
 ): Boolean {
     val f = File(path)
     if (!f.exists()) return false
-    if (!isStopRequestForSession(f.lastModified(), sessionStartedAtMs)) {
+    val content = runCatching { f.readText() }.getOrNull()
+    if (isStopRequestForSession(content, f.lastModified(), sessionStartedAtMs, sessionPid)) {
         runCatching { f.delete() }
-        return false
+        return true
     }
-    runCatching { f.delete() }
-    return true
+    if (stopRequestTargetPid(content) == null) {
+        // 旧格式残留：重读确认没被并发重写，避免误删刚写下的真请求。
+        if (runCatching { f.readText() }.getOrNull() == content) runCatching { f.delete() }
+    }
+    return false
 }

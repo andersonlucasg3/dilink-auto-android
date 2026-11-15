@@ -102,15 +102,34 @@ object VdDeploy {
      */
     const val STOP_REQUEST_PATH = "$DIR_PATH/$STOP_REQUEST_NAME"
 
+    /** 引擎 pid 文件名（issue #180）：引擎启动即写入自己的 pid。 */
+    const val PID_NAME = "vd-server.pid"
+
+    /**
+     * 引擎 pid 文件路径（issue #180）：停止哨兵的**内容寻址**标识。
+     *
+     * 引擎启动时把 `Process.myPid()` 写进来；停止方把它的内容抄进
+     * [STOP_REQUEST_PATH]，引擎只受理内容等于自己 pid 的请求。这样"上一轮会话的
+     * 停止命令晚到、落进新引擎的初始化窗口"就不会误杀新会话——mtime 不可靠正是
+     * 因为写入方每次都 `rm -f; touch`，永远产生**新**时间戳。
+     */
+    const val PID_PATH = "$DIR_PATH/$PID_NAME"
+
     /**
      * 请求引擎优雅停止：写哨兵文件，瞬时返回。
      *
      * 命令本身**不做任何等待**（三条 transport 的 shell 超时各不相同，最紧的
      * 只有 5s）——等待由调用方用 [vdAwaitExit] 轮询，超时兜底用
-     * [killCommandForce]。`rm -f` 先清残留，保证 touch 后文件时间戳属于本次请求。
+     * [killCommandForce]。`rm -f` 先清残留，保证文件属于本次请求。
+     *
+     * 内容寻址（issue #180）：优先把 [PID_PATH] 的内容（目标引擎 pid）抄进哨兵；
+     * pid 文件不存在时退化成**空文件**（`rm -f; touch` 的旧形态），引擎侧据此回退
+     * 到 mtime + 启动时刻的旧判定——老客户端/老脚本因此不会被卡死。
      */
     const val gracefulStopCommand =
-        "rm -f $STOP_REQUEST_PATH 2>/dev/null; touch $STOP_REQUEST_PATH 2>/dev/null; exit 0"
+        "rm -f $STOP_REQUEST_PATH 2>/dev/null; " +
+            "(cat $PID_PATH > $STOP_REQUEST_PATH 2>/dev/null) || touch $STOP_REQUEST_PATH 2>/dev/null; " +
+            "exit 0"
 
     /**
      * Liveness probe, output form: prints `Y` when a vd-server process exists,
