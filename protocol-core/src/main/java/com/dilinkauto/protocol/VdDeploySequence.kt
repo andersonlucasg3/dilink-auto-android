@@ -81,6 +81,12 @@ data class VdDeployOutcome(
     val forcedKill: Boolean,
     /** launch() result — see [VdDeployExecutor.launch]. */
     val launched: Boolean,
+    /**
+     * 本次会话的 token（issue #180 第三版）。调用方必须记住它：会话收尾时用
+     * [VdDeploy.gracefulStopCommand]`(sessionToken)` 停止本会话，不能回读设备状态
+     * （那时设备上可能已经是下一代引擎的标识）。
+     */
+    val sessionToken: String = ""
 )
 
 /** Shared timing/convergence constants for the deploy sequence. */
@@ -162,13 +168,51 @@ suspend fun vdAwaitExit(
  */
 suspend fun vdStopEngine(
     executor: VdDeployExecutor,
+    /**
+     * 本会话的 token（issue #180 第三版）。**必须**是部署时记住的那一个：停止
+     * 请求要写进本会话专属的哨兵，回读设备状态只会读到下一代引擎。
+     * null = 旧格式（固定名 + mtime），供没有 token 的老路径使用。
+     */
+    sessionToken: String? = null,
     gracefulTimeoutMs: Long = VdDeploySequence.GRACEFUL_EXIT_TIMEOUT_MS,
     timeoutMs: Long = VdDeploySequence.EXIT_WAIT_TIMEOUT_MS,
     pollMs: Long = VdDeploySequence.EXIT_WAIT_POLL_MS,
     now: () -> Long = System::currentTimeMillis,
     sleep: suspend (Long) -> Unit = { delay(it) },
+): Boolean = stopEngineWith(
+    executor,
+    VdDeploy.gracefulStopCommand(sessionToken),
+    gracefulTimeoutMs, timeoutMs, pollMs, now, sleep
+)
+
+/**
+ * 停止**当前在跑的引擎**（token 未知）。只允许用在"新引擎还没启动"的位置——
+ * 也就是 [vdRunDeploySequence] 的启动前置清场；见 [VdDeploy.gracefulStopAnyCommand]。
+ */
+private suspend fun vdStopAnyEngine(
+    executor: VdDeployExecutor,
+    gracefulTimeoutMs: Long,
+    timeoutMs: Long,
+    pollMs: Long,
+    now: () -> Long,
+    sleep: suspend (Long) -> Unit,
+): Boolean = stopEngineWith(
+    executor,
+    VdDeploy.gracefulStopAnyCommand,
+    gracefulTimeoutMs, timeoutMs, pollMs, now, sleep
+)
+
+/** [vdStopEngine] / 启动前置清场共用的收敛实现（只有停止命令的来源不同）。 */
+private suspend fun stopEngineWith(
+    executor: VdDeployExecutor,
+    stopCommand: String,
+    gracefulTimeoutMs: Long,
+    timeoutMs: Long,
+    pollMs: Long,
+    now: () -> Long,
+    sleep: suspend (Long) -> Unit,
 ): Boolean {
-    executor.shellSync(VdDeploy.gracefulStopCommand)
+    executor.shellSync(stopCommand)
     if (vdAwaitExit(executor, gracefulTimeoutMs, pollMs, now = now, sleep = sleep)) return false
     // 引擎没有响应哨兵（卡死 / 旧版引擎）：-9 强杀兜底。强杀路径接受
     // cleanup 被跳过的代价——watchdog 与 pre-clean 的兜底另算。
@@ -180,9 +224,12 @@ suspend fun vdStopEngine(
 /**
  * The unified deploy sequence:
  *
- *  1. [vdStopEngine] — 哨兵停旧引擎（graceful → 超时强杀），让旧引擎走正常
- *     退出路径、**把 cleanup 完整跑完**；
+ *  1. [vdStopAnyEngine] — 停"当前在跑的引擎"（token 未知，读设备上的会话文件）；
  *  2. [VdDeploy.DeployPlan.launchCommand] — launch the replacement.
+ *
+ * 第 1 步**不能**用本次 plan 的 token：新引擎还没启动，写进它的专属哨兵只会让
+ * 它启动后立刻读到自己的停止请求、整段会话不足 1 秒（issue #180 的原始症状）。
+ * 会话收尾走 [vdStopEngine]`(sessionToken)`，调用方用自己记住的 token。
  *
  * 为什么不用 SIGTERM：**Android ART 的 app_process 收到 SIGTERM 直接终止，
  * 不执行 JVM shutdown hook**（2026-10-10 MI 9 实测：进程 1 秒内消失、
@@ -203,7 +250,11 @@ suspend fun vdRunDeploySequence(
     now: () -> Long = System::currentTimeMillis,
     sleep: suspend (Long) -> Unit = { delay(it) },
 ): VdDeployOutcome {
-    val forcedKill = vdStopEngine(executor, gracefulTimeoutMs, timeoutMs, pollMs, now = now, sleep = sleep)
+    val forcedKill = vdStopAnyEngine(executor, gracefulTimeoutMs, timeoutMs, pollMs, now, sleep)
     val launched = executor.launch(plan.launchCommand)
-    return VdDeployOutcome(forcedKill = forcedKill, launched = launched)
+    return VdDeployOutcome(
+        forcedKill = forcedKill,
+        launched = launched,
+        sessionToken = plan.sessionToken
+    )
 }

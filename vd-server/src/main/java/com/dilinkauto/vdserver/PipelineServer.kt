@@ -65,7 +65,14 @@ class PipelineServer(
      * 的建屏恢复里生效，约束 `ensureContent` 不得把白名单外的应用拉进 VD。
      * 空集合 = 部署端没下传（车机/桌面 ADB 路径），行为与引入前一致。
      */
-    private val allowedPackages: Set<String> = emptySet()
+    private val allowedPackages: Set<String> = emptySet(),
+    /**
+     * issue #180 第三版：本次会话的 token（部署方生成、经 argv 第 11 槽下传）。
+     *
+     * 非空时只监听 `stop-request-<token>`；空 = 旧客户端/老脚本，回退固定名
+     * `stop-request` + mtime。见 [VdDeploy] 类头"会话归属"。
+     */
+    private val sessionToken: String = ""
 ) {
     /**
      * S-L2：fps 来自 argv，可能是遗留/被手改的 pref（含 0）。`1_000_000_000L / 0`
@@ -87,12 +94,19 @@ class PipelineServer(
     private val sessionStartedAtMs = System.currentTimeMillis()
 
     /**
-     * issue #180：本进程 pid —— 停止哨兵的内容寻址标识。
+     * issue #180：本进程 pid —— 旧格式哨兵的**内容寻址**标识。
      *
-     * 启动时写进 [VdDeploy.PID_PATH]，停止方把它抄进哨兵；引擎只受理内容等于自己
-     * pid 的请求，mtime 只作为旧格式（空/非数字）的回退判据。
+     * 启动时写进 [VdDeploy.PID_PATH]，旧格式停止方把它抄进哨兵；没有 token 的引擎
+     * 只受理内容等于自己 pid 的请求，mtime 只作为空内容（空文件）的回退判据。
      */
     private val sessionPid: String = android.os.Process.myPid().toString()
+
+    /**
+     * issue #180 第三版：本会话监听的哨兵路径。
+     *
+     * 有 token → `stop-request-<token>`（角色由文件名决定）；无 token → 旧格式固定名。
+     */
+    private val stopRequestPath: String = VdDeploy.stopRequestPath(sessionToken)
     @Volatile private var running = true
     private val cleanupStarted = AtomicBoolean(false)
     private val cleanupFinished = AtomicBoolean(false)
@@ -163,6 +177,8 @@ class PipelineServer(
         },
         log = { log(it) },
         err = { err(it) },
+        sessionToken = sessionToken,
+        stopRequestPath = stopRequestPath,
         sessionStartedAtMs = sessionStartedAtMs,
         sessionPid = sessionPid
     )
@@ -269,9 +285,18 @@ class PipelineServer(
             val carHost = args.getOrNull(8)?.takeIf { it.isNotBlank() && it != VdDeployArgs.CAR_HOST_ANY }
             // issue #21：第 10 个槽位是「允许上车的应用」逗号清单，`-`/缺省 = 不过滤。
             val allowed = VdDeployArgs.parseAllowedPackages(args.getOrNull(9))
+            // issue #180 第三版：第 11 个槽位是本次会话的 token，`-`/缺省 = 旧格式固定名。
+            val sessionToken = VdDeployArgs.parseSessionToken(args.getOrNull(10))
             log("Starting: VD=${w}x${h} @${d}dpi, encode=${ew}x${eh}, phoneHost=$ph, fps=$f, bitrate=${br/1_000_000}M, carHost=${carHost ?: "ANY"}")
             log("Allowlist: ${if (allowed.isEmpty()) "not handed down (no recents filtering)" else "${allowed.size} packages"}")
-            PipelineServer(w, h, d, ph, ew, eh, f, br, carHost, allowed).run()
+            log(
+                "Stop sentinel: " + if (sessionToken.isEmpty()) {
+                    "${VdDeploy.STOP_REQUEST_PATH} (legacy, mtime + pid addressing)"
+                } else {
+                    "${VdDeploy.stopRequestPath(sessionToken)} (this session only)"
+                }
+            )
+            PipelineServer(w, h, d, ph, ew, eh, f, br, carHost, allowed, sessionToken).run()
         }
         private fun log(msg: String) = PipeLog.log(msg)
         private fun err(msg: String) = PipeLog.err(msg)
@@ -279,9 +304,9 @@ class PipelineServer(
 
     fun run() {
         Runtime.getRuntime().addShutdownHook(Thread({ cleanup() }, "ShutdownHook"))
-        // issue #180：第一步就发布本进程 pid，让停止方能把请求寻址到具体引擎。
-        // 放在 EGL/编码器初始化之前——初始化窗口内的真停止请求也能被识别。
-        publishPidFile()
+        // issue #180：第一步就发布本进程标识（pid + token，原子写），让停止方能把请求
+        // 投递到具体会话。放在 EGL/编码器初始化之前——初始化窗口内的真停止请求也能被识别。
+        publishSessionFiles()
         try {
             touchInjector.initInputManager()
             shell.start()
@@ -316,23 +341,24 @@ class PipelineServer(
             // S-M9: arm the watchdog only now, i.e. after the main thread is guaranteed to
             // be unblocked. Armed before the await it could only observe running=true.
             //
-            // issue #180：清场必须紧跟武装之前，而不是 run() 开头。
+            // issue #180：启动编排是**清场 → 武装 → 建屏**（见 [runStartupSequence]）。
             //
-            // 清场放在 run() 开头时，它与 `startWatchdog()` 之间隔着一整段
-            // setupEncoder + EGL/GL 初始化（上限 10s）；上一轮会话的收尾
-            // （`vdStopEngine` / `PhoneDisplayRestorer`）若与本次 launch 并发，哨兵就
-            // 会落进这段「已清过场、watchdog 还没开始读」的窗口，被新引擎当成自己的
-            // 停止请求（现场日志：`EGL/GL ready, VD input surface created` 的下一行就是
+            // 清场必须紧跟武装之前，而不是 run() 开头：放开头时它与 `startWatchdog()`
+            // 之间隔着一整段 setupEncoder + EGL/GL 初始化（上限 10s），上一轮会话的收尾
+            // 若与本次 launch 并发，哨兵就会落进「已清过场、watchdog 还没开始读」的窗口
+            // （现场日志：`EGL/GL ready, VD input surface created` 的下一行就是
             // `Stop request detected ... graceful shutdown`，整段会话不足 1 秒）。
             //
             // watchdog 开始轮询之前，本进程还没有任何可被停止的会话，因此此刻盘上的
-            // 哨兵一律清掉 —— 但**内容写给本进程 pid** 的除外（那是初始化窗口里用户
-            // 按下的真停止，见 [shouldDropStartupStopRequest]）。
-            armWatchdogWithStartupCleanup(
+            // **旧格式**哨兵一律清掉 —— 内容写给本进程 pid 的除外（那是初始化窗口里
+            // 用户按下的真停止，见 [shouldDropStartupStopRequest]）。会话专属哨兵
+            // （`stop-request-<token>`）不删：只有持有本会话 token 的部署方会写它。
+            val vdReady = runStartupSequence(
                 clearStartupStopRequest = { clearStartupStopRequest() },
-                armWatchdog = { startWatchdog() }
+                armWatchdog = { startWatchdog() },
+                createVirtualDisplay = { createVirtualDisplay() }
             )
-            if (!createVirtualDisplay()) { running = false; err("Fatal: failed to create VD"); return }
+            if (!vdReady) { running = false; err("Fatal: failed to create VD"); return }
             val conns = bindAndAccept() ?: run { running = false; return }
             startLifecycleReader(conns.phoneChannel)
             startTouchReader(conns.carInput)
@@ -690,34 +716,88 @@ class PipelineServer(
     }
 
     /**
-     * issue #180：把本进程 pid 发布到 [VdDeploy.PID_PATH]。
+     * issue #180：把本进程的标识发布到共享存储（原子写，评审第 2 条）。
      *
-     * 停止方的 [VdDeploy.gracefulStopCommand] 会把它抄进哨兵，实现"请求内容到会话"
-     * 的绑定。写失败不致命：哨兵退化成空文件，两边都回落到 mtime + 启动时刻的旧判定。
+     *  - [VdDeploy.PID_PATH]：本进程 pid，旧格式停止方的内容寻址标识；
+     *  - [VdDeploy.SESSION_TOKEN_PATH]：本会话 token，供"停掉当前引擎"（启动前置
+     *    清场）读取——只有 token 非空时才写。
+     *
+     * 写失败不致命：旧格式停止方退化成空文件（mtime 判定），新客户端则靠文件名
+     * 归属，两者仍能停。
      */
-    private fun publishPidFile() {
-        val ok = runCatching { File(VdDeploy.PID_PATH).writeText(sessionPid) }.isSuccess
-        if (!ok) {
-            err("Startup: failed to publish ${VdDeploy.PID_PATH} — stop requests fall back to legacy mtime mode")
+    private fun publishSessionFiles() {
+        val pidOk = writeTextAtomically(VdDeploy.PID_PATH, sessionPid)
+        if (!pidOk) {
+            err("Startup: failed to publish ${VdDeploy.PID_PATH} — legacy stop requests fall back to mtime mode")
+        }
+        if (VdDeploy.isValidSessionToken(sessionToken)) {
+            val tokenOk = writeTextAtomically(VdDeploy.SESSION_TOKEN_PATH, sessionToken)
+            if (!tokenOk) {
+                err("Startup: failed to publish ${VdDeploy.SESSION_TOKEN_PATH} — pre-launch cleanup cannot target this session")
+            }
         }
     }
 
     /**
      * issue #180：watchdog 武装前的清场——删掉不属于本会话的停止哨兵。
      *
-     * 调用点必须紧跟 [startWatchdog]（顺序由 [armWatchdogWithStartupCleanup] 锁定）。
-     * 内容写成本进程 pid 的哨兵**保留**：那是初始化窗口内用户按下的真停止。
+     * 调用点由 [runStartupSequence] 固定在 [startWatchdog] 之前。
+     *
+     *  - 会话专属哨兵（[stopRequestPath] 是 `stop-request-<token>`）：**保留**，
+     *    只有持有本会话 token 的部署方会写它（初始化窗口里的真停止）。
+     *  - 旧格式固定名：token 模式下本会话根本不读它，盘上残留直接清掉；旧格式模式
+     *    下按 [shouldDropStartupStopRequest] 判定（内容写给本进程 pid 的保留）。
+     *  - token 模式顺手清掉上一轮会话的 `stop-request-<旧 token>`（它们的引擎已退出，
+     *    永远不会有人消费）。
      */
     private fun clearStartupStopRequest() {
-        val f = File(VdDeploy.STOP_REQUEST_PATH)
+        if (VdDeploy.isValidSessionToken(sessionToken)) {
+            dropFiles(
+                "legacy/other-session sentinels (not read by this token session)",
+                listOf(File(VdDeploy.STOP_REQUEST_PATH)) +
+                    otherSessionSentinelFiles()
+            )
+            return
+        }
+        val f = File(stopRequestPath)
         if (!f.exists()) return
         val content = runCatching { f.readText() }.getOrNull()
-        if (!shouldDropStartupStopRequest(content, sessionPid)) {
+        if (!shouldDropStartupStopRequest(content, sessionPid, sessionToken)) {
             log("Startup: kept stop-request addressed to this pid ($sessionPid)")
             return
         }
         val removed = runCatching { f.delete() }.getOrDefault(false)
         log("Startup: dropped pre-arm stop-request (deleted=$removed)")
+    }
+
+    /** 本会话以外的 `stop-request-<token>` 残留（token 模式下由 [clearStartupStopRequest] 清掉）。 */
+    private fun otherSessionSentinelFiles(): List<File> {
+        val own = File(stopRequestPath).name
+        val dir = File(VdDeploy.DIR_PATH)
+        val prefix = "${VdDeploy.STOP_REQUEST_PREFIX}-"
+        return dir.listFiles { f ->
+            f.isFile && f.name.startsWith(prefix) && f.name != own
+        }?.toList().orEmpty()
+    }
+
+    private fun dropFiles(reason: String, files: List<File>) {
+        if (files.isEmpty()) return
+        val removed = files.count { runCatching { it.delete() }.getOrDefault(false) }
+        log("Startup: dropped $removed $reason")
+    }
+
+    /**
+     * issue #180：收尾时撤掉本会话发布在共享存储上的标识（评审第 2 条：原来只写不删）。
+     *
+     * 只删**内容仍属于本进程**的文件：下一代引擎可能已经启动并发布了自己的 pid/token，
+     * 无条件删除会把它的标识抹掉（见 [deleteIfContentMatches]）。
+     */
+    private fun removeSessionFiles() {
+        deleteIfContentMatches(VdDeploy.PID_PATH, sessionPid)
+        if (VdDeploy.isValidSessionToken(sessionToken)) {
+            deleteIfContentMatches(VdDeploy.SESSION_TOKEN_PATH, sessionToken)
+        }
+        runCatching { File(stopRequestPath).delete() }
     }
 
     /**
@@ -891,6 +971,9 @@ class PipelineServer(
         mark(TeardownStep.GL_RELEASED)
         virtualDisplay?.let { try { it.release() } catch (_: Exception) {} }
         mark(TeardownStep.VIRTUAL_DISPLAY_RELEASED)
+        // issue #180：撤掉本会话发布在共享存储上的 pid / token，避免"上一轮标识"被下一轮
+        // 的停止方读到（同时只在内容仍属于本进程时才删，见 removeSessionFiles）。
+        removeSessionFiles()
         mark(TeardownStep.COMPLETE)
         log("Cleanup complete")
         cleanupFinished.set(true)
@@ -952,15 +1035,23 @@ internal fun isTeardownStepForward(current: TeardownStep?, next: TeardownStep): 
     current == null || next.ordinal > current.ordinal
 
 /**
- * issue #180：watchdog 武装前的启动编排——**先清场、再 arm**，顺序不能交换。
+ * issue #180：watchdog 武装前后的启动编排 —— **清场 → 武装 → 建屏**，顺序不能交换。
  *
  * 抽成 top-level 函数是为了让纯 JVM 单测能锁住这条顺序契约（[PipelineServer]
- * 依赖 Android 运行环境，进不了单测）。清场本身见 `PipelineServer.clearStartupStopRequest`。
+ * 依赖 Android 运行环境，进不了单测）：
+ *  - 清场必须在 arm 之前，否则 arm 之后、清场之前落盘的旧会话哨兵会被当成自己的；
+ *  - 建屏必须在 arm 之后，否则建屏期（EGL/编码器/VD，上限 10s）里没人消费真停止
+ *    请求，用户按下的停止会被拖到建屏结束才生效。
+ *
+ * 清场本身见 `PipelineServer.clearStartupStopRequest`，建屏见
+ * `PipelineServer.createVirtualDisplay`。
  */
-internal fun armWatchdogWithStartupCleanup(
+internal fun runStartupSequence(
     clearStartupStopRequest: () -> Unit,
-    armWatchdog: () -> Unit
-) {
+    armWatchdog: () -> Unit,
+    createVirtualDisplay: () -> Boolean
+): Boolean {
     clearStartupStopRequest()
     armWatchdog()
+    return createVirtualDisplay()
 }

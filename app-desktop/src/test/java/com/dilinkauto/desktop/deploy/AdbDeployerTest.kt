@@ -52,7 +52,9 @@ class AdbDeployerTest {
             val command = args.getOrNull(3)
             return when {
                 args.firstOrNull() == "connect" -> connectResult
-                command == VdDeploy.gracefulStopCommand -> true
+                // 停止命令有两份：启动前置清场（读会话文件）与会话收尾（写自己那份）。
+                command == VdDeploy.gracefulStopAnyCommand -> true
+                command?.startsWith("p=") == true -> true
                 command == VdDeploy.probeExitCodeCommand -> probeAlive()
                 command == VdDeploy.killCommandForce -> true
                 args.lastOrNull()?.contains("app_process") == true -> launchResult
@@ -91,8 +93,8 @@ class AdbDeployerTest {
 
         assertTrue(ok)
         val shells = runner.shellCommands()
-        // 优雅停止（哨兵文件）→ 探活 ×2（连续两次"已退出"） → launch
-        assertEquals(listOf(VdDeploy.gracefulStopCommand, VdDeploy.probeExitCodeCommand, VdDeploy.probeExitCodeCommand), shells.dropLast(1))
+        // 启动前置清场（读设备会话文件定 token）→ 探活 ×2（连续两次"已退出"） → launch
+        assertEquals(listOf(VdDeploy.gracefulStopAnyCommand, VdDeploy.probeExitCodeCommand, VdDeploy.probeExitCodeCommand), shells.dropLast(1))
         assertTrue("最后一条应是启动命令: ${shells.last()}", shells.last().contains("exec app_process"))
 
         // 启动命令必须保持前台（waitForExit=false），否则 adb shell 流一关引擎就被回收
@@ -166,10 +168,13 @@ class AdbDeployerTest {
         val stopped = deployer.gracefulStop {}
 
         assertTrue(stopped)
-        // 收尾阶段 = 启动命令（app_process）之后的全部 shell 命令
+        // 收尾阶段 = 启动命令（app_process）之后的全部 shell 命令。
+        // 收尾哨兵必须用**本次部署**的 token（不是回读设备）—— issue #180 第三版。
+        val token = deployer.lastSessionToken
+        assertTrue("部署必须记住会话 token: $token", !token.isNullOrBlank())
         val teardownShells = runner.shellCommands().dropWhile { !it.contains("app_process") }.drop(1)
         assertEquals(
-            listOf(VdDeploy.gracefulStopCommand, VdDeploy.probeExitCodeCommand, VdDeploy.probeExitCodeCommand),
+            listOf(VdDeploy.gracefulStopCommand(token), VdDeploy.probeExitCodeCommand, VdDeploy.probeExitCodeCommand),
             teardownShells,
         )
     }

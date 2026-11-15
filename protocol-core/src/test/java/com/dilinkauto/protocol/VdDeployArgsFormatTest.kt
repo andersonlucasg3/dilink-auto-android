@@ -8,21 +8,22 @@ import org.junit.Test
 /**
  * VdDeployArgs.format / coerceDpiOverride 单测。
  * （sanitizeCarHost 与"默认 carHost='-'"已由 AuditProtocolFixesTest 覆盖，这里只补
- * 精确 10 字段布局、等比缩放钳制、bitrate 边界、allowlist 槽位（issue #21）。）
+ * 精确 11 字段布局、等比缩放钳制、bitrate 边界、allowlist 槽位（issue #21）与
+ * 会话 token 槽位（issue #180 第三版）。）
  *
  * format 是 PipelineServer.main() 的 argv 契约，字段顺序/钳制一旦漂移，部署参数就错位。
  */
 class VdDeployArgsFormatTest {
 
     @Test
-    fun `format emits exact ten field layout with empty allowlist sentinel`() {
+    fun `format emits exact eleven field layout with empty trailing sentinels`() {
         val out = VdDeployArgs.format(
             vdWidth = 1280, vdHeight = 720, dpi = 160, phoneHost = "127.0.0.1",
             encodeWidth = 1280, encodeHeight = 720, fps = 24,
             bitrate = 4_000_000, carHost = "10.0.0.7"
         )
-        assertEquals("1280 720 160 127.0.0.1 1280 720 24 4000000 10.0.0.7 -", out)
-        assertEquals(10, out.split(" ").size)
+        assertEquals("1280 720 160 127.0.0.1 1280 720 24 4000000 10.0.0.7 - -", out)
+        assertEquals(11, out.split(" ").size)
     }
 
     @Test
@@ -34,10 +35,10 @@ class VdDeployArgsFormatTest {
             allowedPackages = listOf("com.autonavi.minimap", "com.baidu.BaiduMap")
         )
         assertEquals(
-            "1280 720 160 127.0.0.1 1280 720 24 4000000 10.0.0.7 com.autonavi.minimap,com.baidu.BaiduMap",
+            "1280 720 160 127.0.0.1 1280 720 24 4000000 10.0.0.7 com.autonavi.minimap,com.baidu.BaiduMap -",
             out
         )
-        assertEquals(10, out.split(" ").size)
+        assertEquals(11, out.split(" ").size)
     }
 
     @Test
@@ -47,8 +48,31 @@ class VdDeployArgsFormatTest {
             1280, 720, 160, "127.0.0.1", 1280, 720, 24,
             allowedPackages = listOf("com.autonavi.minimap; rm -rf /", "com.baidu.BaiduMap", " ", "com.baidu.BaiduMap")
         )
-        assertEquals("com.baidu.BaiduMap", out.split(" ").last())
-        assertEquals(10, out.split(" ").size)
+        assertEquals("com.baidu.BaiduMap", out.split(" ")[9])
+        assertEquals(11, out.split(" ").size)
+    }
+
+    @Test
+    fun `format appends the session token as the eleventh field`() {
+        val out = VdDeployArgs.format(
+            vdWidth = 1280, vdHeight = 720, dpi = 160, phoneHost = "127.0.0.1",
+            encodeWidth = 1280, encodeHeight = 720, fps = 24,
+            sessionToken = "AbC123xy"
+        )
+        assertEquals("AbC123xy", out.split(" ")[10])
+
+        // 非法 token（含 shell 元字符 / 空 / "-"）一律退化成未传哨兵：它会进设备侧 shell
+        // 行、也会被拼成哨兵文件名。
+        for (bad in listOf("a b", "a;reboot", "", "-", "a".repeat(65), "../etc/passwd")) {
+            assertEquals(
+                "非法 token 必须退化成 ${VdDeployArgs.SESSION_TOKEN_ANY}: $bad",
+                VdDeployArgs.SESSION_TOKEN_ANY,
+                VdDeployArgs.sanitizeSessionToken(bad)
+            )
+        }
+        assertEquals("AbC123xy", VdDeployArgs.parseSessionToken("AbC123xy"))
+        assertEquals("", VdDeployArgs.parseSessionToken("-"))
+        assertEquals("", VdDeployArgs.parseSessionToken(null))
     }
 
     @Test
@@ -98,10 +122,11 @@ class VdDeployArgsFormatTest {
         // encodeWidth/Height=0 → scale 仍为 1（除以 0f 得 Inf，被 minOf 排除），不崩，EW/EH=0
         val out = VdDeployArgs.format(1280, 720, 160, "127.0.0.1", encodeWidth = 0, encodeHeight = 0, fps = 24)
         val f = out.split(" ")
-        assertEquals(10, f.size)
+        assertEquals(11, f.size)
         assertEquals("0", f[4])
         assertEquals("0", f[5])
         assertEquals("-", f[9])
+        assertEquals("-", f[10])
     }
 
     @Test

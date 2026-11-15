@@ -22,13 +22,32 @@ package com.dilinkauto.protocol
  * cleanup 只在**正常退出路径**（main 线程的 `run()` finally）可靠执行——
  * socket 断开、绑定超时等都走这条路。因此停止协议改为**文件哨兵**：
  *
- *  1. [gracefulStopCommand] — 写 [STOP_REQUEST_PATH]（瞬时返回）；
+ *  1. [gracefulStopCommand] — 写**本会话专属**的哨兵文件 `stop-request-<token>`
+ *     （瞬时返回）；
  *  2. 引擎的 watchdog 轮询到该文件后消费它（删除）并置 `running=false`，
  *     于是所有等待点退出、`run()` 走到 finally、cleanup 完整跑完；
  *  3. 外部轮询等待进程真正退出（[vdAwaitExit]）；超时才用
  *     [killCommandForce] 兜底 —— 强杀路径接受"cleanup 被跳过"的代价。
  *
- * 引擎启动时也会删除残留哨兵（防上一轮未消费的信号误杀新实例）。
+ * ── 会话归属：per-session 哨兵名（issue #180 第三版）──
+ *
+ * 固定文件名 `stop-request` 挡不住"上一轮会话的收尾晚到"：内容寻址也不行 ——
+ * 写入方在**停止那一刻**才去读引擎标识，读到的往往已经是新引擎（`run()` 第一行
+ * 就发布 pid 文件），请求于是被投递给新会话、新引擎秒退。所以哨兵名按会话区分：
+ *
+ *  - 部署方在启动时生成 token（[newSessionToken]），经 argv 第 11 槽传给引擎；
+ *  - 引擎只监听 [stopRequestPath]`(token)`；本会话收尾用**自己记住的 token** 写
+ *    哨兵（[gracefulStopCommand]），旧会话的 token 落在别的文件名上，天然无效；
+ *  - 「启动前置清场」要停的是"当前在跑的、token 未知的引擎"，读设备上的
+ *    [SESSION_TOKEN_PATH]（[gracefulStopAnyCommand]）—— 那一刻新引擎还不存在，
+ *    这个"晚读"是安全的；
+ *  - 没有 token 的引擎（老客户端 / 老脚本 / e2e）回退固定名 + mtime：内容为空或
+ *    非数字时按"mtime 不早于本会话启动"判定。
+ *
+ * 写入一律是"同目录 temp + `mv`"（原子替换）：`rm -f; cat > 哨兵` 会让并发读者
+ * 读到空半成品，进而回落到 mtime 分支。
+ *
+ * 引擎启动时也会清掉旧格式残留哨兵（防上一轮未消费的信号误杀新实例）。
  *
  * [killCommand]（裸 SIGTERM）**不再用于部署序列**——在 ART 上它等同于
  * SIGKILL 但少一层"明确表态"；保留常量仅供手动排查/调试。
@@ -91,14 +110,18 @@ object VdDeploy {
     /** Force kill (-9). The only kill signal with well-defined semantics on ART. */
     val killCommandForce: String get() = killByPid("-9")
 
-    /** 停止哨兵文件名（见类头"如何停止引擎"）。 */
-    const val STOP_REQUEST_NAME = "stop-request"
+    /** 停止哨兵文件名前缀（见类头"会话归属"）。旧格式 = 无 token 时直接用这个名字。 */
+    const val STOP_REQUEST_PREFIX = "stop-request"
+
+    /** 旧格式（无 token）停止哨兵文件名。 */
+    const val STOP_REQUEST_NAME = STOP_REQUEST_PREFIX
 
     /**
-     * 停止哨兵文件路径。外部（部署序列 / PhoneDisplayRestorer）写它表示
-     * "请优雅退出"；引擎的 watchdog 轮询它、消费（删除）它、然后走正常退出
-     * 路径跑完整 cleanup。放在 [DIR_PATH] 下：app_process(shell UID)、
-     * adb shell、Shizuku 三个身份都有读写权限。
+     * 旧格式停止哨兵路径。**没有 token 的引擎**（老客户端 / 老脚本 / e2e）监听它；
+     * 新部署的引擎改听 [stopRequestPath]`(token)`，这个文件只剩兼容意义。
+     *
+     * 放在 [DIR_PATH] 下：app_process(shell UID)、adb shell、Shizuku 三个身份都有
+     * 读写权限。
      */
     const val STOP_REQUEST_PATH = "$DIR_PATH/$STOP_REQUEST_NAME"
 
@@ -106,30 +129,96 @@ object VdDeploy {
     const val PID_NAME = "vd-server.pid"
 
     /**
-     * 引擎 pid 文件路径（issue #180）：停止哨兵的**内容寻址**标识。
+     * 引擎 pid 文件路径（issue #180）：旧格式哨兵的**内容寻址**标识。
      *
-     * 引擎启动时把 `Process.myPid()` 写进来；停止方把它的内容抄进
-     * [STOP_REQUEST_PATH]，引擎只受理内容等于自己 pid 的请求。这样"上一轮会话的
-     * 停止命令晚到、落进新引擎的初始化窗口"就不会误杀新会话——mtime 不可靠正是
-     * 因为写入方每次都 `rm -f; touch`，永远产生**新**时间戳。
+     * 引擎启动时把 `Process.myPid()` 写进来；旧格式停止方把它的内容抄进
+     * [STOP_REQUEST_PATH]，引擎据此区分"写给自己的"和"上一轮残留的"请求。
+     * 这条判据只对**没有 token** 的会话（旧客户端）生效 —— 它挡不住"停止那一刻
+     * 才去读 pid"的晚读（读到的已经是新引擎），所以新客户端改走 per-session 哨兵名。
      */
     const val PID_PATH = "$DIR_PATH/$PID_NAME"
 
+    /** 会话 token 文件名：引擎启动时把自己的 token 写进来，供"停掉当前引擎"读。 */
+    const val SESSION_TOKEN_NAME = "vd-server.session"
+
     /**
-     * 请求引擎优雅停止：写哨兵文件，瞬时返回。
+     * 会话 token 文件路径（issue #180 第三版）。
      *
-     * 命令本身**不做任何等待**（三条 transport 的 shell 超时各不相同，最紧的
-     * 只有 5s）——等待由调用方用 [vdAwaitExit] 轮询，超时兜底用
-     * [killCommandForce]。`rm -f` 先清残留，保证文件属于本次请求。
-     *
-     * 内容寻址（issue #180）：优先把 [PID_PATH] 的内容（目标引擎 pid）抄进哨兵；
-     * pid 文件不存在时退化成**空文件**（`rm -f; touch` 的旧形态），引擎侧据此回退
-     * 到 mtime + 启动时刻的旧判定——老客户端/老脚本因此不会被卡死。
+     * 只有 [gracefulStopAnyCommand]（启动前置清场）读它：那一刻要停的是"当前在跑的
+     * 引擎"、token 未知，而新引擎还没启动，所以晚读是安全的；本会话收尾一律用
+     * 调用方记住的 token，绝不回读这里。
      */
-    const val gracefulStopCommand =
-        "rm -f $STOP_REQUEST_PATH 2>/dev/null; " +
-            "(cat $PID_PATH > $STOP_REQUEST_PATH 2>/dev/null) || touch $STOP_REQUEST_PATH 2>/dev/null; " +
-            "exit 0"
+    const val SESSION_TOKEN_PATH = "$DIR_PATH/$SESSION_TOKEN_NAME"
+
+    /** token 允许的字符集：只允许能安全进文件名的字符（长度 1..64）。 */
+    private val SESSION_TOKEN_REGEX = Regex("[A-Za-z0-9_-]{1,64}")
+
+    /**
+     * token 是否可用来拼哨兵名。
+     *
+     * `-`（argv 里的"未传"哨兵）必须判为非法：否则会拼出 `stop-request--`。
+     */
+    fun isValidSessionToken(token: String?): Boolean {
+        val t = token?.trim().orEmpty()
+        return t.isNotEmpty() && t != "-" && SESSION_TOKEN_REGEX.matches(t)
+    }
+
+    /**
+     * 生成本次会话的 token（部署时生成、随 argv 传给引擎）。
+     *
+     * UUID 去掉连字符：32 个十六进制字符，落在 [SESSION_TOKEN_REGEX] 内，
+     * 且不需要时钟/随机源注入即可保证跨会话不撞名。
+     */
+    fun newSessionToken(): String = java.util.UUID.randomUUID().toString().replace("-", "")
+
+    /** 会话专属哨兵文件名；token 非法/缺失 → 旧格式固定名。 */
+    fun stopRequestName(token: String? = null): String =
+        if (isValidSessionToken(token)) "$STOP_REQUEST_PREFIX-${token!!.trim()}" else STOP_REQUEST_NAME
+
+    /** 会话专属（或旧格式）哨兵文件路径。 */
+    fun stopRequestPath(token: String? = null): String = "$DIR_PATH/${stopRequestName(token)}"
+
+    /**
+     * 把请求**原子地**落进哨兵：同目录 `temp` + `mv`。
+     *
+     * 不能写成 `rm -f 哨兵; cat > 哨兵`：并发读者会在两个命令之间看到"文件不存在"、
+     * 或读到被清空后的半成品，于是回落到 mtime 分支（旧格式判定）—— 这正是评审里
+     * 那条 TOCTOU。`mv` 是同目录 rename，替换是原子的，读者要么看到旧文件、要么
+     * 看到完整的新文件。
+     *
+     * 内容仍是 [PID_PATH] 的内容（旧格式引擎还需内容寻址）；pid 文件缺失时留空文件
+     * （旧格式的 mtime 回退）。命令**不做任何等待**：三条 transport 的 shell 超时
+     * 最紧只有 5s，等待与 -9 兜底都在 Kotlin 侧（[vdAwaitExit]）。
+     */
+    private fun atomicSentinelWrite(): String =
+        "tmp=\"\$p.tmp.\$\$\"; rm -f \"\$tmp\" 2>/dev/null; " +
+            "(cat $PID_PATH > \"\$tmp\" 2>/dev/null) || touch \"\$tmp\" 2>/dev/null; " +
+            "mv -f \"\$tmp\" \"\$p\" 2>/dev/null; exit 0"
+
+    /**
+     * 请求**指定会话**的引擎优雅停止：写它专属的哨兵文件，瞬时返回。
+     *
+     * @param sessionToken 本次会话启动时记住的 token。旧客户端/老脚本传 null，
+     *   回退固定名 [STOP_REQUEST_PATH]（内容寻址 + mtime，行为与引入前一致）。
+     */
+    fun gracefulStopCommand(sessionToken: String? = null): String =
+        "p=${stopRequestPath(sessionToken)}; " + atomicSentinelWrite()
+
+    /**
+     * 请求**当前在跑的任意引擎**优雅停止（启动前置清场专用）。
+     *
+     * 读 [SESSION_TOKEN_PATH] 拿到目标引擎的 token 后写它专属的哨兵；token 缺失/非法
+     * （老引擎、老客户端部署的会话）回退固定名 [STOP_REQUEST_PATH]。
+     *
+     * 为什么可以"晚读"：调用点只有 `vdRunDeploySequence` 的停止半段，此时新引擎
+     * 还没启动，盘上的会话文件只可能属于正在跑的那个引擎。**会话收尾不得用它** ——
+     * 那会在新引擎启动后读到新 token、把新会话杀掉（issue #180 的原始症状）。
+     */
+    val gracefulStopAnyCommand: String
+        get() = "t=\$(head -c 64 $SESSION_TOKEN_PATH 2>/dev/null); " +
+            "case \"\$t\" in ''|*[!A-Za-z0-9_-]*) p=$STOP_REQUEST_PATH ;; " +
+            "*) p=$DIR_PATH/$STOP_REQUEST_PREFIX-\$t ;; esac; " +
+            atomicSentinelWrite()
 
     /**
      * Liveness probe, output form: prints `Y` when a vd-server process exists,
@@ -208,13 +297,15 @@ object VdDeploy {
      * or phone Shizuku) so the three deploy sites do not each re-assemble the
      * same sequence.
      *
-     * 停止命令**不在 plan 里**：`vdRunDeploySequence` 统一用
-     * [gracefulStopCommand]（哨兵文件）+ [killCommandForce]（超时兜底）——
-     * 见类头"如何停止引擎"。
+     * [sessionToken] 是新会话的归属标识：随 argv 传给引擎，同时决定
+     * [stopCommand] 写哪个哨兵文件。调用方必须**记住它**，会话收尾时用
+     * [stopCommand] 停止（而不是回读设备状态，那会读到下一代引擎）。
      */
     data class DeployPlan(
         val args: String,
-        val launchCommand: String
+        val launchCommand: String,
+        val sessionToken: String = "",
+        val stopCommand: String = VdDeploy.gracefulStopCommand()
     )
 
     /**
@@ -237,6 +328,8 @@ object VdDeploy {
      * @param allowedPackages 车机可见应用的包名集合（issue #21）。只有手机端
      *                  Shizuku 部署路径能读到 allowlist prefs 并下传；车机/桌面
      *                  ADB 路径传空集合（引擎不做过滤，行为不变）。
+     * @param sessionToken 本次会话的 token（issue #180）。缺省生成一个新的；
+     *                  非法值（含 `-`）按"未传"处理，引擎回退旧格式固定名。
      */
     fun buildDeployPlan(
         jarPath: String,
@@ -251,15 +344,19 @@ object VdDeploy {
         bitrate: Int = VideoConfig.DEFAULT_BITRATE,
         background: Boolean,
         carHost: String = VdDeployArgs.CAR_HOST_ANY,
-        allowedPackages: Collection<String> = emptyList()
+        allowedPackages: Collection<String> = emptyList(),
+        sessionToken: String? = null
     ): DeployPlan {
+        val token = sessionToken?.trim()?.takeIf { isValidSessionToken(it) } ?: newSessionToken()
         val args = VdDeployArgs.format(
             vdWidth, vdHeight, dpi, phoneHost, encodeWidth, encodeHeight, fps, bitrate, carHost,
-            allowedPackages
+            allowedPackages, token
         )
         return DeployPlan(
             args = args,
-            launchCommand = commandLine(jarPath, logPath, args, background)
+            launchCommand = commandLine(jarPath, logPath, args, background),
+            sessionToken = token,
+            stopCommand = gracefulStopCommand(token)
         )
     }
 }

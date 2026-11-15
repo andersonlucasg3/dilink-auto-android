@@ -152,7 +152,8 @@ op_neutral() {
   [ -z "$(engine_pid)" ] || { log_err "中立核验失败：引擎未归零"; return 1; }
   [ "$(dphone 'settings get system screen_off_timeout' 2>/dev/null | tr -d '\r\n ')" = "$BASELINE_SCREEN_OFF_TIMEOUT" ] || { log_err "中立核验失败：screen_off_timeout"; return 1; }
   [ "$(listening_on "$PHONE_SERIAL" 9637)" != "Y" ] || { log_err "中立核验失败：9637 未释放"; return 1; }
-  [ -z "$(dphone 'ls /sdcard/DiLinkAuto/stop-request 2>/dev/null' 2>/dev/null | tr -d '\r\n ')" ] || { log_err "中立核验失败：哨兵残留"; return 1; }
+  # issue #180 第三版：哨兵按会话分文件（`stop-request-<token>`），残留检查用通配。
+  [ -z "$(dphone 'ls /sdcard/DiLinkAuto/stop-request* 2>/dev/null' 2>/dev/null | tr -d '\r\n ')" ] || { log_err "中立核验失败：哨兵残留"; return 1; }
   log_ok "中立态收敛完成"
   return 0
 }

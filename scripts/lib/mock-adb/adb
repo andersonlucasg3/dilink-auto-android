@@ -227,6 +227,11 @@ exec_shell() {
     cat\ /sdcard/DiLinkAuto/e2e-occupy.pid*) exit 0 ;;
     kill\ -9*) exit 0 ;;
     "cat /sdcard/DiLinkAuto/client.log") mock_clientlog ;;
+    # issue #180 第三版：停止命令改成「同目录 temp + mv」的原子写
+    # （`p=...; tmp=...; cat pid > tmp; mv -f tmp p` / `t=$(head -c 64 vd-server.session); case ...`），
+    # 整串不再以 `rm -f /sdcard/` 开头，上面的 rm 分支匹配不到。这里按同一语义收口：
+    # 出现停止哨兵请求 = 会话终结信号。
+    *stop-request*) rm -f "$ST/session"; setflag disconnected; exit 0 ;;
     *) echo "mock-adb(shell): 未实现：$cmd" >&2; exit 2 ;;
   esac
 }

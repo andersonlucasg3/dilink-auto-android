@@ -136,6 +136,15 @@ class ConnectionService : Service() {
     private var phoneBatteryReporter: PhoneBatteryReporter? = null
     @Volatile private var savedDefaultIme: String? = null
 
+    /**
+     * 本会话 vd-server 的 token（issue #180 第三版）。
+     *
+     * Shizuku 部署时由 plan 生成并记下来；会话收尾（[cleanupSession] →
+     * `PhoneDisplayRestorer`）必须用**它**写停止哨兵。回读设备上的
+     * `vd-server.session` 会读到下一代引擎 —— 那正是"旧会话停止命令杀掉新引擎"的成因。
+     */
+    @Volatile private var vdSessionToken: String? = null
+
     override fun onCreate() {
         super.onCreate()
         FileLog.loadEnabled(getSharedPreferences(AppPrefs.FILE_NAME, MODE_PRIVATE))
@@ -725,6 +734,11 @@ class ConnectionService : Service() {
             if (outcome.forcedKill) {
                 FileLog.w(TAG, "Previous VD server did not exit in time — forced kill used")
             }
+            // issue #180：记住本次会话的 token，收尾时用它写自己那份哨兵。
+            vdSessionToken = outcome.sessionToken
+            if (outcome.launched) {
+                FileLog.i(TAG, "VD server session token: ${outcome.sessionToken}")
+            }
             if (!outcome.launched) {
                 FileLog.e(TAG, "VD server launch failed (Shizuku execBackground returned false) — tearing down")
                 cleanupSession()
@@ -847,6 +861,10 @@ class ConnectionService : Service() {
         _serviceState.value = State.WAITING
         val ime = savedDefaultIme
         savedDefaultIme = null
+        // issue #180：token 跟会话一起快照——收尾协程可能在下一轮部署之后才跑，
+        // 那时字段里已经是新会话的 token。
+        val vdToken = vdSessionToken
+        vdSessionToken = null
 
         // Everything that can block runs on the process-lifetime teardownScope,
         // never on the caller's thread: cleanupSession is invoked from Main
@@ -868,7 +886,7 @@ class ConnectionService : Service() {
             // Runs on PhoneDisplayRestorer's own process-lifetime scope: the two-stage
             // stop + `cmd display power-reset` cannot be cancelled by onDestroy().
             if (hadVd) {
-                displayRestorer.restore(ime)
+                displayRestorer.restore(ime, vdToken)
             } else {
                 FileLog.i(TAG, "cleanupSession: empty session — skip physical display restore")
             }

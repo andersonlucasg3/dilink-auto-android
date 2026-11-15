@@ -25,13 +25,18 @@ internal class ProcessWatchdog(
     private val isCleanedUp: () -> Boolean,
     private val onStopRequested: () -> Unit,
     private val onForceCleanup: () -> Unit,
-    private val stopRequestPath: String = VdDeploy.STOP_REQUEST_PATH,
+    /**
+     * issue #180（第三版）：本会话 token。非空时只监听它专属的
+     * `stop-request-<token>`，旧会话写固定名的请求根本不在这个文件上。
+     */
+    private val sessionToken: String = "",
+    private val stopRequestPath: String = VdDeploy.stopRequestPath(sessionToken),
     /**
      * issue #180：本会话（进程）启动时刻——旧格式（空/非数字）哨兵的 mtime 回退
-     * 判据。内容带 pid 的哨兵走内容寻址，不看时间。
+     * 判据。会话专属哨兵不看时间。
      */
     private val sessionStartedAtMs: Long = System.currentTimeMillis(),
-    /** issue #180：本进程 pid —— 停止哨兵内容寻址的标识。 */
+    /** issue #180：本进程 pid —— 旧格式哨兵的**内容寻址**标识。 */
     private val sessionPid: String = "",
     private val gracePeriodMs: Long = WATCHDOG_GRACE_MS,
     private val pollIntervalMs: Long = POLL_INTERVAL_MS,
@@ -59,7 +64,7 @@ internal class ProcessWatchdog(
             // hook，cleanup 会被整体跳过（2026-10-10 MI 9 实测，见 VdDeploy 类头）。
             // 这里置 running=false 后各等待点（accept 轮询 / park 切片 / bind 重试）
             // 会在 ≤100ms 内退出，run() 走到 finally，cleanup 完整执行。
-            if (consumeStopRequest(stopRequestPath, sessionStartedAtMs, sessionPid)) {
+            if (consumeStopRequest(stopRequestPath, sessionStartedAtMs, sessionPid, sessionToken)) {
                 log("Stop request detected ($stopRequestPath) — graceful shutdown")
                 onStopRequested()
                 break
@@ -110,12 +115,14 @@ internal fun stopRequestTargetPid(content: String?): Long? {
 /**
  * 停止哨兵的「会话归属」判定（issue #180）。
  *
- * 两级判定，**内容优先**：
- *  1. 内容寻址（主）：哨兵内容是某个 pid 时，只有等于本进程 pid 才受理。写入方每次
- *     都 `rm -f; touch`，mtime 永远是新值——旧会话的停止命令晚到（落在
- *     `createVirtualDisplay`/`bindAndAccept` 期间）只有靠内容才能识别出"不是写给我的"。
- *  2. mtime + 启动时刻（回退）：内容为空/非数字（老客户端、老脚本、pid 文件写失败）
- *     时，mtime 早于本会话启动（扣 [STOP_REQUEST_MTIME_TOLERANCE_MS] 容差）判为残留；
+ * 三级判定，**文件名优先**：
+ *  1. 会话专属文件名（主）：[VdDeploy.isValidSessionToken]`(sessionToken)` 时，
+ *     读到的是 `stop-request-<token>` —— 只有持有本会话 token 的部署方会写它，
+ *     所以内容与 mtime 都不参与判定。上一轮会话的 token 落在别的文件名上，压根
+ *     不会被读到（这正是内容寻址挡不住的那个晚读场景）。
+ *  2. 内容寻址（旧格式）：哨兵内容是某个 pid 时，只有等于本进程 pid 才受理。
+ *  3. mtime + 启动时刻（旧格式）：内容为空/非数字（老客户端、老脚本、e2e）时，
+ *     mtime 早于本会话启动（扣 [STOP_REQUEST_MTIME_TOLERANCE_MS] 容差）判为残留；
  *     `fileMtimeMs <= 0`（读不到时间戳）按引入前的契约"存在即受理"——宁可多停一次，
  *     也不要让真停止请求被静默吞掉。
  */
@@ -123,8 +130,10 @@ internal fun isStopRequestForSession(
     content: String?,
     fileMtimeMs: Long,
     sessionStartedAtMs: Long,
-    sessionPid: String
+    sessionPid: String,
+    sessionToken: String = ""
 ): Boolean {
+    if (VdDeploy.isValidSessionToken(sessionToken)) return true
     val target = stopRequestTargetPid(content)
     if (target != null) return target.toString() == sessionPid.trim()
     return fileMtimeMs <= 0L || fileMtimeMs + STOP_REQUEST_MTIME_TOLERANCE_MS >= sessionStartedAtMs
@@ -133,11 +142,19 @@ internal fun isStopRequestForSession(
 /**
  * 启动清场时是否丢弃该哨兵（issue #180）。
  *
- * 只有「内容写成本进程 pid」的哨兵才保留——那是初始化窗口内用户按下的真停止；
- * 其余（空/非数字/写给别的 pid）都是跨会话信号，一律丢弃。
+ * - 会话专属哨兵（token 非空）：**保留**。它的写入方必须是持有本会话 token 的
+ *   部署方，那是初始化窗口（watchdog 还没武装）里用户按下的真停止。
+ * - 旧格式固定名：只有「内容写成本进程 pid」的哨兵才保留；其余（空/非数字/写给
+ *   别的 pid）都是跨会话信号，一律丢弃。
  */
-internal fun shouldDropStartupStopRequest(content: String?, sessionPid: String): Boolean =
-    stopRequestTargetPid(content)?.toString() != sessionPid.trim()
+internal fun shouldDropStartupStopRequest(
+    content: String?,
+    sessionPid: String,
+    sessionToken: String = ""
+): Boolean {
+    if (VdDeploy.isValidSessionToken(sessionToken)) return false
+    return stopRequestTargetPid(content)?.toString() != sessionPid.trim()
+}
 
 /**
  * 消费停止哨兵（协议见 [VdDeploy.gracefulStopCommand]）：文件存在**且属于本会话**
@@ -146,25 +163,61 @@ internal fun shouldDropStartupStopRequest(content: String?, sessionPid: String):
  *
  * 删除规则（issue #180 评审的 TOCTOU 项）：
  *  - 受理（本会话）：受理后立即停，此时删掉"更新一点的重复请求"也无副作用；
- *  - 残留（旧格式 + 早于本进程启动）：删前重读内容，内容变了说明写入方刚重写过
- *    （`rm -f; touch`），不再删除，留给下一轮判定；
- *  - 写给**别的 pid**：不删——目标引擎可能还在读。
+ *  - **未受理：一律不删**（旧格式残留也一样）。原来"重读内容相同就删"的做法挡不住
+ *    `rm -f; mv` 的并发写入——空文件重读仍是空串，`content == content` 恒真，
+ *    于是刚写下的真请求被误删；残留由下一次启动清场兜底。
+ *  - 写给**别的 pid**：更不该删——目标引擎可能还在读。
  */
 internal fun consumeStopRequest(
     path: String = VdDeploy.STOP_REQUEST_PATH,
     sessionStartedAtMs: Long,
-    sessionPid: String
+    sessionPid: String,
+    sessionToken: String = ""
 ): Boolean {
     val f = File(path)
     if (!f.exists()) return false
     val content = runCatching { f.readText() }.getOrNull()
-    if (isStopRequestForSession(content, f.lastModified(), sessionStartedAtMs, sessionPid)) {
+    if (isStopRequestForSession(content, f.lastModified(), sessionStartedAtMs, sessionPid, sessionToken)) {
         runCatching { f.delete() }
         return true
     }
-    if (stopRequestTargetPid(content) == null) {
-        // 旧格式残留：重读确认没被并发重写，避免误删刚写下的真请求。
-        if (runCatching { f.readText() }.getOrNull() == content) runCatching { f.delete() }
-    }
     return false
 }
+
+/**
+ * 原子写文件：同目录 temp + rename（issue #180 评审第 1 条）。
+ *
+ * 直接 `writeText` 会先截断再写，并发读者可能读到空文件——对 pid/token 文件来说
+ * 就等于"标识不存在"，停止方随之回落到旧判定。用 temp + `Files.move` 保证读者
+ * 要么看到旧内容、要么看到完整的新内容。
+ */
+internal fun writeTextAtomically(path: String, content: String): Boolean = runCatching {
+    val target = File(path)
+    val dir = target.absoluteFile.parentFile ?: return@runCatching false
+    if (!dir.exists()) dir.mkdirs()
+    val tmp = File.createTempFile(target.name + ".", ".tmp", dir)
+    try {
+        tmp.writeText(content)
+        java.nio.file.Files.move(
+            tmp.toPath(), target.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE
+        )
+        true
+    } finally {
+        if (tmp.exists()) tmp.delete()
+    }
+}.getOrDefault(false)
+
+/**
+ * 只在文件内容等于 [expected] 时删除（issue #180）。
+ *
+ * 收尾时删 pid / token 文件必须这么做：下一代引擎可能已经启动并发布了自己的标识，
+ * 无条件删除会把**别人的**标识抹掉。
+ */
+internal fun deleteIfContentMatches(path: String, expected: String): Boolean = runCatching {
+    val f = File(path)
+    if (!f.exists()) return@runCatching false
+    if (f.readText() != expected) return@runCatching false
+    f.delete()
+}.getOrDefault(false)
