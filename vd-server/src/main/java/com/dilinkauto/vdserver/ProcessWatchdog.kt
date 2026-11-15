@@ -26,11 +26,17 @@ internal class ProcessWatchdog(
     private val onStopRequested: () -> Unit,
     private val onForceCleanup: () -> Unit,
     /**
-     * issue #180（第三版）：本会话 token。非空时只监听它专属的
-     * `stop-request-<token>`，旧会话写固定名的请求根本不在这个文件上。
+     * issue #180（第三版）：本会话 token。非空时主监听它专属的
+     * `stop-request-<token>`。
+     *
+     * 但 token 模式**不能只读**这一份：车机 ADB 路径的引擎由车机部署，手机端拿不到
+     * token，收尾只能写旧格式固定名（见 [isLegacyStopRequestForTokenSession]）。那条
+     * 请求的内容是本进程 pid，必须受理，否则 12s 后 `-9`、cleanup 整段跳过。
      */
     private val sessionToken: String = "",
     private val stopRequestPath: String = VdDeploy.stopRequestPath(sessionToken),
+    /** 旧格式固定名哨兵：token 模式下的兜底通道（严格限定，见 [isLegacyStopRequestForTokenSession]）。 */
+    private val legacyStopRequestPath: String = VdDeploy.STOP_REQUEST_PATH,
     /**
      * issue #180：本会话（进程）启动时刻——旧格式（空/非数字）哨兵的 mtime 回退
      * 判据。会话专属哨兵不看时间。
@@ -66,6 +72,15 @@ internal class ProcessWatchdog(
             // 会在 ≤100ms 内退出，run() 走到 finally，cleanup 完整执行。
             if (consumeStopRequest(stopRequestPath, sessionStartedAtMs, sessionPid, sessionToken)) {
                 log("Stop request detected ($stopRequestPath) — graceful shutdown")
+                onStopRequested()
+                break
+            }
+            // token 模式的兜底：车机 ADB 部署路径（引擎不是手机端启的，没有 token）。
+            if (VdDeploy.isValidSessionToken(sessionToken) &&
+                stopRequestPath != legacyStopRequestPath &&
+                consumeLegacyFallbackStopRequest(legacyStopRequestPath, sessionPid)
+            ) {
+                log("Stop request detected ($legacyStopRequestPath, addressed to pid=$sessionPid) — graceful shutdown")
                 onStopRequested()
                 break
             }
@@ -182,6 +197,44 @@ internal fun consumeStopRequest(
         return true
     }
     return false
+}
+
+/**
+ * token 会话是否受理**旧格式固定名**哨兵（issue #180 第四轮评审的阻塞项）。
+ *
+ * 约束来源：车机 ADB 部署路径里引擎是**车机**启的，手机端 `vdStartVdServerViaShizuku`
+ * 没跑过、`vdSessionToken` 为空，会话收尾只能写固定名。那条命令
+ * （`gracefulStopCommand(null)`）会把 `vd-server.pid` 的内容抄进哨兵 —— 也就是
+ * **本进程 pid**。若 token 模式完全无视固定名，这条唯一可用的停止通道就失效：
+ * 12s 超时后 `-9`，`cleanup()`（面板/letterbox/IME/`screen_off_timeout`）整段跳过。
+ *
+ * 但兜底必须**只看内容等于本进程 pid**：
+ *  - 空内容 / 无法解析：老客户端（1.0.3 及更早）写的就是空哨兵，晚到时 mtime 是新的
+ *    —— 放行它等于把 #180 重新装回去。这类老客户端本来也只会驱动老引擎（无 token），
+ *    让它们走各自的 12s 兜底；
+ *  - 内容是别的 pid：目标可能是上一代引擎，不能删、也不能停。
+ */
+internal fun isLegacyStopRequestForTokenSession(content: String?, sessionPid: String): Boolean {
+    val target = stopRequestTargetPid(content) ?: return false
+    return sessionPid.isNotBlank() && target.toString() == sessionPid.trim()
+}
+
+/**
+ * 消费 token 会话的**旧格式兜底**哨兵：规则见 [isLegacyStopRequestForTokenSession]。
+ *
+ * 与 [consumeStopRequest] 一样，只删"已受理"的文件；不匹配的一律留着（可能是别的
+ * 引擎的请求，或者等下一次启动清场处理）。
+ */
+internal fun consumeLegacyFallbackStopRequest(
+    path: String = VdDeploy.STOP_REQUEST_PATH,
+    sessionPid: String
+): Boolean {
+    val f = File(path)
+    if (!f.exists()) return false
+    val content = runCatching { f.readText() }.getOrNull()
+    if (!isLegacyStopRequestForTokenSession(content, sessionPid)) return false
+    runCatching { f.delete() }
+    return true
 }
 
 /**

@@ -9,20 +9,25 @@ import org.junit.Test
 import java.io.File
 import java.io.FileInputStream
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * [consumeStopRequest] / 启动清场契约测试（停止哨兵协议见
  * [com.dilinkauto.protocol.VdDeploy.gracefulStopCommand] 与其类头）。
  *
- * 用临时目录注入路径：vd-server 的单测跑纯 JVM，不能碰 /sdcard。watchdog 的
- * 线程集成不在单测范围内——它只依赖本函数的返回值与"消费即删除"语义。
+ * 用临时目录注入路径：vd-server 的单测跑纯 JVM，不能碰 /sdcard。
  *
  * issue #180（第三版）：哨兵按**会话**分文件。
  *  1. **会话专属名**（主）：`stop-request-<token>`，token 由部署方启动时生成并记住。
  *     引擎只读自己那份，上一轮会话的 token 落在别的文件名上，天然无效——这正是
  *     "内容寻址也挡不住晚读"的修法。
- *  2. **旧格式固定名**（回退）：没有 token 的老客户端/老脚本写 `stop-request`，
- *     内容带 pid 时按内容寻址，否则按 mtime + 启动时刻判定。
+ *  2. **旧格式固定名**（回退）：车机 ADB 部署路径的引擎拿不到 token，手机端收尾只
+ *     能写它；token 模式**只受理内容等于本进程 pid 的那一种**，见
+ *     [isLegacyStopRequestForTokenSession]。
+ *  3. 完全没有 token 的引擎（老客户端/老脚本/e2e）：内容带 pid 按内容寻址，
+ *     否则按 mtime + 启动时刻判定。
  */
 class StopRequestTest {
 
@@ -344,9 +349,115 @@ class StopRequestTest {
         assertFalse(File(pidPath).exists())
     }
 
+    // ── 车机 ADB 部署路径的兜底（第四轮复审阻塞项） ────────────────────────────
+
+    /**
+     * 车机 ADB 路径：引擎是**车机**启的，手机端没有 token，收尾只能写固定名
+     * （`gracefulStopCommand(null)` 把 `vd-server.pid` 的内容抄进哨兵）。
+     * token 引擎必须受理这条请求，否则只能等 12s 超时 `-9`、cleanup 整段跳过。
+     */
+    @Test
+    fun `token session accepts the legacy sentinel addressed to its own pid`() {
+        val legacy = File(legacyPath).apply { writeText(SELF_PID) }
+        val sessionStart = System.currentTimeMillis()
+
+        // 主通道（会话专属文件）不存在
+        assertFalse(consumeStopRequest(tokenPath(SELF_TOKEN), sessionStart, SELF_PID, SELF_TOKEN))
+        assertTrue(isLegacyStopRequestForTokenSession(SELF_PID, SELF_PID))
+        assertTrue(
+            "车机部署路径的停止必须被受理",
+            consumeLegacyFallbackStopRequest(legacyPath, SELF_PID)
+        )
+        assertFalse("受理后消费掉", legacy.exists())
+    }
+
+    /** 老客户端写的**空**哨兵晚到时 mtime 是新的：token 会话不得受理，否则 #180 回归。 */
+    @Test
+    fun `token session ignores an empty legacy sentinel even with a fresh mtime`() {
+        val legacy = File(legacyPath).apply { writeText("") }
+
+        assertFalse(isLegacyStopRequestForTokenSession("", SELF_PID))
+        assertFalse(
+            "空内容 + 新 mtime 不能让 token 会话退出（那正是 #180 的旧路径）",
+            consumeLegacyFallbackStopRequest(legacyPath, SELF_PID)
+        )
+        assertTrue("不匹配的请求保留（可能属于别的引擎）", legacy.exists())
+    }
+
+    @Test
+    fun `token session ignores a legacy sentinel addressed to another pid`() {
+        val legacy = File(legacyPath).apply { writeText(OLD_PID) }
+
+        assertFalse(isLegacyStopRequestForTokenSession(OLD_PID, SELF_PID))
+        assertFalse(consumeLegacyFallbackStopRequest(legacyPath, SELF_PID))
+        assertTrue(legacy.exists())
+    }
+
+    /**
+     * 端到端（引擎侧）：token 会话的 watchdog 在**一次轮询内**消费车机路径写下的
+     * 固定名哨兵 → `onStopRequested`（= `running=false`，随后 `run()` finally 跑
+     * 完整 `cleanup()`），且不走强杀兜底。
+     */
+    @Test
+    fun `token session watchdog consumes the car-path legacy stop without forcing cleanup`() {
+        val stopLatch = CountDownLatch(1)
+        val cleanedUp = AtomicBoolean(false)
+        val forced = AtomicBoolean(false)
+        val watchdog = ProcessWatchdog(
+            isRunning = { !cleanedUp.get() },
+            isCleanedUp = { cleanedUp.get() },
+            onStopRequested = {
+                cleanedUp.set(true)
+                stopLatch.countDown()
+            },
+            onForceCleanup = { forced.set(true) },
+            sessionToken = SELF_TOKEN,
+            stopRequestPath = tokenPath(SELF_TOKEN),
+            legacyStopRequestPath = legacyPath,
+            sessionStartedAtMs = System.currentTimeMillis(),
+            sessionPid = SELF_PID,
+            gracePeriodMs = 200,
+            pollIntervalMs = 20,
+            cleanupCheckIntervalMs = 10,
+            log = {},
+            err = {},
+            exitProcess = {},
+            sleep = { Thread.sleep(it) }
+        )
+        val thread = Thread { watchdog.runLoop() }.apply { isDaemon = true; start() }
+        try {
+            // 车机部署的引擎：手机端收尾写固定名 + 抄本进程 pid（= 当前引擎 pid）
+            File(legacyPath).writeText(SELF_PID)
+
+            assertTrue(
+                "必须在一次轮询内被消费（远小于 12s 的优雅退出预算）",
+                stopLatch.await(2, TimeUnit.SECONDS)
+            )
+            assertFalse("不得走 -9 兜底（那会跳过 cleanup）", forced.get())
+            assertFalse("哨兵已消费", File(legacyPath).exists())
+        } finally {
+            thread.interrupt()
+        }
+    }
+
+    /** 启动清场的删除集合不碰并发写入的临时文件（第四轮复审非阻塞项 1）。 */
+    @Test
+    fun `other session sentinel scan excludes temp files and the own file`() {
+        assertTrue(isOtherSessionSentinelName("stop-request-oldToken", "stop-request-self"))
+        assertFalse("本会话自己的文件不能删", isOtherSessionSentinelName("stop-request-self", "stop-request-self"))
+        assertFalse("固定名不是「别人会话的」", isOtherSessionSentinelName("stop-request", "stop-request-self"))
+        assertFalse(
+            "写入中的 temp 文件（temp + mv）不能被清场删掉",
+            isOtherSessionSentinelName("stop-request-oldToken.tmp.4321", "stop-request-self")
+        )
+    }
+
     private companion object {
         /** 本会话 pid 的注入值（测试不依赖真实进程）。 */
         const val SELF_PID = "4321"
+
+        /** 上一轮会话 pid 的注入值。 */
+        const val OLD_PID = "9876"
 
         /** 本会话 token / 上一轮会话 token 的注入值。 */
         const val SELF_TOKEN = "selfToken0123"

@@ -752,11 +752,19 @@ class PipelineServer(
      */
     private fun clearStartupStopRequest() {
         if (VdDeploy.isValidSessionToken(sessionToken)) {
-            dropFiles(
-                "legacy/other-session sentinels (not read by this token session)",
-                listOf(File(VdDeploy.STOP_REQUEST_PATH)) +
-                    otherSessionSentinelFiles()
-            )
+            // 旧格式固定名在 token 模式下仍是**车机 ADB 部署路径**的兜底通道（手机端
+            // 没有 token），内容写成本进程 pid 的必须保留；其余一律清掉。
+            val legacy = File(VdDeploy.STOP_REQUEST_PATH)
+            if (legacy.exists()) {
+                val content = runCatching { legacy.readText() }.getOrNull()
+                if (isLegacyStopRequestForTokenSession(content, sessionPid)) {
+                    log("Startup: kept legacy stop-request addressed to this pid ($sessionPid)")
+                } else {
+                    dropFiles("stale legacy stop-request", listOf(legacy))
+                }
+            }
+            // 上一轮会话的 `stop-request-<旧 token>`：它们的引擎已退出，永远不会有人消费。
+            dropFiles("other-session sentinels", otherSessionSentinelFiles())
             return
         }
         val f = File(stopRequestPath)
@@ -774,9 +782,8 @@ class PipelineServer(
     private fun otherSessionSentinelFiles(): List<File> {
         val own = File(stopRequestPath).name
         val dir = File(VdDeploy.DIR_PATH)
-        val prefix = "${VdDeploy.STOP_REQUEST_PREFIX}-"
         return dir.listFiles { f ->
-            f.isFile && f.name.startsWith(prefix) && f.name != own
+            f.isFile && isOtherSessionSentinelName(f.name, own)
         }?.toList().orEmpty()
     }
 
@@ -1054,4 +1061,20 @@ internal fun runStartupSequence(
     clearStartupStopRequest()
     armWatchdog()
     return createVirtualDisplay()
+}
+
+/**
+ * 是否是「别人会话的哨兵文件」—— 启动清场的删除集合（issue #180）。
+ *
+ * 只认 `stop-request-<token>` 形态，并且：
+ *  - 排除本会话自己的文件（它还可能是初始化窗口里的真停止）；
+ *  - 排除写入过程中的**临时文件**：停止方是"同目录 temp + mv"原子写
+ *    （`stop-request-<token>.tmp.<pid>`），并发写入时那是别人正在用的中转文件，
+ *    整批删掉会把一次真停止请求抹掉（第四轮复审非阻塞项 1）。
+ */
+internal fun isOtherSessionSentinelName(name: String, ownName: String): Boolean {
+    if (name == ownName) return false
+    if (!name.startsWith("${VdDeploy.STOP_REQUEST_PREFIX}-")) return false
+    if (name.contains(".tmp")) return false
+    return true
 }
