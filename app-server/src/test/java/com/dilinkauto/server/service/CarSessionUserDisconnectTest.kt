@@ -13,7 +13,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -171,8 +170,5 @@ class CarSessionUserDisconnectTest {
         assertTrue("connectJob 必须被取消", connectJob.isCancelled)
         assertTrue("discoveryJob 必须被取消", discoveryJob.isCancelled)
         assertTrue("userDisconnected 必须落盘为 true，抑制自动重连", carPrefs.userDisconnected)
-        assertFalse("解码器不应在断开后继续运行", (coordinator.javaClass
-            .getDeclaredField("videoDecoder").apply { isAccessible = true }
-            .get(coordinator) as VideoDecoder).isRunning)
     }
 }

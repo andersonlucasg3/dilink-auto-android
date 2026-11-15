@@ -711,7 +711,12 @@ internal class CarSessionCoordinator(
             // CAS 失败），listener 就不会再回调，`_state` 会停在 STREAMING、三处 Job
             // 仍 active，而 userDisconnected 又抑制了自动重连，表现为「必须杀后台」。
             // handleDisconnect() 自带 teardownGuard 防重入，并发路径同样会推到 IDLE。
-            handleDisconnect()
+            //
+            // 拆除必须回到 service scope（Main）执行：handleDisconnect 内读写的
+            // connectionScope/connectJob/discoveryJob/blackScreenRebuilds 都不是
+            // volatile，既有口径是 Main（listener 也是 scope.launch{}），
+            // 直接在 IO 上调会把它们变成跨线程竞争。
+            scope.launch { handleDisconnect() }
         }
     }
 

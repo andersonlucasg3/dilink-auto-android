@@ -39,9 +39,14 @@ class CarLaunchScreenReconnectTest {
             "CarConnectionService 必须暴露 reconnect() 入口",
             serviceSrc.contains("fun reconnect() = sessionCoordinator.reconnect()"),
         )
+        // 只断言「文件里出现过 startConnection()」太宽（它本来就在 startConnection 自己的
+        // 定义与 handleDisconnect 的重连分支里出现），这里把范围收窄到 reconnect() 函数体。
+        val reconnectBody = coordinatorSrc
+            .substringAfter("fun reconnect()")
+            .substringBefore("fun sendCommandToVd")
         assertTrue(
-            "sessionCoordinator.reconnect() 必须复用 startConnection() 的完整启动流程",
-            coordinatorSrc.contains("fun reconnect()") && coordinatorSrc.contains("startConnection()"),
+            "sessionCoordinator.reconnect() 的函数体必须调用 startConnection()，复用完整启动流程",
+            reconnectBody.contains("startConnection()"),
         )
     }
 
