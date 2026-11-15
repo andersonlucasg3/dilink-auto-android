@@ -16,7 +16,7 @@ import java.io.File
  * cleanup did not complete within GRACE_MS, it forces cleanup() directly
  * and then System.exit(1) / Runtime.halt(1) so the JVM ShutdownHook also fires. The forced
  * path restores the panel via DisplayControl reflection — same mechanism
- * setPhysicalDisplayPower uses — and does NOT depend on Shizuku.
+ * restorePanel uses — and does NOT depend on Shizuku.
  *
  * It also polls for external stop requests ([consumeStopRequest]), triggering graceful shutdown.
  */
@@ -67,7 +67,7 @@ internal class ProcessWatchdog(
         if (!isCleanedUp()) {
             err("Watchdog: cleanup did not complete within ${gracePeriodMs}ms — forcing panel restore + exit")
             try { onForceCleanup() } catch (e: Exception) { err("Watchdog cleanup error: ${e.describe()}") }
-            // Give cleanup's setPhysicalDisplayPower(true) time to land before
+            // Give cleanup's restorePanel() time to land before
             // halt() tears the process down (halt bypasses ShutdownHook).
             try { sleep(500) } catch (_: Exception) {}
             exitProcess(1)

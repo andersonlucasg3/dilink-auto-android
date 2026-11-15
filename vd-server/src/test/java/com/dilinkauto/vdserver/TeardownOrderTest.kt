@@ -44,7 +44,7 @@ class TeardownOrderTest {
 
     @Test
     fun panelIsRestoredWhileTheShellIsStillAlive() {
-        // 既有约定（AGENTS.md §0 / 记忆）：面板恢复必须在杀 shell 之前，否则 setPhysicalDisplayPower
+        // 既有约定（AGENTS.md §0 / 记忆）：面板恢复必须在杀 shell 之前，否则 restorePanel
         // 没人执行，手机会留在黑屏。
         assertTrue(TeardownStep.PANEL_RESTORED.ordinal < TeardownStep.SHELL_CLOSED.ordinal)
         assertTrue(TeardownStep.IME_RESTORED.ordinal < TeardownStep.SHELL_CLOSED.ordinal)

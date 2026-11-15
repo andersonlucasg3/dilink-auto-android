@@ -177,7 +177,7 @@ Empty payload. Sent after the VD server has bound the video (9638) and input (96
 
 ### SET_DISPLAY_POWER (0x32) -- Car/PC -> Phone (control channel)
 
-1-byte payload: a non-zero first byte = screen on, `0` or an empty payload = screen off (an empty payload deliberately means off, so a peer that forgets the field cannot accidentally light the panel). Routed by the vd-server's `handleCarCommand` to `DisplayPowerController.setPhysicalDisplayPower` — the same path as `GO_HOME`, so app-client is not involved. The vd-server powers the phone's physical panel off by default once it holds video + input, and restores it on disconnect; this message hands the mid-session manual toggle to the user.
+1-byte payload: a non-zero first byte = screen on, `0` or an empty payload = screen off (an empty payload deliberately means off, so a peer that forgets the field cannot accidentally light the panel). Routed by the vd-server's `handleCarCommand` to `DisplayPowerController.powerOffPanel()` (off) or `restorePanel()` (on) — the same path as `GO_HOME`, so app-client is not involved. The vd-server powers the phone's physical panel off by default once it holds video + input, and restores it on disconnect; this message hands the mid-session manual toggle to the user.
 
 ## Video Channel (0x01)
 
