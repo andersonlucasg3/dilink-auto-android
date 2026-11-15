@@ -141,7 +141,7 @@ class PipelineServer(
         onForceCleanup = {
             // issue #112：若主线程 cleanup() 在 resetLetterboxStyle/moveTasks 等步骤挂起，
             // 看门狗强制唤醒物理屏幕并恢复 IME，防止手机永久黑屏
-            try { displayController.setPhysicalDisplayPower(true) } catch (e: Exception) { err("Watchdog force display power failed: ${e.message}") }
+            try { displayController.restorePanel() } catch (e: Exception) { err("Watchdog force display power failed: ${e.message}") }
             try { shell.exec("input keyevent 224") } catch (_: Exception) {}
             try { displayController.restoreIme() } catch (_: Exception) {}
         },
@@ -153,7 +153,8 @@ class PipelineServer(
         execOut = { shell.execOutput(it) },
         displayId = { displayId },
         onStackEmpty = { lifecycle.enqueue(VdLifecycle.MSG_STACK_EMPTY, ByteArray(0)) },
-        setDisplayPower = { displayController.setPhysicalDisplayPower(it) },
+        // issue #66：熄屏受能力闸门约束，点亮（含车机侧手动亮屏）无条件尝试。
+        setDisplayPower = { on -> if (on) displayController.restorePanel() else displayController.powerOffPanel() },
         requestSyncFrame = { syncFrameRequested.set(true) },
         // issue #15：车机请求"显示自愈"时的最后一级 —— SF 层树脱同步修复，
         // 复用创建期那套旋转往返（见 VirtualDisplayCreator.ensureDtaAttached）。
@@ -438,7 +439,7 @@ class PipelineServer(
             val carInput = acceptCarChannel(inputServer, 30000) ?: run { err("Car input timeout"); try { phoneChannel.close() } catch (_: Exception) {}; try { carVideo.close() } catch (_: Exception) {}; return null }
             log("Car connected: video=${carVideo.remoteAddress} input=${carInput.remoteAddress}")
             // Power the physical panel off only now — after the car holds both channels.
-            displayController.setPhysicalDisplayPower(false)
+            displayController.powerOffPanel()
             handedOff = true
             return ConnectionSet(carVideo, carInput, phoneChannel, audioServer)
         } finally {
@@ -676,7 +677,7 @@ class PipelineServer(
         } finally {
             // Peer of readLifecycleCommands: when the car-input socket dies alone,
             // tear the whole pipeline down so the physical panel recovers
-            // (setPhysicalDisplayPower(true) runs in cleanup()) instead of
+            // (displayController.restorePanel() runs in cleanup()) instead of
             // leaving the encoder spinning with no consumer.
             running = false
             r.close()
@@ -695,7 +696,7 @@ class PipelineServer(
      *  process killed midway has already returned the device to normal.
      *  2. The foreground app is moved back to the physical display.
      *  3. The physical panel is re-powered and the IME restored — while the
-     *  persistent shell is still usable (`setPhysicalDisplayPower` needs it).
+     *  persistent shell is still usable (`restorePanel` needs it).
      *  4. Threads, GL, encoder, and finally the VirtualDisplay are released.
      *
      * The previous order had `virtualDisplay.release()` dead last with nothing
@@ -764,7 +765,7 @@ class PipelineServer(
         carCommands.moveAllTasksToDisplay(displayId, 0)
         mark(TeardownStep.APPS_MOVED)
         // 3. Restore screen BEFORE killing shell (order matters: shell.exec needs the shell alive)
-        displayController.setPhysicalDisplayPower(true)
+        displayController.restorePanel()
         try { shell.exec("input keyevent 224") } catch (_: Exception) {}
         mark(TeardownStep.PANEL_RESTORED)
         displayController.restoreIme()

@@ -18,6 +18,11 @@ internal class DisplayPowerController(
     private val shellProvider: () -> OutputStream?,
     private val execShellOutput: (String) -> String?,
     private val logErr: (String) -> Unit,
+    /**
+     * 反射调用（`DisplayControl.setDisplayPowerMode`）的注入口，**仅供单测**记录调用序列；
+     * 生产为 null，走 [applyDisplayControlPower]。
+     */
+    private val reflectionPowerOverride: ((Boolean) -> Boolean)? = null,
     /** `screen_off_timeout` 原值存档（跨进程；见 [TimeoutSnapshotFile]，2026-10-17 S19 实证新增）。 */
     private val snapshotFile: TimeoutSnapshotFile = TimeoutSnapshotFile(),
 ) {
@@ -31,11 +36,14 @@ internal class DisplayPowerController(
      * 本会话是否**尝试过**深熄屏（issue #66）。
      *
      * 记「尝试」而不是「成功」：反射调用可能在已经生效之后才抛异常
-     * （现场就是 `setDisplayPowerMode failed: null` 而屏幕确实黑了），
-     * 所以只要发出过熄屏请求就必须在收尾时走点亮链。
+     * （现场就是 `setDisplayPowerMode failed: null` 而屏幕确实黑了）。
+     * **只用于日志**：收尾点亮不因它短路，因为面板状态是整机的、可能来自上个被 kill 的进程。
      */
     @Volatile
     private var deepOffAttempted = false
+
+    /** [canDeepPowerOff] 的进程内结论：null = 未探测。 */
+    private var deepOffRecoverable: Boolean? = null
 
     /** `cmd display` 对 `power-reset` 的支持程度（三态，见 [powerResetCapability]）。 */
     private enum class PowerResetCapability { SUPPORTED, UNSUPPORTED, UNKNOWN }
@@ -95,18 +103,10 @@ internal class DisplayPowerController(
      *    `cmd display` 既没有 `power-off` 也没有 `power-reset`，屏幕上真正变黑的是
      *    反射那次「抛异常前已生效」的深熄屏 —— 闸门必须加在反射**之前**，
      *    加在 [shellPowerOff] 前面拦不住。
-     *  - 本次会话没尝试过熄屏时，点亮分支直接短路，不再刷一串必然失败的恢复日志。
+     *  - 点亮（[restorePanel]）**无条件执行**：熄屏标志是本进程的、面板状态是整机的，
+     *    上个进程被 kill 掉一样会把面板留在深熄状态，收尾不能因为本进程没熄过就跳过。
      */
-    fun setPhysicalDisplayPower(on: Boolean) {
-        if (on) {
-            if (!deepOffAttempted) {
-                PipeLog.log("skip panel restore: no deep power-off attempted this session")
-                return
-            }
-            if (applyDisplayControlPower(true)) return
-            shellPowerOn()
-            return
-        }
+    fun powerOffPanel() {
         if (!canDeepPowerOff()) {
             logErr(
                 "skip deep power-off: no recoverable path on this ROM " +
@@ -115,8 +115,20 @@ internal class DisplayPowerController(
             return
         }
         deepOffAttempted = true
-        if (applyDisplayControlPower(false)) return
+        if (reflectPower(false)) return
         shellPowerOff()
+    }
+
+    /**
+     * 点亮物理面板。收尾、看门狗强清、车机侧「手动亮屏」都走这里，**不做条件短路**：
+     * 面板可能被上一个被 kill 的会话留在深熄状态，见类头 2026-11-15 说明。
+     */
+    fun restorePanel() {
+        if (!deepOffAttempted) {
+            PipeLog.log("panel restore: no deep power-off this session — attempting anyway (a killed session may have left the panel off)")
+        }
+        if (reflectPower(true)) return
+        shellPowerOn()
     }
 
     /**
@@ -127,11 +139,19 @@ internal class DisplayPowerController(
      *  2. `cmd display help` **明确**列出 `power-reset`（[shellPowerOn] 的兜底路径）。
      *
      * help 拿不到时按不可逆处理：宁可投屏期间屏幕常亮，也不要把面板熄成单向门。
+     * 结论按进程缓存（[deepOffRecoverable]）：熄屏可被车机侧手动重复下发，不能每次都
+     * 先做一次「探测性点亮」，否则面板本来就黑时会被点亮、再熄掉，产生可见闪屏。
      */
     private fun canDeepPowerOff(): Boolean {
-        if (applyDisplayControlPower(true)) return true
-        return powerResetCapability() == PowerResetCapability.SUPPORTED
+        deepOffRecoverable?.let { return it }
+        val recoverable = reflectPower(true) || powerResetCapability() == PowerResetCapability.SUPPORTED
+        deepOffRecoverable = recoverable
+        return recoverable
     }
+
+    /** 反射路径的统一入口：[reflectionPowerOverride] 供单测注入调用序列。 */
+    private fun reflectPower(on: Boolean): Boolean =
+        reflectionPowerOverride?.invoke(on) ?: applyDisplayControlPower(on)
 
     /** 反射路径：完全成功返回 true；任何一步失败（含类加载）返回 false。 */
     private fun applyDisplayControlPower(on: Boolean): Boolean {

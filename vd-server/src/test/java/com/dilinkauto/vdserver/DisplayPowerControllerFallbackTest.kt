@@ -34,8 +34,12 @@ class DisplayPowerControllerFallbackTest {
         val shell = CapturingShell()
         val errors = mutableListOf<String>()
         val outputQueries = mutableListOf<String>()
+        /** 反射调用序列（issue #66：用来钉住「闸门在反射之前」）。 */
+        val reflectionCalls = mutableListOf<Boolean>()
         var help = ""
         var powerResetResult = ""
+        /** 反射路径的返回值；默认 false（JVM 上真反射也一定失败）。 */
+        var reflectionResult = false
 
         private val snapshot = File(
             Files.createTempDirectory("dpc-fallback").toFile(),
@@ -53,6 +57,7 @@ class DisplayPowerControllerFallbackTest {
                 }
             },
             logErr = { errors += it },
+            reflectionPowerOverride = { on -> reflectionCalls += on; reflectionResult },
             snapshotFile = TimeoutSnapshotFile(snapshot),
         )
     }
@@ -69,16 +74,10 @@ class DisplayPowerControllerFallbackTest {
         }
     }
 
-    /**
-     * 走一次「可恢复」的熄屏（help 含 power-reset），让点亮链具备执行条件。
-     *
-     * issue #66 起，`setPhysicalDisplayPower(true)` 在本次会话没有尝试过硬熄屏时
-     * 会直接短路（见 `panel restore is skipped when no deep power-off was attempted`），
-     * 所以点亮链的用例必须先熄一次。
-     */
+    /** 走一次「可恢复」的熄屏（help 含 power-reset）再返回控制器。 */
     private fun Harness.deepOffFirst(): DisplayPowerController {
         val dpc = dpc()
-        dpc.setPhysicalDisplayPower(false)
+        dpc.powerOffPanel()
         return dpc
     }
 
@@ -89,7 +88,7 @@ class DisplayPowerControllerFallbackTest {
         val h = Harness().apply {
             help = "  enable-display DISPLAY_ID\n  disable-display DISPLAY_ID\n"
         }
-        h.dpc().setPhysicalDisplayPower(false)
+        h.dpc().powerOffPanel()
 
         assertTrue(
             "必须说明为什么拒绝深熄屏：${h.errors}",
@@ -102,9 +101,29 @@ class DisplayPowerControllerFallbackTest {
     }
 
     @Test
+    fun `gate runs before the reflection call`() {
+        // issue #66 的核心不变量：闸门必须在反射**之前**。Flyme 现场是反射抛异常
+        // 之前熄屏已经生效，若把 `applyDisplayControlPower(false)` 放回闸门前面，
+        // 面板照样会黑、而点亮层全空。
+        val h = Harness().apply {
+            help = "  enable-display DISPLAY_ID\n  disable-display DISPLAY_ID\n"
+        }
+        h.dpc().powerOffPanel()
+
+        assertFalse(
+            "闸门未通过时不得发出任何熄屏方向的反射调用（含探测）：${h.reflectionCalls}",
+            h.reflectionCalls.any { it == false },
+        )
+        assertTrue(
+            "闸门需要先探测一次点亮方向：${h.reflectionCalls}",
+            h.reflectionCalls == listOf(true),
+        )
+    }
+
+    @Test
     fun `unknown cmd display help is treated as unrecoverable`() {
         val h = Harness().apply { help = "" }
-        h.dpc().setPhysicalDisplayPower(false)
+        h.dpc().powerOffPanel()
 
         assertTrue("help 拿不到时也要拒绝深熄屏：${h.errors}", h.errors.any { it.contains("skip deep power-off") })
         assertFalse(
@@ -116,38 +135,53 @@ class DisplayPowerControllerFallbackTest {
     @Test
     fun `rom with power-reset still deep-offs`() {
         val h = Harness().apply { help = "  power-reset DISPLAY_ID\n" }
-        h.dpc().setPhysicalDisplayPower(false)
+        h.dpc().powerOffPanel()
 
         assertTrue(
             "可恢复的 ROM 仍应熄屏：${h.shell.lines()}",
             h.shell.lines().any { it == "cmd display power-off 0" },
         )
+        assertTrue(
+            "探测（true）必须先于熄屏（false）：${h.reflectionCalls}",
+            h.reflectionCalls == listOf(true, false),
+        )
     }
 
     @Test
-    fun `panel restore is skipped when no deep power-off was attempted`() {
-        val h = Harness().apply { help = "  power-reset DISPLAY_ID\n" }
-        val (_, stdout) = captureStdout { h.dpc().setPhysicalDisplayPower(true) }
+    fun `panel restore is unconditional even when this session never powered off`() {
+        // 面板状态是整机的：上个进程被 kill 可能把面板留在深熄状态，
+        // 所以收尾/看门狗的点亮不能因为「本进程没熄过」就短路。
+        val h = Harness().apply { help = "" }
+        val dpc = h.dpc()
+        val (_, stdout) = captureStdout { dpc.restorePanel() }
 
-        assertTrue("必须说明跳过原因：$stdout", stdout.contains("skip panel restore"))
-        assertFalse(
-            "没熄过就不该下发点亮命令：${h.outputQueries}",
+        assertTrue(
+            "必须显式说明本会话没熄过屏但仍尝试点亮：$stdout",
+            stdout.contains("no deep power-off this session"),
+        )
+        assertTrue(
+            "点亮链必须真的执行：${h.outputQueries}",
             h.outputQueries.any { it.contains("power-reset") },
         )
     }
 
     @Test
     fun `capability probe is cached across calls`() {
-        // 熄屏方向的能力探测（issue #66 新增的闸门）同样只做一次。
+        // 熄屏方向的能力探测（issue #66 新增的闸门）同样只做一次：熄屏可被手动重复下发，
+        // 每次都探测会带来一次「探测性点亮」，面板本来黑时就是可见闪屏。
         val h = Harness().apply {
             help = "  power-reset DISPLAY_ID\n"
         }
         val dpc = h.dpc()
-        dpc.setPhysicalDisplayPower(false)
-        dpc.setPhysicalDisplayPower(false)
+        dpc.powerOffPanel()
+        dpc.powerOffPanel()
 
         val probes = h.outputQueries.count { it.startsWith("cmd display help") }
         assertTrue("cmd display help 只应探测一次，实际 $probes 次", probes == 1)
+        assertTrue(
+            "反射探测也只应发生一次：${h.reflectionCalls}",
+            h.reflectionCalls.count { it } == 1,
+        )
     }
 
     @Test
@@ -157,7 +191,7 @@ class DisplayPowerControllerFallbackTest {
             powerResetResult = "Unknown command: power-reset\n__DILINK_RC=255"
         }
         val dpc = h.deepOffFirst()
-        val (_, stdout) = captureStdout { dpc.setPhysicalDisplayPower(true) }
+        val (_, stdout) = captureStdout { dpc.restorePanel() }
 
         assertTrue(
             "必须把 Unknown command 记为失败并带原文：${h.errors}",
@@ -173,7 +207,7 @@ class DisplayPowerControllerFallbackTest {
             powerResetResult = "__DILINK_RC=0"
         }
         val dpc = h.deepOffFirst()
-        val (_, stdout) = captureStdout { dpc.setPhysicalDisplayPower(true) }
+        val (_, stdout) = captureStdout { dpc.restorePanel() }
 
         assertTrue("rc=0 必须打印成功：$stdout", stdout.contains("Physical display restored via power-reset"))
         assertFalse(
@@ -183,10 +217,27 @@ class DisplayPowerControllerFallbackTest {
     }
 
     @Test
+    fun `reflection success short-circuits the shell fallback`() {
+        val h = Harness().apply {
+            help = "  power-reset DISPLAY_ID\n"
+            reflectionResult = true
+        }
+        val dpc = h.dpc()
+        dpc.powerOffPanel()
+        dpc.restorePanel()
+
+        assertFalse(
+            "反射可用时不得再走 shell 兜底：${h.shell.lines()}",
+            h.shell.lines().any { it.contains("power-off") || it.contains("power-reset") },
+        )
+        assertTrue("应先探测再熄屏再点亮：${h.reflectionCalls}", h.reflectionCalls == listOf(true, false, true))
+    }
+
+    @Test
     fun `power off still uses the persistent shell`() {
         val h = Harness().apply { help = "  power-reset DISPLAY_ID\n  power-off DISPLAY_ID\n" }
         val dpc = h.dpc()
-        dpc.setPhysicalDisplayPower(false)
+        dpc.powerOffPanel()
 
         assertTrue(
             "熄屏路径保持 fire-and-forget：${h.shell.lines()}",

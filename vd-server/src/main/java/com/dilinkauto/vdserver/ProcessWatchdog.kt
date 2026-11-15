@@ -67,7 +67,7 @@ internal class ProcessWatchdog(
         if (!isCleanedUp()) {
             err("Watchdog: cleanup did not complete within ${gracePeriodMs}ms — forcing panel restore + exit")
             try { onForceCleanup() } catch (e: Exception) { err("Watchdog cleanup error: ${e.describe()}") }
-            // Give cleanup's setPhysicalDisplayPower(true) time to land before
+            // Give cleanup's restorePanel() time to land before
             // halt() tears the process down (halt bypasses ShutdownHook).
             try { sleep(500) } catch (_: Exception) {}
             exitProcess(1)
