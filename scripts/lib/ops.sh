@@ -63,9 +63,10 @@ _bounds_top_y() { # <bounds串> → 左上角 y（"bounds=\"[x1,y1][x2,y2]\"" �
   echo "${s%%]*}"
 }
 _bounds_of_ip_edittext() { # <ui> → ManualConnectBox 的 IP 输入框 bounds（不可达时返回空）
-  # 真机校准（2026-10-16 try4）：启动页 CarLaunchScreen 上 ManualConnectBox 是**最底部**
-  # 卡片（CarLaunchScreen.kt:105-158 布局顺序：Branding → statusCard → [WifiAdbSetupCard]
-  # → HowToConnect → ManualConnectBox），设置卡片的 EditText 都在它上方。
+  # 真机校准（2026-10-16 try4）：启动页 CarLaunchScreen 的窄屏内容列里 ManualConnectBox
+  # 是**最底部**卡片（顺序：Branding → statusCard → [WifiAdbSetupCard] → HowToConnect
+  # → ManualConnectBox），设置卡片的 EditText 都在它上方。issue #173 PA 已给该列加
+  # verticalScroll + imePadding，但老 APK / 更高竖屏仍可能不可达，故保留可见性校验。
   # 优先按「手机 IP 地址」标签定位（Compose 把 TextField label 渲染在框内、y 与框重叠）。
   # **2026-10-17 修正（S19 实证）**：ManualConnectBox 在真机（1080x2152 竖屏）上被挤出
   # 屏幕外且无滚动容器（3 个设置卡已占满到 y=2048，HowToConnect/ManualConnectBox 恒不可见）
@@ -181,22 +182,68 @@ op_launch_server() { # A 上 monkey 拉起 server
   return 0
 }
 
+# ── issue #173 PA：首次连接入口的降级路径 ──────────────────────────────────
+# 竖屏超高被裁（S19 实证）或 uiautomator 拿不到 XML 时，ManualConnectBox 不可达。
+# 旧行为是直接 return 1，S01 setup 必失败；现在改用仓库内已被 S08/S19/S20/S21
+# 实证的 op_reconnect（重启 app 触发启动路径自动连接）兜底，并继续走 ③ 收敛窗口。
+# 不引入 bad()、不改 rc 语义（e2e-dual-device.sh:103-115 的记账不变量）。
+_connect_manual_ui() { # <ip> → 0 已点「连接」；1 ManualConnectBox 不可达（调用方走重启兜底）
+  local ip=$1 ui eb cb cand i
+  ui=$(_a_dump) || return 1
+  # 先验证 ManualConnectBox 可见性（「连接」按钮 = 存在性标志）——不可见时**不碰任何
+  # 输入框**。S19 实证：竖屏 1080x2152 下该卡片被挤出屏幕外；任何 EditText 都是设置卡
+  # 数值框，旧序「先输后找」会把 IP 污染进目标帧率框（filter 后 "192"、失焦提交）。
+  cb=""
+  for cand in "连接" "Connect"; do
+    cb=$(_bounds_of_text "$ui" "$cand"); [ -n "$cb" ] && break
+  done
+  [ -n "$cb" ] || return 1
+  eb=$(_bounds_of_ip_edittext "$ui")
+  [ -n "$eb" ] || return 1
+  _tap_bounds "$CAR_SERIAL" "$eb"; sleep 0.5
+  for i in $(seq 1 24); do dcar input keyevent KEYCODE_DEL > /dev/null 2>&1; done
+  dcar input text "$ip" > /dev/null 2>&1
+  sleep 0.3
+  _tap_bounds "$CAR_SERIAL" "$cb"
+  log_step "已点击「连接」（ip=$ip），待命处理 B 的授权框"
+  return 0
+}
+
+_connect_restart_fallback() { # <car_state> → 0 已发起重启（继续 ③ 收敛）；1 原语失败
+  # 降级不是失败：只用 log_step（▶ 信息行），不新增 ✗、不进两套账。
+  log_step "ManualConnectBox 不可达（car_state=$1）——改用「重启 app」原语触发自动连接（issue #173 PA）"
+  if op_reconnect; then
+    log_step "已发起 app 重启，继续收敛窗口等待 STREAMING"
+    return 0
+  fi
+  log_err "「重启 app」原语失败（ManualConnectBox 不可达，car_state=$1）"
+  return 1
+}
+
 op_connect() {
   # 2026-10-16 真机校准（try4 取证）——A 的 app **自动连接是主路径**：
   # CarConnectionService.startConnection() 同时起 WiFi 轨（网关探测 + mDNS 发现）与
   # USB/TCP-ADB 轨；实测启动 ~1.5s 控制连接 + 握手、~18s 到 STREAMING（瓶颈是引擎
   # 部署 15s，A 侧 logcat 时间线实证）。IP 输入框/「连接」按钮只在「未连上」的
-  # CarLaunchScreen.ManualConnectBox 出现（CarLaunchScreen.kt:130/156 的
+  # CarLaunchScreen.ManualConnectBox 出现（宽屏 / 窄屏两个分支各自的
   # state != STREAMING/CONNECTED 分支），且中文 ROM 按钮文案是「连接」不是 "Connect"
   # （values-zh 实证）——try4 就死在照搬英文串 + 在自动连接已进行时找手动按钮。
   # 策略：① 先等自动连接（顺带代点 B 的无线调试授权框）；② 超时才走手动 UI 兜底；
   # ③ 收敛等待到 STREAMING（授权框是硬阻塞——不点掉会永远卡 CONNECTING，必须在本
-  #    op 内处理完；reach_streaming 的 wait_state_eq 是二道保险）。
+  #    op 内处理完；reach_streaming 的 wait_state_eq 是二道保险）；
+  # ④ issue #173 PA：② 里 ManualConnectBox 不可达（竖屏超高被裁 / dump 失败）时，
+  #   不再 return 1，改用 op_reconnect 重启 app 触发自动连接，然后照常进 ③；
+  #   不在 ③ 超时后二次重启（会掩盖产品侧断连根因、把失败拖到 360s）。
+  # 行号会随布局改动漂移，故本段不写死 CarLaunchScreen.kt 的行号。
   local ip=${PHONE_IP:-}
   [ -n "$ip" ] || { log_err "PHONE_IP 未知（preflight 没跑？）"; return 1; }
 
   # ① 自动连接窗口（实测 2~5s 进 CONNECTING；给 30s 容 WiFi 慢发现）
-  local st t0=$SECONDS n=0 deadline=$((SECONDS + 30))
+  # 两个窗口提为环境变量只为离线单测可置 0；生产默认值 30 / 180 一字不变。
+  # st 显式初始化为 UNKNOWN：0 窗口下 set -u 不会因未绑定变量退出。
+  local auto_wait_s=${E2E_CONNECT_AUTO_WAIT_S:-30}
+  local settle_wait_s=${E2E_CONNECT_SETTLE_WAIT_S:-180}
+  local st=UNKNOWN t0=$SECONDS n=0 deadline=$((SECONDS + auto_wait_s))
   while [ "$SECONDS" -lt "$deadline" ]; do
     st=$(car_state_now)
     case "$st" in
@@ -213,26 +260,11 @@ op_connect() {
       log_step "A 已自动进入连接流程（car_state=$st，耗时 $((SECONDS - t0))s）——跳过手动 UI 输入" ;;
     *)
       # ② 手动 UI 兜底（自动发现失败；A 上 CarLaunchScreen 的 ManualConnectBox）
+      # issue #173 PA：把原先内联的 UI 驱动抽到 _connect_manual_ui；不可达时不再直接
+      # 失败，改用 _connect_restart_fallback 走「重启 app」原语，然后照常进 ③ 收敛。
+      # 保住 UI 主路径（mock 回放的 S01 靠它建流）与记账不变量（不引入 bad 记账）。
       log_step "A 未自动连接（car_state=$st）——走手动 UI 输入（ip=$ip）"
-      local ui eb cb cand i
-      ui=$(_a_dump) || return 1
-      # 先验证 ManualConnectBox 可见性（「连接」按钮 = 存在性标志）——不可见时**不碰任何
-      # 输入框**。2026-10-17 S19 实证：竖屏 1080x2152 下 ManualConnectBox 被挤出屏幕外
-      # 且无滚动容器（P0.5 §F 3「两种方向都不可达」的真正原因）；任何 EditText 都是设置卡
-      # 数值框，旧序「先输后找」会把 IP 污染进目标帧率框（filter 后 "192"、失焦提交）。
-      cb=""
-      for cand in "连接" "Connect"; do
-        cb=$(_bounds_of_text "$ui" "$cand"); [ -n "$cb" ] && break
-      done
-      [ -n "$cb" ] || { log_err "A 的 UI 上找不到「连接/Connect」按钮（ManualConnectBox 不可达——竖屏超高被裁、无滚动容器；P0.5 §F 3 / S19 实证。重连请走「重启 app」原语）"; return 1; }
-      eb=$(_bounds_of_ip_edittext "$ui")
-      [ -n "$eb" ] || { log_err "A 的 UI 上找不到 IP 输入框（pattern not found — 按 .plan/e2e-observability.md §F 校准）"; return 1; }
-      _tap_bounds "$CAR_SERIAL" "$eb"; sleep 0.5
-      for i in $(seq 1 24); do dcar input keyevent KEYCODE_DEL > /dev/null 2>&1; done
-      dcar input text "$ip" > /dev/null 2>&1
-      sleep 0.3
-      _tap_bounds "$CAR_SERIAL" "$cb"
-      log_step "已点击「连接」（ip=$ip），待命处理 B 的授权框" ;;
+      _connect_manual_ui "$ip" || _connect_restart_fallback "$st" || return 1 ;;
   esac
 
   # ③ 收敛到 STREAMING（授权框轮询 + 状态等待）
@@ -240,7 +272,7 @@ op_connect() {
   # 的（重建 ×2，每次重建 = 重新握手 + 重新部署引擎 16s），叠加首次部署后
   # 最坏情况 ~110s（实测 freeze 时刻 car_state=STREAMING 只差几秒——90s 窗口
   # 卡在第三次部署完成前）。180s 覆盖「部署 + 风暴 ×2 + 波动」。
-  local deadline2=$((SECONDS + 180))
+  local deadline2=$((SECONDS + settle_wait_s))
   while [ "$SECONDS" -lt "$deadline2" ]; do
     [ "$(car_state_now)" = "STREAMING" ] && break
     accept_auth_dialog "$PHONE_SERIAL" 6 > /dev/null 2>&1 || true

@@ -1,6 +1,8 @@
 package com.dilinkauto.server.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -105,7 +108,9 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
         InfoBar(infoChips)
         BoxWithConstraints(
             modifier = Modifier.fillMaxSize().padding(40.dp),
-            contentAlignment = Alignment.Center
+            // issue #173 PA：窄屏内容列可滚动后，长列表必须从顶部起排；继续居中会在
+            // 超高竖屏上把开头/结尾裁掉。宽屏 Row 是 fillMaxSize，对齐方式不影响它。
+            contentAlignment = Alignment.TopCenter
         ) {
             val isWide = maxWidth > 700.dp
 
@@ -152,9 +157,20 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
                 }
             } else {
                 // Single-column layout for narrow screens
+                // issue #173 PA：MI 9 竖屏 1080x2152 上，Branding + statusCard(3 个
+                // SettingSection + 3 个 Switch) + [WifiAdbSetupCard] 已占满到 y≈2048，
+                // 末尾的 HowToConnect / ManualConnectBox 恒被挤出屏幕外且原先无滚动容器
+                // （scripts/lib/ops.sh 的 S19 实证）。只给窄屏内容列加滚动：
+                //   - imePadding() 让软键盘弹出时「连接」按钮仍在可滚到的范围内；
+                //   - 宽屏 Row 的 weight(1f)/CenterVertically 与无限高滚动约束耦合，
+                //     且本 issue 实证阻塞只在竖屏，无真机验证前不动横屏主形态；
+                //   - InfoBar 在 Box 叠加层，不会被卷进滚动内容。
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.widthIn(max = 560.dp)
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .imePadding()
+                        .verticalScroll(rememberScrollState())
                 ) {
                     BrandingSection()
                     Spacer(Modifier.height(32.dp))
