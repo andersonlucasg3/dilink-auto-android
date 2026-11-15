@@ -22,6 +22,8 @@ import android.util.Log
  * - 任何异常都必须就地吞掉并记录，绝不能让车机端崩溃；
  * - **必须在 IO 线程执行**：`sleepMs` 内部是阻塞 `Thread.sleep`，调用方不能是
  *   `Dispatchers.Main`（车机会卡 UI 3 秒）；
+ * - **必须可中止**：探针全程没有挂起点，取消协程不会自动打断阻塞循环，所以每一拍前都要
+ *   问一次 [shouldAbort]；否则断线后旧探针会跑完并继续往下一个会话回传；
  * - 反射入口可注入，单测可以在 JVM 上覆盖「类缺失 / 类存在但调用失败」两条路径。
  */
 internal class BydVehicleProbe(
@@ -31,6 +33,8 @@ internal class BydVehicleProbe(
     private val classLookup: (String) -> Class<*>? = { name -> runCatching { Class.forName(name) }.getOrNull() },
     /** 采样间隔的接缝，单测传 0 避免真睡眠。 */
     private val sleepMs: (Long) -> Unit = { Thread.sleep(it) },
+    /** 中止判定接缝：会话在采样途中被取消时返回 true，生产侧接协程 `isActive`。 */
+    private val shouldAbort: () -> Boolean = { false },
 ) {
     /** 单次会话最多采几拍转速（500ms 一拍 → 约 3 秒）。 */
     private val speedSamples = 6
@@ -38,12 +42,22 @@ internal class BydVehicleProbe(
     fun run() {
         emit("start pkg=${context?.packageName ?: "-"} uid=${runCatching { context?.applicationInfo?.uid }.getOrNull() ?: -1} sdk=${Build.VERSION.SDK_INT} debug=${com.dilinkauto.server.BuildConfig.DEBUG}")
         emit("note rpm 8191/65535 = invalid sentinel; speed raw unit varies by model")
+        if (abortedAt("start")) return
         reportPermission()
-        probeEngine()
-        probeStatistic()
-        probeSpeed()
-        probeAc()
+        // 每个 probe 返回 false 表示会话已结束；`done` 只在四组全部跑完时才出现，
+        // 否则日志读者会把「断线截断」当成「跑完了但读不到」。
+        if (!probeEngine()) return
+        if (!probeStatistic()) return
+        if (!probeSpeed()) return
+        if (!probeAc()) return
         emit("done")
+    }
+
+    /** 会话已结束就停下，并把停在哪一步记下来（避免把「没跑完」误读成「读不到」）。 */
+    private fun abortedAt(where: String): Boolean {
+        if (!shouldAbort()) return false
+        emit("aborted at $where")
+        return true
     }
 
     /** 权限现状：signature 级权限在非平台签名包里应当是 DENIED。 */
@@ -56,31 +70,39 @@ internal class BydVehicleProbe(
     }
 
     /** 主角：发动机转速。`getEngineSpeed()` → `super.get(1012, 0x14400012)`。 */
-    private fun probeEngine() {
-        val device = obtainDevice(ENGINE_DEVICE, "engine") ?: return
+    private fun probeEngine(): Boolean {
+        val device = obtainDevice(ENGINE_DEVICE, "engine") ?: return true
         for (i in 0 until speedSamples) {
+            if (abortedAt("engine speed[$i]")) return false
             emit("engine speed[$i]=${callInt(device, "getEngineSpeed")}")
             if (i != speedSamples - 1) sleepMs(SAMPLE_INTERVAL_MS)
         }
         emit("engine power=${callInt(device, "getEnginePower")}")
+        return true
     }
 
     /** 对照组：TripLogger 在这条路径上读到过真实值（SOC 86.0），用来区分「全挂」还是「只有 engine 不行」。 */
-    private fun probeStatistic() {
-        val device = obtainDevice(STATISTIC_DEVICE, "statistic") ?: return
+    private fun probeStatistic(): Boolean {
+        if (abortedAt("statistic")) return false
+        val device = obtainDevice(STATISTIC_DEVICE, "statistic") ?: return true
         emit("statistic soc=${callDouble(device, "getElecPercentageValue")}")
+        return true
     }
 
-    private fun probeSpeed() {
-        val device = obtainDevice(SPEED_DEVICE, "speed") ?: return
+    private fun probeSpeed(): Boolean {
+        if (abortedAt("speed")) return false
+        val device = obtainDevice(SPEED_DEVICE, "speed") ?: return true
         // 标签写 raw：`getCurrentSpeed()` 的原始单位随车型/固件而异，别写成 km/h 误导判读。
         emit("speed raw=${callDouble(device, "getCurrentSpeed")}")
+        return true
     }
 
     /** 更高门槛的对照：AC 设备初始化要求 `BYDAUTO_AC_COMMON`，比 engine 的 `_GET` 更严。 */
-    private fun probeAc() {
-        val device = obtainDevice(AC_DEVICE, "ac") ?: return
+    private fun probeAc(): Boolean {
+        if (abortedAt("ac")) return false
+        val device = obtainDevice(AC_DEVICE, "ac") ?: return true
         emit("ac temp(area=1)=${callInt(device, "getTemprature", 1)}")
+        return true
     }
 
     /**

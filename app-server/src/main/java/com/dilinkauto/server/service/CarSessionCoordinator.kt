@@ -201,10 +201,12 @@ internal class CarSessionCoordinator(
      * `probe/BydVehicleProbe.kt` 与测试一起删除（清理条件写在 issue #188 里）。
      *
      * 几个必须守住的点：
-     * - **握手之后再打开 logWriter**：手机端在握手后会下发 `LOG_TOGGLE`（release 手机默认关），
-     *   太早打开会被覆盖，探针行会被 `CarLogWriter.send` 的 `if (!enabled) return` 静默丢弃；
-     * - **跑完恢复原值**，不能把用户手动打开的日志关掉；
+     * - **握手之后才开始**，并且走 [CarLogWriter.sendUnconditional] 而不是去动全局开关：
+     *   手机端在握手后会下发 `LOG_TOGGLE`（release 手机默认关），临时 `setEnabled(true)`
+     *   会与它抢同一个开关，跑完再还原还会把用户刚打开的日志关掉（#72 回归）；
      * - **IO 线程**：`scope` 是 `Dispatchers.Main`，探针内部有阻塞 sleep；
+     * - **可中止**：探针没有挂起点，取消协程不会自动打断阻塞循环，必须把自己的 `isActive`
+     *   传进去，否则断线后旧探针会跑完并往下一个会话继续回传；
      * - 会话在 `CONNECTED` 之前就结束时补一行 skipped，避免把「没跑」误读成「读不到」。
      */
     private fun armBydVehicleProbe(parent: Job) {
@@ -215,19 +217,24 @@ internal class CarSessionCoordinator(
                     it == CarConnectionService.State.CONNECTED || it == CarConnectionService.State.STREAMING
                 }
             } catch (e: CancellationException) {
-                carLogSend("[BydProbe] skipped: session ended before CONNECTED", "W")
+                probeLog("[BydProbe] skipped: session ended before CONNECTED", "W")
                 throw e
             }
-            val wasEnabled = logWriter.isEnabled()
-            logWriter.setEnabled(true)
-            try {
-                runCatching { BydVehicleProbe(context = context, sink = { carLogSend(it, "I") }).run() }
-                    .onFailure { carLogSend("[BydProbe] crashed: ${it.javaClass.simpleName}: ${it.message}", "E") }
-            } finally {
-                logWriter.setEnabled(wasEnabled)
+            val self = coroutineContext[Job]
+            runCatching {
+                BydVehicleProbe(
+                    context = context,
+                    sink = { probeLog(it) },
+                    shouldAbort = { self?.isActive != true },
+                ).run()
+            }.onFailure {
+                probeLog("[BydProbe] crashed: ${it.javaClass.simpleName}: ${it.message}", "E")
             }
         }
     }
+
+    /** 探针专用上报：不受 `LOG_TOGGLE` 影响，否则手机上关着诊断日志时探针等于没跑。 */
+    private fun probeLog(msg: String, level: String = "I") = logWriter.sendUnconditional(msg, level)
 
     fun beginConnect(host: String, port: Int) {
         connectionScope?.cancel()

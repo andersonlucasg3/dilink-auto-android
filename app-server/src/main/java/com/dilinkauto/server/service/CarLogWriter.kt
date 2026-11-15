@@ -52,9 +52,6 @@ internal class CarLogWriter(
     /** Release builds default to off; the phone toggles via LOG_TOGGLE. */
     fun setEnabled(value: Boolean) { enabled = value }
 
-    /** 当前开关状态（issue #188 探针需要保存/恢复，避免覆盖手机端下发的 LOG_TOGGLE）。 */
-    fun isEnabled(): Boolean = enabled
-
     /**
      * Start of a new session: drop anything buffered from the previous one.
      *
@@ -112,6 +109,18 @@ internal class CarLogWriter(
     /** Log to logcat (honoring [enabled]) and enqueue for phone relay. */
     fun send(msg: String, level: String = "I") {
         if (!enabled) return
+        write(msg, level)
+    }
+
+    /**
+     * 绕过 [enabled] 的强制上报（issue #188 探针这类一次性诊断用）。
+     *
+     * 不能靠临时 `setEnabled(true)` 实现：那会和手机下发的 `LOG_TOGGLE` 抢同一个开关，
+     * 结束时还原还会把用户刚打开的日志关掉（#72 回归）。
+     */
+    fun sendUnconditional(msg: String, level: String = "I") = write(msg, level)
+
+    private fun write(msg: String, level: String) {
         when (level) {
             "D" -> Log.d(tag, msg)
             "W" -> Log.w(tag, msg)
