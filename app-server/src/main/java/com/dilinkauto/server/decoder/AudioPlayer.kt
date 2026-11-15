@@ -58,6 +58,15 @@ class AudioPlayer(
     /** 日志回调 —— 由 CarConnectionService 接到 `carLogSend`（同 `VideoDecoder.logSink`）。 */
     var logSink: ((String) -> Unit)? = null
 
+    /**
+     * 播放线程因不可恢复原因退出时的显式上报（issue #181）。
+     *
+     * 原来 CONFIG 超时只在线程内打一行日志就返回，上层完全不知道播放侧已经死了，
+     * 喂帧侧继续填 jitter 队列。该回调由 `CarConnectionService` 接到 `carLogSend(..., "E")`，
+     * 让「播放不可用」在会话层可见。
+     */
+    var onFatal: ((String) -> Unit)? = null
+
     private fun emit(line: String) {
         logSink?.invoke(line) ?: Log.i(TAG, line)
     }
@@ -260,9 +269,10 @@ class AudioPlayer(
         var codec: MediaCodec? = null
         var track: AudioTrack? = null
         try {
-            val firstConfig = awaitConfig() ?: run {
-                logE("No CONFIG within ${CONFIG_WAIT_TIMEOUT_MS}ms — playback thread exiting")
-                return
+            // issue #181：软阈值只告警、硬阈值才终结；超时由 awaitConfig 内显式上报。
+            val firstConfig = when (val wait = awaitConfig()) {
+                is AudioConfigWaitResult.Ready -> wait.config
+                is AudioConfigWaitResult.TimedOut, AudioConfigWaitResult.Stopped -> return
             }
             // 已应用的 CONFIG 代次：每次 configure 都会 +1，据此决定要不要重建解码器。
             var appliedGeneration = configGeneration
@@ -392,15 +402,29 @@ class AudioPlayer(
         }
     }
 
-    /** 等第一份 CONFIG（有界）。返回 null 表示超时/已停止。 */
-    private fun awaitConfig(): AudioPayload.Config? {
-        val deadline = SystemClock.elapsedRealtime() + CONFIG_WAIT_TIMEOUT_MS
-        while (running.get() && SystemClock.elapsedRealtime() < deadline) {
-            config?.let { return it }
-            LockSupport.parkNanos(2_000_000L)
-        }
-        return config
-    }
+    /**
+     * 等第一份 CONFIG（issue #181）。
+     *
+     * 软阈值 [AUDIO_CONFIG_SOFT_TIMEOUT_MS] 只告警「仍在等」，硬阈值
+     * [AUDIO_CONFIG_HARD_TIMEOUT_MS] 才终结；超时通过 `onFatal` 显式上报给会话层，
+     * 不再让播放线程无声无息地消失。
+     */
+    private fun awaitConfig(): AudioConfigWaitResult = AudioConfigWaiter(
+        config = { config },
+        running = { running.get() },
+        clockMs = { SystemClock.elapsedRealtime() },
+        onStillWaiting = { waited ->
+            logW(
+                "No CONFIG within ${waited}ms — still waiting up to ${AUDIO_CONFIG_HARD_TIMEOUT_MS}ms " +
+                    "(playback stays silent until CONFIG arrives)"
+            )
+        },
+        onTimeout = { waited ->
+            val reason = "No CONFIG within ${waited}ms — audio unavailable for this session"
+            logE(reason)
+            onFatal?.invoke(reason)
+        },
+    ).await()
 
     /**
      * 起播前把积压裁到目标水位（探针 `rx2` 的 prime 语义）。
@@ -605,9 +629,6 @@ class AudioPlayer(
          * 只会同时放大延迟与 `droppedOldest`，是掩盖不是修复（issue #164）。
          */
         private const val TRACK_BUFFER_FRAMES = 12
-
-        /** 等第一份 CONFIG 的上限；超时则播放线程退出（音频静默降级）。 */
-        private const val CONFIG_WAIT_TIMEOUT_MS = 3000L
 
         /** 起播攒水位（prime）的上限。 */
         private const val PRIME_TIMEOUT_MS = 3000L

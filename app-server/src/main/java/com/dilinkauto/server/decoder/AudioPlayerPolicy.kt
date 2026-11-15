@@ -1,5 +1,8 @@
 package com.dilinkauto.server.decoder
 
+import com.dilinkauto.protocol.AudioPayload
+import java.util.concurrent.locks.LockSupport
+
 /**
  * 车机端音频播放的纯判定/格式化（issue #73 分节 PB / Refs #13）。
  *
@@ -125,4 +128,76 @@ internal fun isPcmSilent(pcm: ByteArray): Boolean {
         if (b.toInt() != 0) return false
     }
     return true
+}
+
+/** 等第一份 CONFIG 的结果（issue #181）。 */
+internal sealed class AudioConfigWaitResult {
+    /** CONFIG 已到，可以建解码器/`AudioTrack` 起播。 */
+    data class Ready(val config: AudioPayload.Config) : AudioConfigWaitResult()
+
+    /** 硬超时：本次会话拿不到 CONFIG，调用方必须显式上报而不是静默退出。 */
+    data class TimedOut(val waitedMs: Long) : AudioConfigWaitResult()
+
+    /** `stop()` 已请求停止，属正常收尾，不算故障。 */
+    object Stopped : AudioConfigWaitResult()
+}
+
+/**
+ * 软阈值：到这里只告警「仍在等」，不退出（issue #181 候选 A）。
+ *
+ * 原实现把它当**硬退出**阈值：现场 CONFIG 只晚 109 ms 就整段静音。原因是这段预算
+ * 从车机侧音频 TCP 连上就开始计（`CarSessionCoordinator.connectAudioIfEnabled`），
+ * 而手机端 9640 的 accept 被刻意放在视频管线 unpark 之后（`PipelineServer.run`），
+ * CONFIG 只能在 accept + 采集 + 首帧编码输出之后才发 —— 覆盖的是 VD/GL bring-up，
+ * 与音频首包快慢无关。
+ */
+internal const val AUDIO_CONFIG_SOFT_TIMEOUT_MS = 3000L
+
+/** 硬阈值：与视频首帧同量级（8~10s），到这里才终结并显式上报。 */
+internal const val AUDIO_CONFIG_HARD_TIMEOUT_MS = 10_000L
+
+/** 轮询粒度，与原实现一致（2 ms）。 */
+internal const val AUDIO_CONFIG_POLL_NANOS = 2_000_000L
+
+/**
+ * 等第一份 CONFIG 的时序机（issue #181，纯 JVM 可测）。
+ *
+ * 时钟与睡眠都从构造参数注入，单测用假时钟把 3.1 s / 10 s 压成毫秒级，
+ * 不必真的起播放线程，也不依赖 `SystemClock`（无 Robolectric 时它只返回默认值）。
+ *
+ * 规则（表驱动钉在 `AudioConfigWaitTest`）：
+ * 1. 每轮先读 CONFIG —— 到达优先于任何超时判定，迟到 109 ms 也能起播；
+ * 2. 到 [softTimeoutMs] 只回调一次 [onStillWaiting]（可观测，但不退出）；
+ * 3. 到 [hardTimeoutMs] 才回调 [onTimeout] 并返回 [AudioConfigWaitResult.TimedOut]，
+ *    调用方必须据此显式上报，不能静默退出；
+ * 4. `running` 转 false（`stop()`）立即返回 [AudioConfigWaitResult.Stopped]，不算故障。
+ */
+internal class AudioConfigWaiter(
+    private val config: () -> AudioPayload.Config?,
+    private val running: () -> Boolean,
+    private val clockMs: () -> Long,
+    private val parkNanos: (Long) -> Unit = { LockSupport.parkNanos(it) },
+    private val softTimeoutMs: Long = AUDIO_CONFIG_SOFT_TIMEOUT_MS,
+    private val hardTimeoutMs: Long = AUDIO_CONFIG_HARD_TIMEOUT_MS,
+    private val onStillWaiting: (Long) -> Unit = {},
+    private val onTimeout: (Long) -> Unit = {},
+) {
+    fun await(): AudioConfigWaitResult {
+        val startMs = clockMs()
+        var warned = false
+        while (true) {
+            config()?.let { return AudioConfigWaitResult.Ready(it) }
+            if (!running()) return AudioConfigWaitResult.Stopped
+            val waited = clockMs() - startMs
+            if (waited >= hardTimeoutMs) {
+                onTimeout(waited)
+                return AudioConfigWaitResult.TimedOut(waited)
+            }
+            if (!warned && waited >= softTimeoutMs) {
+                warned = true
+                onStillWaiting(waited)
+            }
+            parkNanos(AUDIO_CONFIG_POLL_NANOS)
+        }
+    }
 }
