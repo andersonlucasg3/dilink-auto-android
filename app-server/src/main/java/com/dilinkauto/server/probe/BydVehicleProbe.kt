@@ -77,6 +77,7 @@ internal class BydVehicleProbe(
             emit("engine speed[$i]=${callInt(device, "getEngineSpeed")}")
             if (i != speedSamples - 1) sleepMs(SAMPLE_INTERVAL_MS)
         }
+        if (abortedAt("engine power")) return false
         emit("engine power=${callInt(device, "getEnginePower")}")
         return true
     }

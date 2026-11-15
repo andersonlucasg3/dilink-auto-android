@@ -177,7 +177,7 @@ internal class CarSessionCoordinator(
         adbTracker.resetAdbReadiness()
 
         logWriter.setEnabled(com.dilinkauto.server.BuildConfig.DEBUG)
-        logWriter.beginSession()
+        logWriter.beginSession(BydVehicleProbe.TAG)
         carPrefs.userDisconnected = false
         _state.value = CarConnectionService.State.CONNECTING
         _statusMessage.value = context.getString(R.string.status_connecting)
