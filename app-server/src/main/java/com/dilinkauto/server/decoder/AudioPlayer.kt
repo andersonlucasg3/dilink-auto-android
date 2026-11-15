@@ -58,6 +58,15 @@ class AudioPlayer(
     /** 日志回调 —— 由 CarConnectionService 接到 `carLogSend`（同 `VideoDecoder.logSink`）。 */
     var logSink: ((String) -> Unit)? = null
 
+    /**
+     * 播放线程因不可恢复原因退出时的显式上报（issue #181）。
+     *
+     * 原来 CONFIG 超时只在线程内打一行日志就返回，上层完全不知道播放侧已经死了，
+     * 喂帧侧继续填 jitter 队列。该回调由 `CarConnectionService` 接到 `carLogSend(..., "E")`，
+     * 让「播放不可用」在会话层可见。
+     */
+    var onFatal: ((String) -> Unit)? = null
+
     private fun emit(line: String) {
         logSink?.invoke(line) ?: Log.i(TAG, line)
     }
@@ -75,8 +84,21 @@ class AudioPlayer(
 
     private val running = AtomicBoolean(false)
 
+    /**
+     * 播放侧是否已判定不可用（issue #181）。
+     *
+     * 致命退出（CONFIG 硬超时 / 解码器或 `AudioTrack` 创建失败）后置 true，
+     * [onFrame] 据此不再入队 —— 否则喂帧侧会继续把 jitter 队列填满、持续刷丢帧日志，
+     * 而播放线程已经不在了。**不改丢帧策略本身**（丢最旧帧属 #179）。
+     */
+    @Volatile
+    private var playbackFailed = false
+
     /** 播放线程是否在跑。 */
     val isRunning: Boolean get() = running.get()
+
+    /** 播放侧是否已判定不可用（issue #181，诊断/测试用）。 */
+    val isPlaybackFailed: Boolean get() = playbackFailed
 
     /** 当前会话的抖动缓冲；未 [start] 时为 null（[onFrame] 直接丢弃）。 */
     @Volatile
@@ -174,10 +196,12 @@ class AudioPlayer(
      * FRAME 先于 CONFIG 到达时丢弃（裸 AAC 无 ADTS，缺 csd 解不了），并留一条痕迹。
      */
     fun onFrame(frame: AudioPayload.Frame) {
-        if (!running.get()) return
-        if (config == null) {
-            val n = framesBeforeConfig.incrementAndGet()
-            if (n <= 3) logW("FRAME before CONFIG (${frame.data.size}B) — dropped")
+        if (!audioShouldEnqueueFrame(running.get(), playbackFailed, config != null)) {
+            // CONFIG 还没到时留一条痕迹；播放侧已判死则整段静默，不再刷丢帧日志。
+            if (running.get() && !playbackFailed) {
+                val n = framesBeforeConfig.incrementAndGet()
+                if (n <= 3) logW("FRAME before CONFIG (${frame.data.size}B) — dropped")
+            }
             return
         }
         val buf = jitter ?: return
@@ -214,6 +238,7 @@ class AudioPlayer(
             droppedOldestValue = 0
             inputDropValue = 0
             framesBeforeConfig.set(0)
+            playbackFailed = false
 
             log("Starting: bufferMs=${buf.bufferMs} targetFrames=${buf.targetFrames} capacity=${buf.capacity}")
 
@@ -260,21 +285,24 @@ class AudioPlayer(
         var codec: MediaCodec? = null
         var track: AudioTrack? = null
         try {
-            val firstConfig = awaitConfig() ?: run {
-                logE("No CONFIG within ${CONFIG_WAIT_TIMEOUT_MS}ms — playback thread exiting")
-                return
-            }
+            // issue #181：软阈值只告警、硬阈值才终结；超时由 awaitFirstConfig 内显式上报。
+            val firstConfig = awaitFirstConfig(
+                configSource = { config },
+                runningSource = { running.get() },
+                clockMs = { SystemClock.elapsedRealtime() },
+                parkNanos = { LockSupport.parkNanos(it) },
+            ) ?: return
             // 已应用的 CONFIG 代次：每次 configure 都会 +1，据此决定要不要重建解码器。
             var appliedGeneration = configGeneration
 
             codec = buildDecoder(firstConfig)
             if (codec == null) {
-                logE("Failed to create AAC decoder — playback thread exiting")
+                reportFatal("decoder fatal: Failed to create AAC decoder — audio unavailable for this session")
                 return
             }
             track = buildTrack(firstConfig)
             if (track == null) {
-                logE("Failed to create AudioTrack — playback thread exiting")
+                reportFatal("track fatal: Failed to create AudioTrack — audio unavailable for this session")
                 return
             }
             track.play()
@@ -381,8 +409,8 @@ class AudioPlayer(
                 }
             }
         } catch (e: Throwable) {
-            // 音频绝不许把异常穿到会话层（R6）；native 崩坏也只留一行。
-            logE("Playback loop died: ${e.javaClass.simpleName}: ${e.message}")
+            // 音频绝不许把异常穿到会话层（R6）；native 崩坏也只留一行 + 显式上报。
+            reportFatal("playback fatal: ${e.javaClass.simpleName}: ${e.message}")
         } finally {
             // 线程是它捕获的 codec/track 的唯一释放属主（无论正常退出还是抛异常）。
             try { codec?.stop() } catch (_: Exception) {}
@@ -392,14 +420,58 @@ class AudioPlayer(
         }
     }
 
-    /** 等第一份 CONFIG（有界）。返回 null 表示超时/已停止。 */
-    private fun awaitConfig(): AudioPayload.Config? {
-        val deadline = SystemClock.elapsedRealtime() + CONFIG_WAIT_TIMEOUT_MS
-        while (running.get() && SystemClock.elapsedRealtime() < deadline) {
-            config?.let { return it }
-            LockSupport.parkNanos(2_000_000L)
+    /**
+     * 起播前等第一份 CONFIG，并处理软/硬阈值（issue #181）。
+     *
+     * 从 [playbackLoop] 抽出来是为了能在纯 JVM 单测里注入时钟，并锁住
+     * 「`TimedOut` → [reportFatal] → [onFatal]」这条接线（删掉会红）。
+     *
+     * @return CONFIG；硬超时或 `stop()` 返回 null。
+     */
+    internal fun awaitFirstConfig(
+        configSource: () -> AudioPayload.Config?,
+        runningSource: () -> Boolean,
+        clockMs: () -> Long,
+        parkNanos: (Long) -> Unit,
+        softTimeoutMs: Long = AUDIO_CONFIG_SOFT_TIMEOUT_MS,
+        hardTimeoutMs: Long = AUDIO_CONFIG_HARD_TIMEOUT_MS,
+    ): AudioPayload.Config? {
+        val wait = AudioConfigWaiter(
+            config = configSource,
+            running = runningSource,
+            clockMs = clockMs,
+            parkNanos = parkNanos,
+            softTimeoutMs = softTimeoutMs,
+            hardTimeoutMs = hardTimeoutMs,
+            onStillWaiting = { waited ->
+                logW(
+                    "No CONFIG within ${waited}ms — still waiting up to ${hardTimeoutMs}ms " +
+                        "(playback stays silent until CONFIG arrives)"
+                )
+            },
+            onTimeout = { waited ->
+                reportFatal("CONFIG fatal: No CONFIG within ${waited}ms — audio unavailable for this session")
+            },
+        ).await()
+        return when (wait) {
+            is AudioConfigWaitResult.Ready -> wait.config
+            is AudioConfigWaitResult.TimedOut, AudioConfigWaitResult.Stopped -> null
         }
-        return config
+    }
+
+    /**
+     * 致命退出：置 [playbackFailed]、放掉 [running]，并显式上报会话层（issue #181）。
+     *
+     * 顺序不能反：先置 [playbackFailed] 再 `running.set(false)`。若并发 `start()`
+     * 插在中间，它先看到 running=false 会复位 playbackFailed=false，旧线程再置 true
+     * 就会误关新线程的喂帧闸门。先置失败标记可让最坏情况变成「新线程已启动后被标记失败」，
+     * 由下一次 `start()` 正常复位（评审建议）。
+     */
+    private fun reportFatal(reason: String) {
+        playbackFailed = true
+        running.set(false)
+        logE(reason)
+        onFatal?.invoke(reason)
     }
 
     /**
@@ -605,9 +677,6 @@ class AudioPlayer(
          * 只会同时放大延迟与 `droppedOldest`，是掩盖不是修复（issue #164）。
          */
         private const val TRACK_BUFFER_FRAMES = 12
-
-        /** 等第一份 CONFIG 的上限；超时则播放线程退出（音频静默降级）。 */
-        private const val CONFIG_WAIT_TIMEOUT_MS = 3000L
 
         /** 起播攒水位（prime）的上限。 */
         private const val PRIME_TIMEOUT_MS = 3000L
