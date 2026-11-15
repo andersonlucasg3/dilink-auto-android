@@ -46,6 +46,11 @@ internal class CarLogWriter(
 
     private val tsFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
 
+    private companion object {
+        /** 离线缓冲上限（行）：车机内存有限，断线期间只留最近的上下文。 */
+        const val MAX_BUFFER_LINES = 10000
+    }
+
     @Volatile private var enabled: Boolean = false
     @Volatile private var started: Boolean = false
 
@@ -75,6 +80,8 @@ internal class CarLogWriter(
             if (keepMarker != null && line.contains(keepMarker)) kept.add(line)
         }
         for (line in kept) {
+            // 重放路径同样受 [MAX_BUFFER_LINES] 约束，避免多次「连不上→重连」把保留行堆上去。
+            if (bufferCount.get() >= MAX_BUFFER_LINES) break
             buffer.add(line)
             bufferCount.incrementAndGet()
         }
@@ -102,8 +109,8 @@ internal class CarLogWriter(
                             try { conn.sendData(DataMsg.CAR_LOG, line.toByteArray(Charsets.UTF_8)) }
                             catch (_: Exception) {}
                         } else {
-                            // Buffer for later — cap at 10000 lines.
-                            if (bufferCount.get() < 10000) {
+                            // Buffer for later — cap at [MAX_BUFFER_LINES].
+                            if (bufferCount.get() < MAX_BUFFER_LINES) {
                                 buffer.add(line)
                                 bufferCount.incrementAndGet()
                             }
