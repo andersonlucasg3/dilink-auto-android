@@ -56,22 +56,22 @@ fun CarShell(service: CarConnectionService) {
     val statusMessage by service.statusMessage.collectAsState()
     val videoReady by service.videoReady.collectAsState()
     val timeState by service.timeState.collectAsState()
-    val altitudeState by service.altitudeState.collectAsState()
     val weatherState by service.weatherState.collectAsState()
     val phoneStatusState by service.phoneStatusState.collectAsState()
     val isConnected = state == CarConnectionService.State.STREAMING ||
             state == CarConnectionService.State.CONNECTED
 
-    // issue #39 / #40 / #41 / #151：常驻信息 chip：时间 + 海拔 + 天气 + 手机电量。
+    // issue #39 / #40 / #41 / #151：常驻信息 chip：时间 + 天气 + 手机电量。
     // 天气：state 为 null（从未成功）时也加 chip 渲染 `—`，让用户知道此栏存在；
-    // altitudeState 本身为 null（provider 尚未初始化）时不加 chip。
-    // issue #54：这三项改为常驻 —— 横屏进左侧导航栏，竖屏进顶部信息条，不再随 Screen 切换隐藏。
+    // issue #50：海拔 chip 已移除 —— 车机 GPS 不给垂直精度（`vAcc=none`），稳态读数
+    // 与真实海拔差 22.6m，BYD 厂商接口也没有海拔来源，没有可信数据就不上屏。
+    // `AltitudeProvider` 仍保留采集与 `[Altitude]` 诊断日志，将来有可信来源可直接恢复渲染。
+    // issue #54：其余三项常驻 —— 横屏进左侧导航栏，竖屏进顶部信息条，不再随 Screen 切换隐藏。
     // issue #151：电量同样常驻，未收到/已断开渲染 `—`；文本由 protocol-core 的
     // BatteryFormat 生成（`86%` / `86%+`），受左栏 76dp 定宽约束，不加图标。
-    val infoChips = remember(timeState, altitudeState, weatherState, phoneStatusState) {
+    val infoChips = remember(timeState, weatherState, phoneStatusState) {
         buildList {
             timeState?.let { add(InfoChip(it.text)) }
-            altitudeState?.let { add(InfoChip(com.dilinkauto.protocol.AltitudeFormat.formatAltitude(it.meters))) }
             // 天气：把 WeatherUiState 转成 chip 文本；null（从未成功）渲染 `—`。
             val weatherText = weatherState?.let {
                 com.dilinkauto.protocol.WeatherFormat.formatWeather(
