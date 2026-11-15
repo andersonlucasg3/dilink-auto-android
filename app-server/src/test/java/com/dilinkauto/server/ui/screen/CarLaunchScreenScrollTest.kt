@@ -102,30 +102,25 @@ class CarLaunchScreenScrollTest {
     }
 
     @Test
-    fun `wide right column is vertically scrollable with a bounded height`() {
-        // issue #182：车机 1204x660 横屏下右列（4 个 SettingSection + 4 个 Switch +
-        // 可选的 WifiAdbSetupCard + ManualConnectBox）远超一屏。原先右列只有
-        // weight(1f) —— 只约束宽度，高度 wrap-content，且没有任何滚动容器，
+    fun `wide right column is vertically scrollable`() {
+        // issue #182：车机 1204x660 横屏下右列（statusCard 的 3 个 SettingSection +
+        // 3 个 Switch + 可选的 WifiAdbSetupCard + ManualConnectBox）远超一屏。
+        // 原先右列只有 weight(1f)，高度 wrap-content，且没有任何滚动容器，
         // 底部选项恒被裁到屏幕外点不到（issue 证据链）。
         // #173 PA 曾断言「横屏不得有 verticalScroll」，理由是 Row(fillMaxSize) +
-        // weight(1f) 与无限高约束耦合；本修复用 fillMaxHeight 的 Box 给出有界高度，
-        // 该理由不再成立，断言随之反转。
+        // weight(1f) 与无限高约束耦合；实际上 Row 已给出有界 maxHeight，该理由
+        // 不成立，断言随之反转。
         assertTrue(
             "宽屏右列必须挂 .verticalScroll(rememberScrollState())，否则底部选项永远点不到",
             wide.contains(".verticalScroll(rememberScrollState())"),
         )
         assertTrue(
-            "宽屏滚动列必须有 fillMaxHeight 的有界父容器，否则 verticalScroll 会落进无界测量",
-            wide.contains(".fillMaxHeight()"),
-        )
-        assertTrue(
             "宽屏滚动列必须挂 .imePadding()，否则软键盘弹出时底部「手动连接」输入框不可达",
             wide.contains(".imePadding()"),
         )
-        assertEquals(
-            "整文件应有两处 verticalScroll（横屏右列 + 窄屏单列）",
-            2,
-            Regex("""\.verticalScroll\(""").findAll(src).count(),
+        assertTrue(
+            "窄屏单列原有的 verticalScroll 不能被宽屏改动顺手删掉",
+            narrow.contains(".verticalScroll(rememberScrollState())"),
         )
     }
 
