@@ -7,6 +7,7 @@ import com.dilinkauto.server.R
 import com.dilinkauto.server.adb.WifiGatewayProbe
 import com.dilinkauto.server.decoder.AudioPlayer
 import com.dilinkauto.server.decoder.VideoDecoder
+import com.dilinkauto.server.probe.BydVehicleProbe
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.concurrent.ExecutorService
@@ -176,7 +177,7 @@ internal class CarSessionCoordinator(
         adbTracker.resetAdbReadiness()
 
         logWriter.setEnabled(com.dilinkauto.server.BuildConfig.DEBUG)
-        logWriter.beginSession()
+        logWriter.beginSession(BydVehicleProbe.TAG)
         carPrefs.userDisconnected = false
         _state.value = CarConnectionService.State.CONNECTING
         _statusMessage.value = context.getString(R.string.status_connecting)
@@ -188,7 +189,52 @@ internal class CarSessionCoordinator(
             startWifiTrack()
             adbTracker.startUsbTrack(trackScope())
         }
+
+        // issue #188 探针（临时诊断代码，见 armBydVehicleProbe 的注释）
+        armBydVehicleProbe(parent)
     }
+
+    /**
+     * issue #188：连接建立后在车机侧读一次 BYDAuto 车辆数据，结果经 `CAR_LOG` 回传手机。
+     *
+     * 临时诊断代码 —— `BydVehicleProbe.ENABLED = false` 即整体失效，结论落定后连同
+     * `probe/BydVehicleProbe.kt` 与测试一起删除（清理条件写在 issue #188 里）。
+     *
+     * 几个必须守住的点：
+     * - **握手之后才开始**，并且走 [CarLogWriter.sendUnconditional] 而不是去动全局开关：
+     *   手机端在握手后会下发 `LOG_TOGGLE`（release 手机默认关），临时 `setEnabled(true)`
+     *   会与它抢同一个开关，跑完再还原还会把用户刚打开的日志关掉（#72 回归）；
+     * - **IO 线程**：`scope` 是 `Dispatchers.Main`，探针内部有阻塞 sleep；
+     * - **可中止**：探针没有挂起点，取消协程不会自动打断阻塞循环，必须把自己的 `isActive`
+     *   传进去，否则断线后旧探针会跑完并往下一个会话继续回传；
+     * - 会话在 `CONNECTED` 之前就结束时补一行 skipped，避免把「没跑」误读成「读不到」。
+     */
+    private fun armBydVehicleProbe(parent: Job) {
+        if (!BydVehicleProbe.ENABLED) return
+        scope.launch(parent + Dispatchers.IO) {
+            try {
+                _state.first {
+                    it == CarConnectionService.State.CONNECTED || it == CarConnectionService.State.STREAMING
+                }
+            } catch (e: CancellationException) {
+                probeLog("[BydProbe] skipped: session ended before CONNECTED", "W")
+                throw e
+            }
+            val self = coroutineContext[Job]
+            runCatching {
+                BydVehicleProbe(
+                    context = context,
+                    sink = { probeLog(it) },
+                    shouldAbort = { self?.isActive != true },
+                ).run()
+            }.onFailure {
+                probeLog("[BydProbe] crashed: ${it.javaClass.simpleName}: ${it.message}", "E")
+            }
+        }
+    }
+
+    /** 探针专用上报：不受 `LOG_TOGGLE` 影响，否则手机上关着诊断日志时探针等于没跑。 */
+    private fun probeLog(msg: String, level: String = "I") = logWriter.sendUnconditional(msg, level)
 
     fun beginConnect(host: String, port: Int) {
         connectionScope?.cancel()
@@ -197,6 +243,7 @@ internal class CarSessionCoordinator(
         scope.launch(parent) {
             adbTracker.startUsbTrack(trackScope())
         }
+        armBydVehicleProbe(parent)
         connectToPhone(host, port)
     }
 

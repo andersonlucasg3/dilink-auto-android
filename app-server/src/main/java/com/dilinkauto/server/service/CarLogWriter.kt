@@ -46,6 +46,11 @@ internal class CarLogWriter(
 
     private val tsFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
 
+    private companion object {
+        /** 离线缓冲上限（行）：车机内存有限，断线期间只留最近的上下文。 */
+        const val MAX_BUFFER_LINES = 10000
+    }
+
     @Volatile private var enabled: Boolean = false
     @Volatile private var started: Boolean = false
 
@@ -60,12 +65,26 @@ internal class CarLogWriter(
      * next one wastes memory on a 4GB device and flushes stale context on
      * reconnect (audit S-L4). Called by [CarConnectionService.startConnection].
      *
+     * [keepMarker] 命中的行跨会话保留（issue #188）：探针的 `skipped` / `crashed` 恰好
+     * 产生在断线瞬间 —— 此时控制链路已断，行只能进 buffer，而下个会话的 [beginSession]
+     * 会把它清掉，于是「探针根本没跑」这条最需要看见的结论永远到不了手机。
+     *
      * Deliberately does NOT clear [logQueue]: lines still queued there belong
      * to the teardown that just finished and are worth shipping.
      */
-    fun beginSession() {
-        while (true) { if (buffer.poll() == null) break }
-        bufferCount.set(0)
+    fun beginSession(keepMarker: String? = null) {
+        val kept = ArrayList<String>()
+        while (true) {
+            val line = buffer.poll() ?: break
+            bufferCount.decrementAndGet()
+            if (keepMarker != null && line.contains(keepMarker)) kept.add(line)
+        }
+        for (line in kept) {
+            // 重放路径同样受 [MAX_BUFFER_LINES] 约束，避免多次「连不上→重连」把保留行堆上去。
+            if (bufferCount.get() >= MAX_BUFFER_LINES) break
+            buffer.add(line)
+            bufferCount.incrementAndGet()
+        }
     }
 
     /** Idempotent — safe to call from [CarConnectionService.onCreate]. */
@@ -90,8 +109,8 @@ internal class CarLogWriter(
                             try { conn.sendData(DataMsg.CAR_LOG, line.toByteArray(Charsets.UTF_8)) }
                             catch (_: Exception) {}
                         } else {
-                            // Buffer for later — cap at 10000 lines.
-                            if (bufferCount.get() < 10000) {
+                            // Buffer for later — cap at [MAX_BUFFER_LINES].
+                            if (bufferCount.get() < MAX_BUFFER_LINES) {
                                 buffer.add(line)
                                 bufferCount.incrementAndGet()
                             }
@@ -109,6 +128,18 @@ internal class CarLogWriter(
     /** Log to logcat (honoring [enabled]) and enqueue for phone relay. */
     fun send(msg: String, level: String = "I") {
         if (!enabled) return
+        write(msg, level)
+    }
+
+    /**
+     * 绕过 [enabled] 的强制上报（issue #188 探针这类一次性诊断用）。
+     *
+     * 不能靠临时 `setEnabled(true)` 实现：那会和手机下发的 `LOG_TOGGLE` 抢同一个开关，
+     * 结束时还原还会把用户刚打开的日志关掉（#72 回归）。
+     */
+    fun sendUnconditional(msg: String, level: String = "I") = write(msg, level)
+
+    private fun write(msg: String, level: String) {
         when (level) {
             "D" -> Log.d(tag, msg)
             "W" -> Log.w(tag, msg)
