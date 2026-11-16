@@ -120,21 +120,27 @@ internal fun audioTrackBufferStats(
  * `buildTrack` 的实际缓冲日志行（issue #206 的冻结契约）：
  *
  * ```
- * AudioTrack buffer: 12288 frames ≈ 256ms (49152B; requested=49152B/12 frames, min=8224)
+ * AudioTrack buffer: 12288 frames ≈ 256ms (49152B; requested=49152B/12288 frames, min=8224)
  * ```
  *
- * 归因 underrun 时看的是**实际分配值**（ROM 会把请求值向上取整），所以这里传的是
- * `AudioTrack` 读回来的帧数，而不是 `maxOf(minBufferSize, 12 帧)` 的请求值。
+ * **行内两个 `frames` 必须是同一套单位（AudioTrack 帧）**：实际值取
+ * `AudioTrack.getBufferSizeInFrames()`，请求值由 [requestedBytes] 按
+ * `channelCount × 2B` 换算，而不是拿 `bufferBytes / (1024 × channelCount × 2)`
+ * 得到的「PCM 块数」。后者正是 1024 口径的指纹：实车请求 12 个 PCM 块 = 49152B，
+ * 换算成 AudioTrack 帧就是 12288 帧 —— 与 `bufferSizeInFrames` 同一个数。
+ *
+ * 归因 underrun 时看的是**实际分配值**（ROM 会把请求值向上取整），所以 [frames] 传的是
+ * `AudioTrack` 读回来的帧数，不是 `maxOf(minBufferSize, 12 个 PCM 块)` 的请求值。
  */
 internal fun audioTrackBufferLine(
     frames: Int,
     sampleRate: Int,
     channelCount: Int,
     requestedBytes: Int,
-    requestedFrames: Int,
     minBytes: Int,
 ): String {
     val stats = audioTrackBufferStats(frames, sampleRate, channelCount)
+    val requestedFrames = requestedBytes / (channelCount * AUDIO_BYTES_PER_SAMPLE)
     return "AudioTrack buffer: ${stats.frames} frames ≈ ${stats.durationMs}ms " +
         "(${stats.bytes}B; requested=${requestedBytes}B/$requestedFrames frames, min=$minBytes)"
 }

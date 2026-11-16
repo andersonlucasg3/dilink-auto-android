@@ -570,7 +570,6 @@ class AudioPlayer(
                     sampleRate = config.sampleRate,
                     channelCount = config.channelCount,
                     requestedBytes = bufferBytes,
-                    requestedFrames = bufferBytes / frameBytes,
                     minBytes = minBytes,
                 )
             )

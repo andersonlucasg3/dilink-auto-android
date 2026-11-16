@@ -227,11 +227,29 @@ class AudioPlayerPolicyTest {
     fun `audioTrack buffer line is the frozen log contract`() {
         assertEquals(
             "AudioTrack buffer: 12288 frames ≈ 256ms " +
-                "(49152B; requested=49152B/12 frames, min=8224)",
+                "(49152B; requested=49152B/12288 frames, min=8224)",
             audioTrackBufferLine(
                 frames = 12288, sampleRate = 48000, channelCount = 2,
-                requestedBytes = 49152, requestedFrames = 12, minBytes = 8224,
+                requestedBytes = 49152, minBytes = 8224,
             ),
         )
+    }
+
+    @Test
+    fun `requested frames use the AudioTrack frame unit not PCM blocks`() {
+        // 实车请求 12 个 PCM 块 = 49152B，换算成 AudioTrack 帧（2ch × 2B）就是 12288 帧，
+        // 与 `bufferSizeInFrames` 同口径。旧实现打 12（49152/4096），是 1024 口径的指纹。
+        val stereo = audioTrackBufferLine(
+            frames = 12288, sampleRate = 48000, channelCount = 2,
+            requestedBytes = 49152, minBytes = 8224,
+        )
+        assertTrue(stereo.contains("(49152B; requested=49152B/12288 frames"))
+
+        // 单声道：49152B = 24576 帧（按 PCM 块算会得到 24，差 1024 倍）。
+        val mono = audioTrackBufferLine(
+            frames = 24576, sampleRate = 48000, channelCount = 1,
+            requestedBytes = 49152, minBytes = 4112,
+        )
+        assertTrue(mono.contains("(49152B; requested=49152B/24576 frames"))
     }
 }

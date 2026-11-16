@@ -170,14 +170,12 @@ internal class GlPipeline(
         // （frameCount）触发，静止短路后 frames 几乎不涨，120 帧门槛要几分钟才到，
         // 既观测不到 idleSkip，也会让 e2e 的 wait_stream_alive 误判「流静止」。
         var tickCount = 0L; var lastLogTick = 0L
-        // issue #206：周期行的窗口口径。累计值（frames/ticks/idleSkip/tex/cb）原样保留，
-        // 另算「本窗口」增量与墙钟窗口长度；`mpixPerSec` 也按本窗口实际发送帧数算
-        // （旧实现是循环外按目标 fps 算常量，帧更少反而吞吐更高）。
-        var lastLogNanos = System.nanoTime()
-        var lastLogTicks = 0L; var lastLogFrames = 0L
-        var lastLogIdleSkips = 0L; var lastLogKeepAlives = 0L
-        var lastLogTexUpdates = 0L
-        var lastLogCallbacks = frameCbCount.get()
+        // issue #206：窗口增量与墙钟基线统一由 PipelineWindowTracker 维护（单测可注入假时钟）。
+        // 累计值（frames/ticks/idleSkip/tex/cb）原样保留；`mpixPerSec` 按本窗口实际
+        // 发送帧数算（旧实现是循环外按目标 fps 算常量，帧更少反而吞吐更高）。
+        val windowTracker = PipelineWindowTracker(
+            initial = PipelineCounters(0, 0, 0, 0, 0, frameCbCount.get())
+        )
         var texUpdates = 0L; var swapFails = 0L
         var sendDrops = 0L; var lastWriteMs = 0L
         // issue #153-PA：静止画面短路的状态与计数。lastComposeNanos=0 表示本会话
@@ -293,16 +291,16 @@ internal class GlPipeline(
 
                 if (tickCount - lastLogTick >= 120) {
                     lastLogTick = tickCount
-                    val nowLogNanos = System.nanoTime()
                     val callbacksNow = frameCbCount.get()
-                    val win = PipelineWindow(
-                        ticks = tickCount - lastLogTicks,
-                        frames = frameCount - lastLogFrames,
-                        idleSkips = idleSkip - lastLogIdleSkips,
-                        keepAlives = keepAliveCount - lastLogKeepAlives,
-                        texUpdates = texUpdates - lastLogTexUpdates,
-                        callbacks = callbacksNow - lastLogCallbacks,
-                        windowMs = (nowLogNanos - lastLogNanos) / 1_000_000L,
+                    val win = windowTracker.snapshot(
+                        PipelineCounters(
+                            ticks = tickCount,
+                            frames = frameCount,
+                            idleSkips = idleSkip,
+                            keepAlives = keepAliveCount,
+                            texUpdates = texUpdates,
+                            callbacks = callbacksNow,
+                        )
                     )
                     PipeLog.log(
                         pipelineStatLine(
@@ -327,10 +325,6 @@ internal class GlPipeline(
                             height = displayHeight,
                         )
                     )
-                    lastLogTicks = tickCount; lastLogFrames = frameCount
-                    lastLogIdleSkips = idleSkip; lastLogKeepAlives = keepAliveCount
-                    lastLogTexUpdates = texUpdates; lastLogCallbacks = callbacksNow
-                    lastLogNanos = nowLogNanos
                 }
             }
         } finally {

@@ -62,14 +62,36 @@ class PipelineStatsTest {
     }
 
     @Test
-    fun `idle skips and frames share the same window denominator`() {
-        // 一个窗口内 120 拍：112 拍静止跳过 + 8 拍保活合成 = 120，帧数 15。
-        // 「跳过比例」只能拿 winIdle/winTicks 算，不能拿 winIdle/winFrames（那不是比例）。
-        val win = PipelineWindow(
-            ticks = 120, frames = 15, idleSkips = 112, keepAlives = 8,
-            texUpdates = 0, callbacks = 0, windowMs = 4000,
-        )
-        assertEquals(win.ticks, win.idleSkips + win.keepAlives)
-        assertEquals(15L, win.frames)
+    fun `window tracker advances every baseline including the wall clock`() {
+        var nowNanos = 0L
+        val tracker = PipelineWindowTracker({ nowNanos })
+
+        nowNanos = 4_000_000_000L
+        val first = tracker.snapshot(PipelineCounters(120, 15, 112, 8, 3, 20))
+        assertEquals(4000L, first.windowMs)
+        assertEquals(120L, first.ticks)
+
+        nowNanos = 10_000_000_000L
+        val second = tracker.snapshot(PipelineCounters(240, 30, 224, 16, 6, 40))
+        // 若复位漏掉 `lastNanos = nowNanos`，第二个窗口会变成 10000ms（跨两个窗口）；
+        // 漏掉任一计数基线同理会让对应增量翻倍。
+        assertEquals(6000L, second.windowMs)
+        assertEquals(120L, second.ticks)
+        assertEquals(15L, second.frames)
+        assertEquals(112L, second.idleSkips)
+        assertEquals(8L, second.keepAlives)
+        assertEquals(3L, second.texUpdates)
+        assertEquals(20L, second.callbacks)
+    }
+
+    @Test
+    fun `window tracker keeps the pre-loop callback baseline`() {
+        // 监听器在 pipelineLoop 之前就注册了，第一窗口不应把之前的回调算成自己的增量。
+        var nowNanos = 0L
+        val tracker = PipelineWindowTracker({ nowNanos }, PipelineCounters(0, 0, 0, 0, 0, 16))
+        nowNanos = 4_000_000_000L
+        val win = tracker.snapshot(PipelineCounters(120, 15, 112, 8, 0, 16))
+        assertEquals(0L, win.callbacks)
+        assertEquals(0L, win.texUpdates)
     }
 }

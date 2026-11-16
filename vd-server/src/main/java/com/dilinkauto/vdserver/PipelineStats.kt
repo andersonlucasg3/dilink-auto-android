@@ -40,6 +40,51 @@ internal data class PipelineWindow(
     val windowMs: Long,
 )
 
+/** 管线循环的累计计数（每拍更新，供 [PipelineWindowTracker] 切窗口增量）。 */
+internal data class PipelineCounters(
+    val ticks: Long,
+    val frames: Long,
+    val idleSkips: Long,
+    val keepAlives: Long,
+    val texUpdates: Long,
+    val callbacks: Long,
+)
+
+/**
+ * 把累计计数切成「本窗口」增量（issue #206）。
+ *
+ * 每次 [snapshot] 必须**同时推进六个计数基线与墙钟基线**。只复位其中一部分会让下一个
+ * 窗口跨两段（典型错误：漏掉 `lastNanos = nowNanos`，第二个窗口的 `winMs` 就是两个
+ * 窗口之和，`mpixPerSec` 随之被腰斩）。这段逻辑单独成类，才能在纯 JVM 单测里注入
+ * 假时钟把复位行为钉住。
+ *
+ * @param clockNanos 单调时钟（纳秒），默认 [System.nanoTime]。
+ * @param initial 会话开始时的基线（`frameCbCount` 在 `pipelineLoop` 之前就可能非 0）。
+ */
+internal class PipelineWindowTracker(
+    private val clockNanos: () -> Long = System::nanoTime,
+    initial: PipelineCounters = PipelineCounters(0, 0, 0, 0, 0, 0),
+) {
+    private var lastCounters = initial
+    private var lastNanos = clockNanos()
+
+    fun snapshot(now: PipelineCounters): PipelineWindow {
+        val nowNanos = clockNanos()
+        val win = PipelineWindow(
+            ticks = now.ticks - lastCounters.ticks,
+            frames = now.frames - lastCounters.frames,
+            idleSkips = now.idleSkips - lastCounters.idleSkips,
+            keepAlives = now.keepAlives - lastCounters.keepAlives,
+            texUpdates = now.texUpdates - lastCounters.texUpdates,
+            callbacks = now.callbacks - lastCounters.callbacks,
+            windowMs = (nowNanos - lastNanos) / 1_000_000L,
+        )
+        lastCounters = now
+        lastNanos = nowNanos
+        return win
+    }
+}
+
 /** 一条 `Pipeline:` 统计行的累计字段（与窗口增量分开，便于单测逐字段钉住）。 */
 internal data class PipelineSnapshot(
     val frames: Long,
