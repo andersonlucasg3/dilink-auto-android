@@ -167,14 +167,28 @@ class VideoDecoder {
     @Volatile
     var msSinceControlFrame: (() -> Long)? = null
 
-    private var frameCount = 0L
+    /**
+     * 收帧 / 喂帧 / 丢弃的唯一账本（issue #205）。
+     *
+     * 以前 `receiveCount / frameCount / dropCount / keyFrames*` 是五个各自 `++` 的散字段：
+     * 冷启动补喂 `cachedKeyFrame` 没记 fed、`stop()` 清队列与缓存不记账、`!configFed` 早退
+     * 直接 `return` —— 现场 `keys_recv=123 keys_fed=118 keys_drop=0` 的「差 5」就是这么来的。
+     * 现在四个数是同一台账的四项，不变式 `received == fed + dropped + pending` 每行统计都校验。
+     * `internal` 供行为级单测直接判决账目。
+     */
+    internal val intake = IntakeAccounting()
 
     /**
-     * 网络线程累计收到的帧数。喂帧线程读它算 STALL 增量（issue #58），跨线程可见性靠
-     * `@Volatile`；它只做诊断，不作为控制流判据。
+     * MediaCodec 生命周期台账（issue #205）：创建/释放各打一行 `codec generation=N`。
+     *
+     * 现场「建 5 次只停 4 次」的真相是断线瞬间的 `Stopping decoder` 进了离线缓冲、被下个
+     * 会话 `beginSession` 清掉，但日志里没有配对锚点时「泄漏」和「日志丢了」无法区分。
      */
+    private val codecLedger = CodecLifecycleLedger()
+
+    /** 当前 codec 的代号（0 = 没有活着的 codec）；汇总行与 finally 释放都用它配对。 */
     @Volatile
-    private var receiveCount = 0L
+    private var codecGeneration = 0
 
     /**
      * 累计出帧数。喂帧线程在 drainOutput() 里自增，网络线程的黑屏闸门会读它
@@ -182,17 +196,13 @@ class VideoDecoder {
      */
     @Volatile
     private var renderCount = 0L
-    private var dropCount = 0L
     private var inputFailCount = 0L
-    private var keyFramesReceived = 0L
-    private var keyFramesFed = 0L
-    private var keyFramesDropped = 0L
 
     /**
-     * 重同步期间在**接收入口**被丢掉的 P 帧数（issue #200），与 [dropCount] 分开计数。
+     * 重同步期间在**接收入口**被丢掉的 P 帧数（issue #200），与总账里的 `drops` 分开计数。
      *
-     * [dropCount] 保留「参考链因积压/超时产生的洞」的原口径；这里的帧根本没进队列，
-     * 不会占满 8 槽、也不会挤掉关键帧。`internal` 供行为级单测观察。
+     * 总账（[intake]）的 `drops` 保留「参考链因积压/超时产生的洞」的原口径；这里的帧根本
+     * 没进队列，不会占满 8 槽、也不会挤掉关键帧。`internal` 供行为级单测观察。
      */
     internal var resyncSkippedFrames = 0L
 
@@ -312,7 +322,7 @@ class VideoDecoder {
      */
     internal fun noteGap() {
         if (!resync.onGap()) return
-        logW("Reference chain broken — waiting for next IDR (${dropCount} drops, ${inputFailCount} inputFails)")
+        logW("Reference chain broken — waiting for next IDR (${intake.snapshot().dropped} drops, ${inputFailCount} inputFails)")
         onNeedsSyncFrame?.invoke()
     }
 
@@ -398,12 +408,15 @@ class VideoDecoder {
                 return
             }
             codec = newCodec
+            // issue #205：先领代号再判竞态 —— 这里的竞态回退与喂帧线程的 finally 是两条
+            // 释放路径，共用同一个 generation，日志才能严格配对。
+            val generation = codecLedger.onCreated()
+            codecGeneration = generation
 
             if (!running.get()) {
                 // Lost a race with stop(): tear down what we just built.
-                logW("start(): stop() raced codec creation — releasing the fresh codec")
-                try { newCodec.stop() } catch (_: Exception) {}
-                try { newCodec.release() } catch (_: Exception) {}
+                logW("start(): stop() raced codec creation — releasing the fresh codec (codec generation=$generation)")
+                releaseCodec(newCodec, generation, "start/stop race")
                 codec = null
                 return
             }
@@ -411,12 +424,19 @@ class VideoDecoder {
             outputSurfaceValid = true
             // 新解码器实例还没有在它绑定的 Surface 上出过帧（issue #198）。
             framesRenderedOnSurface = 0
-            log("MediaCodec created: name=${newCodec.name} dims=${width}x${height} operatingRate=$effectiveFps")
+            log("MediaCodec created: codec generation=$generation name=${newCodec.name} dims=${width}x${height} operatingRate=$effectiveFps")
 
-            frameCount = 0
             renderCount = 0
-            dropCount = 0
             inputFailCount = 0
+            intake.reset()
+            // issue #205：会话开始前队列里可能已经有帧（网络线程在 start() 之前入队），它们
+            // 属于本会话的「已接收、待喂」，必须补记 recv + pending，否则后面喂入时 pending
+            // 会变成负数。CONFIG 不进账（与 onFrameReceived 同口径）。
+            frameQueue.forEach { queued -> if (!queued.isConfig) intake.onReceived(queued.isKeyFrame) }
+            // issue #205：停播期缓存下来的 IDR 对本会话而言是「已接收、待补喂」——先播种，
+            // 冷启动补喂时再由 onFed 销账。否则 fed 会凭空多出一帧，收/喂/丢三本账永远差 1
+            // （现场 5 次会话差 5 正是这么来的）。
+            if (cachedKeyFrame != null) intake.onReceived(isKey = true)
             // issue #203：新解码器实例重新起算实测帧率窗口。
             fpsWindowStartMs = 0L
             measuredFps = 0.0
@@ -448,7 +468,13 @@ class VideoDecoder {
                     // keyframe IS the reference, not a post-flush resync.
                     cachedKeyFrame?.let { key ->
                         log("Feeding cached KEYFRAME for cold-start reference (${key.size} bytes)")
-                        feedBuffer(decoder, key, 0)
+                        // issue #205：补喂的是「已接收」的帧（start() 里播种），成功记 fed、
+                        // 失败记 drop。以前这里既不记 fed 也不记 drop，正是差 5 的来源。
+                        if (feedBuffer(decoder, key, 0)) {
+                            intake.onFed(isKey = true)
+                        } else {
+                            intake.onDropped(isKey = true)
+                        }
                         cachedKeyFrame = null
                     }
 
@@ -468,7 +494,9 @@ class VideoDecoder {
                             return
                         }
                         if (!configFed) {
-                            if (frameCount == 0L) log("Waiting for CONFIG before feeding video frames")
+                            if (intake.snapshot().fed == 0L) log("Waiting for CONFIG before feeding video frames")
+                            // 帧已经从队列取出，必须销账：既不喂也不记丢，账就永远差这一帧（issue #205）。
+                            intake.onDropped(isKey = frame.isKeyFrame)
                             return
                         }
                         val isKey = frame.isKeyFrame
@@ -477,6 +505,8 @@ class VideoDecoder {
                         // 很快到队头；能索要时还会经 onNeedsSyncFrame 让手机立刻补一个。
                         if (!resync.shouldFeed(isKey)) {
                             skipCount++
+                            // 拒喂的帧同样是「已接收、未喂入」，必须记丢（issue #205）。
+                            intake.onDropped(isKey)
                             if (skipCount <= 5 || skipCount % 30 == 0L) {
                                 logW("Resync: skipping P-frame #$skipCount until next IDR")
                             }
@@ -486,19 +516,21 @@ class VideoDecoder {
                             log("Resync: resynced at IDR keyframe after skipping $skipCount P-frames")
                             skipCount = 0L
                         }
-                        if (isKey) {
-                            keyFramesFed++
-                            log("Feeding KEYFRAME #$keyFramesFed size=${frame.data.size} (fed=$frameCount rendered=$renderCount)")
-                        }
                         val decodeStart = if (debugFrameStats) System.nanoTime() else 0L
                         val fed = feedBuffer(decoder, frame.data, 0)
                         if (debugFrameStats) windowDecodeNanos += System.nanoTime() - decodeStart
                         if (fed) {
-                            frameCount++
+                            intake.onFed(isKey)
+                            if (isKey) {
+                                // 关键帧日志只在真的喂进去之后打，避免「记了 fed 但其实没喂」。
+                                val fedNow = intake.snapshot()
+                                log("Feeding KEYFRAME #${fedNow.keyFed} size=${frame.data.size} (fed=${fedNow.fed} rendered=$renderCount)")
+                            }
                         } else {
-                            dropCount++
+                            intake.onDropped(isKey)
                         }
-                        if (frameCount % 30 == 0L) {
+                        val snap = intake.snapshot()
+                        if (snap.fed > 0L && snap.fed % 30 == 0L) {
                             // issue #203：实测入帧帧率（墙钟口径，始终开启），与手机端
                             // `Pipeline:` 行的 newFps= 相互印证；不进协议、只进日志与设置页。
                             val nowMs = SystemClock.elapsedRealtime()
@@ -511,13 +543,17 @@ class VideoDecoder {
                             }
                             fpsWindowStartMs = nowMs
                             val fpsText = " fps=%.1f".format(measuredFps)
+                            val counters = "rendered=$renderCount drops=${snap.dropped} inputFails=$inputFailCount " +
+                                "keys_recv=${snap.keyReceived} keys_fed=${snap.keyFed} keys_drop=${snap.keyDropped}"
                             if (debugFrameStats) {
                                 val decodeMs = windowDecodeNanos / 1_000_000.0
-                                log("Fed $frameCount rendered=$renderCount drops=$dropCount inputFails=$inputFailCount keys_recv=$keyFramesReceived keys_fed=$keyFramesFed keys_drop=$keyFramesDropped queue=${frameQueue.size} skips=$skipCount resync=${resync.awaitingIdr} decodeMs=${"%.1f".format(decodeMs)}$fpsText")
+                                log("Fed ${snap.fed} $counters queue=${frameQueue.size} skips=$skipCount resync=${resync.awaitingIdr} decodeMs=${"%.1f".format(decodeMs)}$fpsText")
                                 windowDecodeNanos = 0L
                             } else {
-                                log("Fed $frameCount rendered=$renderCount drops=$dropCount inputFails=$inputFailCount keys_recv=$keyFramesReceived keys_fed=$keyFramesFed keys_drop=$keyFramesDropped queue=${frameQueue.size} skips=$skipCount resync=${resync.awaitingIdr}$fpsText")
+                                log("Fed ${snap.fed} $counters queue=${frameQueue.size} skips=$skipCount resync=${resync.awaitingIdr}$fpsText")
                             }
+                            // issue #205：每行统计校验一次不变式，不平立刻可查（四项数值一起打）。
+                            intake.violationText()?.let { logW("Intake accounting mismatch: $it") }
                         }
                     }
 
@@ -531,15 +567,17 @@ class VideoDecoder {
                         // issue #58：记录「两次渲染推进之间的间隔」，停顿超阈值时留一条 STALL
                         // 汇总行。卡顿是「停顿后恢复」，恢复必经这里，所以不会漏报。
                         val tickNowMs = SystemClock.elapsedRealtime()
+                        // issue #205：四个诊断数取同一份快照，避免逐字段读跨越两次自增。
+                        val tick = intake.snapshot()
                         renderStall.onTick(
                             nowMs = tickNowMs,
                             snap = RenderStallDetector.Snapshot(
                                 renders = renderCount,
-                                receive = receiveCount,
-                                fed = frameCount,
-                                drops = dropCount,
+                                receive = tick.received,
+                                fed = tick.fed,
+                                drops = tick.dropped,
                                 inputFails = inputFailCount,
-                                keysDropped = keyFramesDropped,
+                                keysDropped = tick.keyDropped,
                                 queueSize = frameQueue.size,
                                 awaitingIdr = resync.awaitingIdr,
                                 skips = skipCount,
@@ -555,11 +593,11 @@ class VideoDecoder {
                             val ctrlSilent = controlSilenceText()
                             when (r.level) {
                                 StallEscalationPolicy.Level.GAP -> {
-                                    logDiagW("LINK GAP ${r.gapMs}ms — no render advance (renders=$renderCount recv=$receiveCount fed=$frameCount drops=$dropCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent) — pre-arming resync + one IDR request")
+                                    logDiagW("LINK GAP ${r.gapMs}ms — no render advance (renders=$renderCount recv=${tick.received} fed=${tick.fed} drops=${tick.dropped} queue=${frameQueue.size} ctrlSilent=$ctrlSilent) — pre-arming resync + one IDR request")
                                     noteGap()
                                 }
                                 StallEscalationPolicy.Level.STALLED ->
-                                    logDiagW("STALLED ${r.gapMs}ms — still no render advance (renders=$renderCount recv=$receiveCount fed=$frameCount drops=$dropCount inputFails=$inputFailCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent resync=${resync.awaitingIdr})")
+                                    logDiagW("STALLED ${r.gapMs}ms — still no render advance (renders=$renderCount recv=${tick.received} fed=${tick.fed} drops=${tick.dropped} inputFails=$inputFailCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent resync=${resync.awaitingIdr})")
                             }
                         }
 
@@ -588,15 +626,15 @@ class VideoDecoder {
                             frame = frameQueue.poll()
                         }
                     }
-                    log("Feed thread exiting: fed=$frameCount rendered=$renderCount drops=$dropCount")
+                    val exitSnap = intake.snapshot()
+                    log("Feed thread exiting: fed=${exitSnap.fed} rendered=$renderCount drops=${exitSnap.dropped}")
                 } finally {
                     // The thread owns the codec it captured (audit S-07): release
                     // it here whether we exited normally or threw. This is the
                     // only release path that is guaranteed to run *after* this
                     // thread has left every native MediaCodec call.
                     synchronized(codecLock) {
-                        try { decoder.stop() } catch (_: Exception) {}
-                        try { decoder.release() } catch (_: Exception) {}
+                        releaseCodec(decoder, generation, "feed thread exit")
                     }
                 }
             }, "VideoDecoderFeed").apply { start() }
@@ -717,9 +755,11 @@ class VideoDecoder {
      *    Only drop a keyframe as absolute last resort (all queued frames are keyframes).
      */
     fun onFrameReceived(isConfig: Boolean, data: ByteArray) {
-        receiveCount++
         val isKey = !isConfig && isKeyFrame(data)
-        if (isKey) keyFramesReceived++
+        // issue #205：CONFIG 不进账（它不是视频帧，`Fed` 的帧率口径与 #203 都按视频帧算），
+        // 其余每帧在这里入账一次，之后只允许 onFed / onDropped 销账一次。
+        if (!isConfig) intake.onReceived(isKey)
+        val receivedNow = intake.snapshot().received
         // 黑屏检测：连续多个 I 帧都极小视为疑似黑屏（去重告警一次），出现正常大小 I 帧则清除。
         val wasAlerted = blackScreen.isAlerted()
         blackScreen.onSustainedBlackScreen = { onSustainedBlackScreen?.invoke() }
@@ -732,21 +772,33 @@ class VideoDecoder {
             // 画面回来了：自愈节奏重新起算，别让上一段黑屏的起点漏到下一段。
             contentBlackHeal.reset()
         }
-        if (isConfig || isKey || receiveCount <= 3 || receiveCount % 60 == 0L) {
-            log("onFrameReceived #$receiveCount isConfig=$isConfig isKey=$isKey size=${data.size} running=${running.get()} queue=${frameQueue.size}")
+        if (isConfig || isKey || receivedNow <= 3 || receivedNow % 60 == 0L) {
+            log("onFrameReceived #$receivedNow isConfig=$isConfig isKey=$isKey size=${data.size} running=${running.get()} queue=${frameQueue.size}")
         }
         // Always cache CONFIG — needed to bootstrap the next decoder instance.
         // A fresh CONFIG establishes a new stream boundary, so any stale cached
         // keyframe from the previous stream must be discarded.
         if (isConfig) {
             configData = data
-            cachedKeyFrame = null
+            // 被新码流边界作废的缓存 IDR 从此再也不会喂入，必须记丢（issue #205）。
+            if (cachedKeyFrame != null) {
+                cachedKeyFrame = null
+                intake.onDropped(isKey = true)
+            }
         }
         // When stopped, cache the most recent IDR so start() can feed it as a
         // reference frame. P-frames are dropped (no codec to decode them).
         if (!running.get() && !isConfig) {
             if (isKey) {
+                // 旧缓存被新 IDR 覆盖：它既不会被喂也不会再被解，记丢并留一行痕迹（issue #205）。
+                if (cachedKeyFrame != null) {
+                    intake.onDropped(isKey = true)
+                    logW("Cached KEYFRAME replaced by a newer one before start() — counted as dropped")
+                }
                 cachedKeyFrame = data
+            } else {
+                // 停播期到达的 P 帧没有解码器可解，接收即丢（以前只记 recv，账面上凭空多一帧）。
+                intake.onDropped(isKey = false)
             }
             return
         }
@@ -757,8 +809,11 @@ class VideoDecoder {
         // 只留关键帧/CONFIG 参与排队。
         if (!isConfig && !isKey && resync.awaitingIdr) {
             resyncSkippedFrames++
+            // 入口丢弃同样要销账（issue #205）：`resyncSkippedFrames` 是独立口径，
+            // 但它必须同时体现为总账里的一次丢弃，否则 recv 会永远领先 fed+drop。
+            intake.onDropped(isKey = false)
             if (resyncSkippedFrames <= 5 || resyncSkippedFrames % 60 == 0L) {
-                logW("Resync: dropped P-frame at receive #$resyncSkippedFrames until next IDR (receive=$receiveCount queue=${frameQueue.size})")
+                logW("Resync: dropped P-frame at receive #$resyncSkippedFrames until next IDR (receive=$receivedNow queue=${frameQueue.size})")
             }
             return
         }
@@ -769,13 +824,14 @@ class VideoDecoder {
             while (!frameQueue.offer(frame)) {
                 // Evict oldest P-frame. If only keyframes queued, drop oldest keyframe.
                 val evicted = frameQueue.poll()
-                dropCount++
-                if (evicted != null && evicted.isKeyFrame) keyFramesDropped++
+                // CONFIG 不进账，驱逐它不记丢；视频帧（含关键帧）逐帧销账（issue #205）。
+                if (evicted != null && !evicted.isConfig) intake.onDropped(evicted.isKeyFrame)
+                val droppedNow = intake.snapshot()
                 // 被驱逐的帧（无论是 P 还是关键帧）都在参考链上留了洞：
                 // 进入重同步，队列里剩余的陈旧 P 帧一律不喂。
                 noteGap()
-                if (dropCount <= 3 || dropCount % 60 == 0L) {
-                    logW("Queue full — evicted for KEYFRAME #$dropCount (keys_dropped=$keyFramesDropped)")
+                if (droppedNow.dropped <= 3 || droppedNow.dropped % 60 == 0L) {
+                    logW("Queue full — evicted for KEYFRAME #${droppedNow.dropped} (keys_dropped=${droppedNow.keyDropped})")
                 }
                 if (evicted == null) break
             }
@@ -784,11 +840,12 @@ class VideoDecoder {
 
         // P-frame: try to enqueue, drop if full
         if (!frameQueue.offer(frame)) {
-            dropCount++
+            intake.onDropped(isKey = false)
             // 丢 P 帧 = 参考链有洞，后续 P 帧不可信 → 重同步到下一个 IDR。
             noteGap()
-            if (dropCount <= 5 || dropCount % 60 == 0L) {
-                logW("Queue full — dropped incoming P-frame #$dropCount (receive=$receiveCount)")
+            val droppedNow = intake.snapshot()
+            if (droppedNow.dropped <= 5 || droppedNow.dropped % 60 == 0L) {
+                logW("Queue full — dropped incoming P-frame #${droppedNow.dropped} (receive=$receivedNow)")
             }
         }
     }
@@ -858,13 +915,23 @@ class VideoDecoder {
         synchronized(lifecycleLock) {
             if (!running.getAndSet(false)) return
             outputSurfaceValid = false
-            log("Stopping decoder: fed=$frameCount rendered=$renderCount drops=$dropCount inputFails=$inputFailCount")
+            // issue #205：先把队列里和缓存里「已接收、未喂入」的帧记成丢弃，再把汇总行打出来
+            // —— 否则每次 stop 都会静默吞掉最多 8 帧 + 1 个缓存 IDR，账永远差在身上。
+            while (true) {
+                val queued = frameQueue.poll() ?: break
+                // CONFIG 不进账（它从未被 onReceived 记过），只结视频帧的账。
+                if (!queued.isConfig) intake.onDropped(queued.isKeyFrame)
+            }
+            if (cachedKeyFrame != null) {
+                cachedKeyFrame = null
+                intake.onDropped(isKey = true)
+            }
+            val stopSnap = intake.snapshot()
+            log("Stopping decoder: fed=${stopSnap.fed} rendered=$renderCount drops=${stopSnap.dropped} inputFails=$inputFailCount codec generation=$codecGeneration")
             resetBlackScreenState()
             liveness.reset()
             contentBlackHeal.reset()
             resync.reset()
-            frameQueue.clear()
-            cachedKeyFrame = null
 
             val thread = feedThread
             feedThread = null
@@ -879,7 +946,7 @@ class VideoDecoder {
                 // SIGSEGV pattern this repo works around on the vd-server side
                 // with a watchdog (audit S-07). Leave the field alone; the
                 // thread's finally clears nothing but does release its own ref.
-                logW("Feed thread still alive after 2s join — leaving codec release to the thread's finally")
+                logW("Feed thread still alive after 2s join — leaving codec release to the thread's finally (codec generation=$codecGeneration)")
                 codec = null
                 return
             }
@@ -889,6 +956,61 @@ class VideoDecoder {
             // raise IllegalStateException on an already-released instance —
             // the thread is the single owner of the release (audit S-07).
             codec = null
+            codecGeneration = 0
+            // issue #205：会话结束时对账 —— 队列已清、线程已退出，pending 必须归零。
+            intake.violationText()?.let { logW("Intake accounting mismatch after stop: $it") }
+            val pending = intake.snapshot().pending
+            if (pending != 0L) logW("Intake accounting leak after stop: pending=$pending")
+        }
+    }
+
+    /**
+     * 重建解码器的**唯一**入口（issue #205）：`stop()` + `start()`，generation 随之递增。
+     *
+     * 所有「Surface 换了 / 重绑失败要重来」的分支都走这里，保证旧 codec 一定先被释放、
+     * 新 codec 一定拿到新代号，日志里 created/released 可以严格配对。目前调用方是
+     * #198 的 `switchSurface` 失败回退；黑屏重建与 viewport 重握手只重连、不重建解码器，
+     * 语义不变。
+     */
+    fun recreateDecoder(surface: Surface, width: Int, height: Int, fps: Int, reason: String) {
+        logW("Recreating decoder: reason=$reason")
+        stop()
+        start(surface, width, height, fps)
+    }
+
+    /**
+     * 进程退出前的生命周期对账（issue #205）：非 0 时打 W 并列出代号。
+     *
+     * 由 `CarSessionCoordinator.shutdown()` 排在解码器执行器末尾调用 —— 在 `stop()` 之后、
+     * 执行器结束之前，既能看到真实残留，也不会把「stop 还在排队」误报成泄漏。
+     */
+    fun logUnreleasedCodecs() {
+        val outstanding = codecLedger.outstanding()
+        if (outstanding == 0) {
+            log("unreleased codecs=0 at shutdown")
+        } else {
+            logW("unreleased codecs=$outstanding at shutdown (generations=${codecLedger.liveGenerations()})")
+        }
+    }
+
+    /**
+     * 释放解码器的唯一出口（issue #205）：先 stop 再 release，各自吞异常，最后销账并打配对行。
+     *
+     * 两条路径共用它：喂帧线程的 finally（正常/异常退出）与 `start()` 里输给 `stop()` 的
+     * 竞态回退。同一 generation 被释放两次会打 W —— 那正是「建 5 次只停 4 次」里最怕的情况。
+     */
+    private fun releaseCodec(decoder: MediaCodec, generation: Int, reason: String) {
+        val known = releaseCodecQuietly(
+            ledger = codecLedger,
+            generation = generation,
+            stop = { decoder.stop() },
+            release = { decoder.release() },
+        )
+        val outstanding = codecLedger.outstanding()
+        if (known) {
+            log("codec generation=$generation released (reason=$reason, outstanding=$outstanding)")
+        } else {
+            logW("codec generation=$generation released twice / unknown (reason=$reason, outstanding=$outstanding)")
         }
     }
 
@@ -906,6 +1028,16 @@ companion object {
          * 守护测试见 `VideoDecoderQueueCapacityTest`。
          */
         internal const val FRAME_QUEUE_CAPACITY = 8
+
+        /**
+         * 解码器生命周期行（`codec generation=N created/released`、`Stopping decoder`）的统一标记
+         * （issue #205）。
+         *
+         * 这些行恰好产生在断线瞬间：控制链路已断 → 只能进 `CarLogWriter` 离线缓冲 → 下个会话
+         * `beginSession` 会清掉整个缓冲。现场「建 5 次只停 4 次」正是这么被清出来的假象，
+         * 所以把标记交给 `beginSession` 跨会话保留，created/released 才有机会配对。
+         */
+        internal const val LIFECYCLE_LOG_MARKER = "codec generation="
 
         /**
          * How long the stream must stay black before [onSustainedBlackScreen]
