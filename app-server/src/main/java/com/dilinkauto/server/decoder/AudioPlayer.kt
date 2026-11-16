@@ -124,8 +124,13 @@ class AudioPlayer(
 
     private val decodedFrames = AtomicLong(0)
     private val starvedFrames = AtomicLong(0)
-    private val silenceFrames = AtomicLong(0)
     private val maxRecoverMsValue = AtomicLong(0)
+
+    /**
+     * issue #194：输入/输出两侧的音频诊断计数（`inZero` / `inMin` / `inMax` / `outZero` /
+     * `outRmsMax`）。纯对象放在 `AudioPlayerPolicy.kt`，这里只负责在正确的调用点上喂它。
+     */
+    private val diag = AudioRxDiag()
 
     /**
      * 累计由「有输入但本拍无输出」这条路径补的静音帧（issue #164）。
@@ -157,8 +162,8 @@ class AudioPlayer(
     /** 累计欠载补静音帧数。 */
     val starved: Long get() = starvedFrames.get()
 
-    /** 累计解码出的全零静音帧数（issue #84 / Refs #79）。 */
-    val silence: Long get() = silenceFrames.get()
+    /** 累计解码出的全零静音帧数（issue #84 / Refs #79；issue #194 起与输入侧分开计数）。 */
+    val silence: Long get() = diag.outZero
 
     /** 累计「有输入但本拍无输出」补的静音帧数（issue #164）。 */
     val padIdle: Long get() = padIdleFrames.get()
@@ -205,6 +210,8 @@ class AudioPlayer(
             return
         }
         val buf = jitter ?: return
+        // issue #194：收到即统计（含稍后被队列丢最旧的帧），与解码输出侧分开计数。
+        diag.onInput(frame.data)
         val dropped = buf.enqueue(frame)
         if (dropped > 0) {
             droppedOldestValue = buf.droppedOldest
@@ -230,7 +237,7 @@ class AudioPlayer(
             jitter = buf
             decodedFrames.set(0)
             starvedFrames.set(0)
-            silenceFrames.set(0)
+            diag.reset()
             maxRecoverMsValue.set(0)
             padIdleFrames.set(0)
             underrunValue = 0
@@ -258,7 +265,7 @@ class AudioPlayer(
     fun stop() {
         synchronized(lifecycleLock) {
             if (!running.getAndSet(false)) return
-            log("Stopping: decoded=${decodedFrames.get()} starved=${starvedFrames.get()} silence=${silenceFrames.get()} underrun=$underrunValue maxRecoverMs=${maxRecoverMsValue.get()} queue=$queueDepthValue padIdle=${padIdleFrames.get()}")
+            log("Stopping: decoded=${decodedFrames.get()} starved=${starvedFrames.get()} silence=${diag.outZero} underrun=$underrunValue maxRecoverMs=${maxRecoverMsValue.get()} queue=$queueDepthValue padIdle=${padIdleFrames.get()}")
             emitStatLine()
             jitter?.clear()
             jitter = null
@@ -591,9 +598,8 @@ class AudioPlayer(
                     outBuf.limit(info.offset + info.size)
                     val pcm = ByteArray(info.size)
                     outBuf.get(pcm)
-                    if (isPcmSilent(pcm)) {
-                        silenceFrames.incrementAndGet()
-                    }
+                    // issue #194：输出侧同时累计 outZero 与窗口 RMS；`silence` 就是这里的 outZero。
+                    diag.onOutput(pcm)
                     wrote += writePcm(track, pcm)
                 }
                 try { codec.releaseOutputBuffer(outId, false) } catch (_: Exception) {}
@@ -632,6 +638,8 @@ class AudioPlayer(
     }
 
     private fun emitStatLine() {
+        // issue #194：outRmsMax 是窗口值，取走即复位，避免下一行继续报旧值。
+        val rmsMax = diag.consumeWindowRmsMax()
         emit(
             audioPlayerStatLine(
                 decoded = decodedFrames.get(),
@@ -639,8 +647,23 @@ class AudioPlayer(
                 underrun = underrunValue,
                 maxRecoverMs = maxRecoverMsValue.get(),
                 queue = queueDepthValue,
-                silence = silenceFrames.get(),
+                silence = diag.outZero,
                 padIdle = padIdleFrames.get(),
+                inZero = diag.inZero,
+                inMin = diag.inMinBytes,
+                inMax = diag.inMaxBytes,
+                outRmsMax = rmsMax,
+            )
+        )
+        // 单独一行便于 `grep AudioDiag` 同时抓发送侧与接收侧，不依赖上面那行是否被改动。
+        emit(
+            audioRxDiagLine(
+                inFrames = diag.inFrames,
+                inZero = diag.inZero,
+                inMin = diag.inMinBytes,
+                inMax = diag.inMaxBytes,
+                outZero = diag.outZero,
+                outRmsMax = rmsMax,
             )
         )
     }

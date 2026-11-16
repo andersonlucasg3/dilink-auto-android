@@ -24,10 +24,11 @@ class AudioPlayerPolicyTest {
     fun `stat line matches the frozen S6 grep contract`() {
         val line = audioPlayerStatLine(
             decoded = 469, starved = 3, underrun = 2, maxRecoverMs = 45, queue = 9, silence = 12,
-            padIdle = 7,
+            padIdle = 7, inZero = 0, inMin = 300, inMax = 420, outRmsMax = 812,
         )
         assertEquals(
-            "[AudioPlayer] decoded=469 starved=3 underrun=2 maxRecoverMs=45 queue=9 silence=12 padIdle=7",
+            "[AudioPlayer] decoded=469 starved=3 underrun=2 maxRecoverMs=45 queue=9 silence=12 " +
+                "padIdle=7 inZero=0 inMin=300 inMax=420 outRmsMax=812",
             line,
         )
     }
@@ -37,7 +38,8 @@ class AudioPlayerPolicyTest {
         val line = audioPlayerStatLine(0, 0, 0, 0, 0, 0)
         assertTrue(line.startsWith(contractPrefix))
         assertEquals(
-            "[AudioPlayer] decoded=0 starved=0 underrun=0 maxRecoverMs=0 queue=0 silence=0 padIdle=0",
+            "[AudioPlayer] decoded=0 starved=0 underrun=0 maxRecoverMs=0 queue=0 silence=0 " +
+                "padIdle=0 inZero=0 inMin=0 inMax=0 outRmsMax=0",
             line,
         )
     }
@@ -54,22 +56,28 @@ class AudioPlayerPolicyTest {
         assertTrue(line.contains(" silence="))
         // issue #164 新增的归因字段，必须钉住：没有它下次还是分不清 starved / 空输出拍
         assertTrue(line.contains(" padIdle="))
+        // issue #194：三条口径必须同名可 grep —— 输入全零 / 输入字节范围 / 窗口最大 RMS
+        assertTrue(line.contains(" inZero="))
+        assertTrue(line.contains(" inMin="))
+        assertTrue(line.contains(" inMax="))
+        assertTrue(line.contains(" outRmsMax="))
     }
 
     @Test
     fun `silence default argument is zero`() {
         val line = audioPlayerStatLine(10, 0, 0, 0, 1)
         assertEquals(
-            "[AudioPlayer] decoded=10 starved=0 underrun=0 maxRecoverMs=0 queue=1 silence=0 padIdle=0",
+            "[AudioPlayer] decoded=10 starved=0 underrun=0 maxRecoverMs=0 queue=1 silence=0 " +
+                "padIdle=0 inZero=0 inMin=0 inMax=0 outRmsMax=0",
             line,
         )
     }
 
     @Test
     fun `padIdle default argument is zero`() {
-        // 老调用点（不传 padIdle）仍要产出与原契约等价的尾部，只多一个 padIdle=0
+        // 老调用点（不传 padIdle / 诊断字段）仍要产出与原契约等价的尾部，新字段全为 0
         val line = audioPlayerStatLine(1, 2, 3, 4, 5, 6)
-        assertTrue(line.endsWith(" silence=6 padIdle=0"))
+        assertTrue(line.endsWith(" silence=6 padIdle=0 inZero=0 inMin=0 inMax=0 outRmsMax=0"))
     }
 
     @Test
@@ -92,5 +100,106 @@ class AudioPlayerPolicyTest {
         val bufEnd = ByteArray(1024)
         bufEnd[1023] = 0x80.toByte()
         assertFalse(isPcmSilent(bufEnd))
+    }
+
+    // ── issue #194：接收侧诊断口径 ──
+
+    @Test
+    fun `pcm16Rms decodes little endian signed samples`() {
+        // [0x00, 0x01] 小端 = 256；按大端会算成 1 —— 这条直接钉住字节序。
+        assertEquals(256, pcm16Rms(byteArrayOf(0x00, 0x01)))
+        // [0x01, 0x00] 小端 = 1。
+        assertEquals(1, pcm16Rms(byteArrayOf(0x01, 0x00)))
+        // -1 = 0xFFFF，平方后 RMS 为 1。
+        assertEquals(1, pcm16Rms(byteArrayOf(0xFF.toByte(), 0xFF.toByte())))
+        // 满幅正/负样本：平方后取 RMS，负号不影响幅度。
+        assertEquals(32767, pcm16Rms(byteArrayOf(0xFF.toByte(), 0x7F)))
+        assertEquals(32768, pcm16Rms(byteArrayOf(0x00, 0x80.toByte())))
+    }
+
+    @Test
+    fun `pcm16Rms is zero for silence and ignores a trailing odd byte`() {
+        assertEquals(0, pcm16Rms(ByteArray(0)))
+        assertEquals(0, pcm16Rms(ByteArray(1)))
+        assertEquals(0, pcm16Rms(ByteArray(4096)))
+        // 最后一个字节不成样本，必须被忽略而不是当 0 拉低均值。
+        assertEquals(256, pcm16Rms(byteArrayOf(0x00, 0x01, 0x7F)))
+    }
+
+    @Test
+    fun `rx diag counts input zeros and output zeros separately`() {
+        val diag = AudioRxDiag()
+        val silencePayload = ByteArray(320)
+        val realPayload = ByteArray(320).also { it[0] = 1 }
+
+        diag.onInput(silencePayload)
+        diag.onInput(realPayload)
+        diag.onInput(realPayload)
+        // 输入里有 1 帧全零，但解码输出是真实 PCM：outZero 不许跟着涨。
+        diag.onOutput(realPayload)
+
+        assertEquals(3L, diag.inFrames)
+        assertEquals(1L, diag.inZero)
+        assertEquals(1L, diag.outFrames)
+        assertEquals(0L, diag.outZero)
+
+        // 反过来：全零输出只涨 outZero，不动 inZero（两个口径永不混用）。
+        diag.onOutput(ByteArray(320))
+        assertEquals(1L, diag.inZero)
+        assertEquals(1L, diag.outZero)
+        assertEquals(2L, diag.outFrames)
+    }
+
+    @Test
+    fun `rx diag tracks payload byte range and resets the rms window`() {
+        val diag = AudioRxDiag()
+        diag.onInput(ByteArray(300))
+        diag.onInput(ByteArray(420))
+        assertEquals(300, diag.inMinBytes)
+        assertEquals(420, diag.inMaxBytes)
+
+        // 小端 256 → 本窗口最大 RMS 256。
+        diag.onOutput(byteArrayOf(0x00, 0x01))
+        assertEquals(256, diag.windowRmsMax)
+        // 取走即复位：不取走会让下一次 2.5s 行继续报旧值。
+        assertEquals(256, diag.consumeWindowRmsMax())
+        assertEquals(0, diag.windowRmsMax)
+
+        diag.onOutput(ByteArray(2))
+        assertEquals(0, diag.consumeWindowRmsMax())
+        // 消费窗口值不影响累计字段。
+        assertEquals(2L, diag.inFrames)
+        assertEquals(300, diag.inMinBytes)
+        assertEquals(2L, diag.outFrames)
+    }
+
+    @Test
+    fun `rx diag reset clears every session counter`() {
+        val diag = AudioRxDiag()
+        diag.onInput(ByteArray(300))
+        diag.onInput(ByteArray(420))
+        diag.onOutput(byteArrayOf(0x00, 0x01))
+        diag.reset()
+
+        assertEquals(0L, diag.inFrames)
+        assertEquals(0L, diag.inZero)
+        assertEquals(0, diag.inMinBytes)
+        assertEquals(0, diag.inMaxBytes)
+        assertEquals(0L, diag.outFrames)
+        assertEquals(0L, diag.outZero)
+        assertEquals(0, diag.windowRmsMax)
+    }
+
+    @Test
+    fun `rx diag line is separately greppable`() {
+        val line = audioRxDiagLine(
+            inFrames = 2554, inZero = 0, inMin = 300, inMax = 420,
+            outZero = 2538, outRmsMax = 812,
+        )
+        assertEquals(
+            "AudioDiag rx inFrames=2554 inZero=0 inMin=300 inMax=420 outZero=2538 outRmsMax=812",
+            line,
+        )
+        assertTrue(line.startsWith("AudioDiag rx "))
     }
 }
