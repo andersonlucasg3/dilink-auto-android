@@ -110,6 +110,19 @@ class PipelineServer(
     @Volatile private var running = true
     private val cleanupStarted = AtomicBoolean(false)
     private val cleanupFinished = AtomicBoolean(false)
+    /**
+     * issue #199：收尾真正落到"最后一步之后"的信号。
+     *
+     * `cleanup()` 可能跑在 daemon 线程（Lifecycle / TouchReader）上，主线程 `run()` 返回
+     * 后 JVM 会把 daemon 就地杀掉 —— 现场因此从未打出过 `18/18`（见 [awaitCleanupFinished]）。
+     */
+    private val cleanupDone = CountDownLatch(1)
+    /** issue #199：收尾进度（步号 + 标签），watchdog 超时 / 补偿标记里一并打出。 */
+    @Volatile private var teardownProgress: String = ""
+    /** issue #199：还没搬回物理屏的 task id（`[a, b]`），供超时现场与补偿标记使用。 */
+    @Volatile private var teardownPendingTasks: String = ""
+    /** PR #208 评审：最近一次被放弃（超时/失败/跳过）的收尾步骤，供后续步骤做保护。 */
+    @Volatile private var abandonedStep: TeardownStep? = null
     private var displayId = -1
     private var virtualDisplay: VirtualDisplay? = null
     private var encoder: MediaCodec? = null
@@ -169,11 +182,20 @@ class PipelineServer(
             pipelineThread?.let { LockSupport.unpark(it) }
         },
         onForceCleanup = {
+            // issue #199 C：被强杀前先落"收尾未完成"标记，下一次启动据此做补偿清理
+            // （避免任务滞留已销毁的 display、panel/IME 状态未知）。
+            markCleanupIncomplete("watchdog")
             // issue #112：若主线程 cleanup() 在 resetLetterboxStyle/moveTasks 等步骤挂起，
             // 看门狗强制唤醒物理屏幕并恢复 IME，防止手机永久黑屏
             try { displayController.restorePanel() } catch (e: Exception) { err("Watchdog force display power failed: ${e.message}") }
             try { shell.exec("input keyevent 224") } catch (_: Exception) {}
             try { displayController.restoreIme() } catch (_: Exception) {}
+        },
+        // issue #199 B：超时消息必须带"卡在哪一步 / 还剩哪些 task"，否则现场仍只有一句
+        // "cleanup did not complete"，下次还得靠猜。
+        progress = {
+            "at ${teardownProgress.ifBlank { "<未开始>" }}, " +
+                "remainingTasks=${teardownPendingTasks.ifBlank { "[]" }}"
         },
         log = { log(it) },
         err = { err(it) },
@@ -354,7 +376,12 @@ class PipelineServer(
             // 用户按下的真停止，见 [shouldDropStartupStopRequest]）。会话专属哨兵
             // （`stop-request-<token>`）不删：只有持有本会话 token 的部署方会写它。
             val vdReady = runStartupSequence(
-                clearStartupStopRequest = { clearStartupStopRequest() },
+                clearStartupStopRequest = {
+                    clearStartupStopRequest()
+                    // issue #199 C：上一轮被 watchdog 强杀时留下的补偿清理。放在清场之后、
+                    // 建屏之前：此时 shell 已可用，且不会与新建 VD 的 dumpsys 抢同一段预算。
+                    compensateIncompleteCleanup()
+                },
                 armWatchdog = { startWatchdog() },
                 createVirtualDisplay = { createVirtualDisplay() }
             )
@@ -396,6 +423,11 @@ class PipelineServer(
             try { t.join() } catch (_: InterruptedException) {}
         } finally {
             cleanup()
+            // issue #199：收尾可能发生在 Lifecycle / TouchReader 这类 **daemon** 线程上
+            // （见 cleanup() 类头）。主线程在这里返回后，JVM 会直接拆掉 daemon 线程 ——
+            // 现场因此从来没有打出过 `18/18` 与 `Cleanup complete`，`removeSessionFiles()`
+            // 也从未执行。这里先有界等待收尾真正落地（预算是编排器总预算 + 1s 余量）。
+            awaitCleanupFinished(TEARDOWN_TOTAL_BUDGET_MS + 1_000L)
         }
     }
 
@@ -875,70 +907,68 @@ class PipelineServer(
         }
     }
 
-    private fun cleanup() {
-        if (!cleanupStarted.compareAndSet(false, true)) return
-        val teardownStartNanos = System.nanoTime()
-        var teardownStep: TeardownStep? = null
-        /**
-         * issue #165：把 cleanup 切成可对账的阶段。
-         *
-         * 只记日志、不改变任何步骤本身；顺序由 [isTeardownStepForward] 在运行时校验
-         * （被改坏只记 err，绝不中断收尾 —— 面板恢复比日志正确更重要）。
-         */
-        fun mark(next: TeardownStep) {
-            if (!isTeardownStepForward(teardownStep, next)) {
-                err("[teardown-step] order violation: ${teardownStep?.label} -> ${next.label}")
-            }
-            teardownStep = next
-            if (TEARDOWN_TRACE_ENABLED) {
-                val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - teardownStartNanos)
-                log("[teardown-step] ${(next.ordinal + 1).toString().padStart(2, '0')}/${TeardownStep.entries.size} ${next.label} (+${elapsedMs}ms)")
-            }
-        }
-        mark(TeardownStep.BEGIN)
-        running = false
+    /**
+     * issue #199：收尾的步骤编排 —— 18 步、每步独立预算、总预算兜底。
+     *
+     * 顺序与语义逐条沿用 issue #165 的既有契约（`TeardownStep` 仍是 18 项，
+     * `[teardown-step] NN/18 label` 仍能在历史日志里对账），只是把「执行」交给
+     * [TeardownRunner]：单步超时只放弃那一步并继续，不再让一步慢把后面全部掐掉。
+     *
+     * 预算取值依据 2026-11-16 现场实测（`.tmp/run-1116/vd-server.log`）：letterbox 210ms、
+     * shell-drained ≤193ms、audio-close ≤5ms、pipeline-join ≤3ms、apps-moved 861~3079ms。
+     */
+    private fun buildTeardownPlan(): List<TeardownStepPlan> = listOf(
+        TeardownStepPlan(TeardownStep.BEGIN, TEARDOWN_BUDGET_BEGIN_MS) {},
         // issue #64：先停窗口采样线程，后面的 shell 恢复命令与 close 才不会被 dumpsys 插队。
-        windowMonitor.stop()
-        mark(TeardownStep.WINDOW_MONITOR_STOPPED)
+        TeardownStepPlan(TeardownStep.WINDOW_MONITOR_STOPPED, TEARDOWN_BUDGET_WINDOW_MONITOR_MS) {
+            windowMonitor.stop()
+        },
         // 1. Global state first — these outlive this process if we die.
         // issue #48：letterbox 残留会被用户描述成「显示尺寸/比例不对」；带读回校验 + 一次重试。
-        try { resetLetterboxStyle() } catch (e: Exception) {
-            err("[teardown-display] reset-letterbox-style failed: ${e.message}")
-        }
-        mark(TeardownStep.LETTERBOX_RESET)
-        if (displayId >= 0) {
-            try { shell.exec("wm user-rotation -d $displayId free") } catch (_: Exception) {}
-        }
-        mark(TeardownStep.ROTATION_FREE)
+        TeardownStepPlan(TeardownStep.LETTERBOX_RESET, TEARDOWN_BUDGET_LETTERBOX_MS) {
+            try { resetLetterboxStyle() } catch (e: Exception) {
+                err("[teardown-display] reset-letterbox-style failed: ${e.message}")
+            }
+        },
+        TeardownStepPlan(TeardownStep.ROTATION_FREE, TEARDOWN_BUDGET_ROTATION_MS) {
+            if (displayId >= 0) {
+                try { shell.exec("wm user-rotation -d $displayId free") } catch (_: Exception) {}
+            }
+        },
         // 2. 先把前台 app 搬回，再把 VD 上**所有**残留 task 搬回并 resize（issue #48）；
         //    只搬顶层会让 quickSwitch 历史任务带着 VD 的 density/bounds 留在物理屏。
-        carCommands.moveTopApp(displayId, 0)
-        carCommands.moveAllTasksToDisplay(displayId, 0)
-        mark(TeardownStep.APPS_MOVED)
+        //    issue #199 A：批量迁移 —— 两层合起来只读 2 次 dumpsys、只等 1 个沉降窗口。
+        TeardownStepPlan(TeardownStep.APPS_MOVED, TEARDOWN_BUDGET_APPS_MOVED_MS) {
+            carCommands.moveTopApp(displayId, 0, probe = false)
+            carCommands.moveAllTasksToDisplay(displayId, 0) { remaining ->
+                teardownPendingTasks = remaining.joinToString(prefix = "[", postfix = "]")
+            }
+        },
         // 3. Restore screen BEFORE killing shell (order matters: shell.exec needs the shell alive)
-        displayController.restorePanel()
-        try { shell.exec("input keyevent 224") } catch (_: Exception) {}
-        mark(TeardownStep.PANEL_RESTORED)
-        displayController.restoreIme()
-        mark(TeardownStep.IME_RESTORED)
+        TeardownStepPlan(TeardownStep.PANEL_RESTORED, 1_500L) {
+            displayController.restorePanel()
+            try { shell.exec("input keyevent 224") } catch (_: Exception) {}
+        },
+        TeardownStepPlan(TeardownStep.IME_RESTORED, 1_000L) { displayController.restoreIme() },
         // 3b. issue #48 取证：面板/IME 已恢复后再读快照，避免 dumpsys 拖慢恢复顺序。
         // 只读：显示 display#0 的 init/cur 与仍留在 VD 上的 task id，不改任何状态。
-        carCommands.logTeardownDisplaySnapshot(displayId)
-        mark(TeardownStep.DISPLAY_SNAPSHOT)
+        //
+        // PR #208 评审：这一步**依赖** apps-moved。搬迁超时后快照读到的是竞态数据，
+        // 而且被放弃的搬迁线程还在用 shell/dumpsys，再插一次 dumpsys 只会互相拖慢。
+        TeardownStepPlan(TeardownStep.DISPLAY_SNAPSHOT, 1_200L, dependsOn = TeardownStep.APPS_MOVED) {
+            carCommands.logTeardownDisplaySnapshot(displayId)
+        },
         // 4. Stop the LifeWriter thread before killing the shell — it may be mid-write.
-        lifecycle.stop()
-        mark(TeardownStep.LIFECYCLE_STOPPED)
+        TeardownStepPlan(TeardownStep.LIFECYCLE_STOPPED, 600L) { lifecycle.stop() },
         // 4b. 屏障（2026-10-10，MI 9 实测）：上面的恢复命令是 fire-and-forget 写进
         // 常驻 sh 的 stdin，而 close() 的 destroy() 会立刻 SIGTERM 掉它 —— 最后
         // 几条命令还没被 sh 读走就随进程死了。实测丢的正是
         // `settings put system screen_off_timeout 60000`：日志完整显示"恢复成功 +
         // Cleanup complete"，但会话结束后值仍停在 2147483647 哨兵。echo 一个唯一
         // 标记并等排水线程回显（stdin/stdout 双 FIFO）⇒ 此前命令都已执行完。
-        shell.awaitIdle()
-        mark(TeardownStep.SHELL_DRAINED)
+        TeardownStepPlan(TeardownStep.SHELL_DRAINED, 1_200L) { shell.awaitIdle() },
         // Now kill the shell
-        shell.close()
-        mark(TeardownStep.SHELL_CLOSED)
+        TeardownStepPlan(TeardownStep.SHELL_CLOSED, 600L) { shell.close() },
         // S3-PA（issue #73）决策 4：先停音频、再停视频。
         //
         // 音频必须在 signalPipelineStop() 之前关：AudioPipeline.close() 自己有 1.5s 的有界
@@ -948,42 +978,163 @@ class PipelineServer(
         //
         // 顺序是「先采集、后写端」：采集停掉之后不会再有 onFrame 进来，此时关 sink 才能让
         // 写线程排空退出并真正关掉 9640 的 socket（sink 是 channel 的唯一属主）。
-        audioPipeline?.let { p ->
-            // AudioPipeline.close() 自己会打一行 `Audio: capture stopped (frames=..., silence=...)`。
-            runCatching { p.close() }.onFailure { err("Audio: close failed: ${it.describe()}") }
-        }
-        audioPipeline = null
-        audioSink?.let { s ->
-            runCatching { s.close() }
-                .onFailure { err("Audio: sink close failed: ${it.describe()}") }
-            log("Audio: sink closed (sent=${s.sentFrames}, configs=${s.sentConfigs}, dropped=${s.droppedFrames}, failed=${s.failed})")
-        }
-        audioSink = null
-        mark(TeardownStep.AUDIO_CLOSED)
+        TeardownStepPlan(TeardownStep.AUDIO_CLOSED, 2_200L) {
+            audioPipeline?.let { p ->
+                // AudioPipeline.close() 自己会打一行 `Audio: capture stopped (frames=..., silence=...)`。
+                runCatching { p.close() }.onFailure { err("Audio: close failed: ${it.describe()}") }
+            }
+            audioPipeline = null
+            audioSink?.let { s ->
+                runCatching { s.close() }
+                    .onFailure { err("Audio: sink close failed: ${it.describe()}") }
+                log("Audio: sink closed (sent=${s.sentFrames}, configs=${s.sentConfigs}, dropped=${s.droppedFrames}, failed=${s.failed})")
+            }
+            audioSink = null
+        },
         // S-M8/S-06: ask the pipeline thread to exit (running=false + unpark) and wait for it
         // (bounded) BEFORE touching the encoder — the render loop may still be inside a
         // native dequeueOutputBuffer/eglSwapBuffers call, which is what used to race
         // cleanup() here.
-        signalPipelineStop()
-        mark(TeardownStep.PIPELINE_JOINED)
-        encoder?.let { try { it.stop() } catch (_: Exception) {}; try { it.release() } catch (_: Exception) {} }
-        mark(TeardownStep.ENCODER_RELEASED)
+        TeardownStepPlan(TeardownStep.PIPELINE_JOINED, PIPELINE_JOIN_TIMEOUT_MS + 500L) {
+            signalPipelineStop()
+        },
+        TeardownStepPlan(TeardownStep.ENCODER_RELEASED, 800L) {
+            encoder?.let { try { it.stop() } catch (_: Exception) {}; try { it.release() } catch (_: Exception) {} }
+        },
         // S-M8: the encoder's input Surface used to be leaked — releasing the codec does not
         // release the Surface we handed it, so every session burned one for nothing.
-        encoderSurface?.let { try { it.release() } catch (_: Exception) {} }
-        mark(TeardownStep.ENCODER_SURFACE_RELEASED)
+        TeardownStepPlan(TeardownStep.ENCODER_SURFACE_RELEASED, 400L) {
+            encoderSurface?.let { try { it.release() } catch (_: Exception) {} }
+        },
         // S-M8: EGL/GL is torn down by the pipeline thread itself (releaseGlResources);
         // signalPipelineStop above is how this thread asks for it.
-        releaseGlResources()
-        mark(TeardownStep.GL_RELEASED)
-        virtualDisplay?.let { try { it.release() } catch (_: Exception) {} }
-        mark(TeardownStep.VIRTUAL_DISPLAY_RELEASED)
+        TeardownStepPlan(TeardownStep.GL_RELEASED, 1_000L) { releaseGlResources() },
+        TeardownStepPlan(TeardownStep.VIRTUAL_DISPLAY_RELEASED, 1_000L) {
+            // PR #208 评审：这一步**故意不挂** apps-moved 依赖 —— 泄漏 VD 的代价高于与
+            // 残留搬迁线程竞争（它只会多发几条 `am display move-stack`，失败已由 shell 层
+            // 兜住）。但必须让日志说清楚"现在是在有残留线程的情况下释放的"。
+            if (abandonedStep == TeardownStep.APPS_MOVED) {
+                err(
+                    "[teardown-step] virtual-display-released runs while the abandoned apps-moved " +
+                        "thread may still be moving tasks (${teardownPendingTasks.ifBlank { "[]" }})"
+                )
+            }
+            virtualDisplay?.let { try { it.release() } catch (_: Exception) {} }
+        },
         // issue #180：撤掉本会话发布在共享存储上的 pid / token，避免"上一轮标识"被下一轮
         // 的停止方读到（同时只在内容仍属于本进程时才删，见 removeSessionFiles）。
-        removeSessionFiles()
-        mark(TeardownStep.COMPLETE)
-        log("Cleanup complete")
-        cleanupFinished.set(true)
+        TeardownStepPlan(TeardownStep.COMPLETE, 500L) { removeSessionFiles() },
+    )
+
+    private fun cleanup() {
+        if (!cleanupStarted.compareAndSet(false, true)) return
+        try {
+            // 所有退出判据（reader / pipeline / watchdog）都只看 running，必须先翻。
+            running = false
+            val report = TeardownRunner(
+                steps = buildTeardownPlan(),
+                totalBudgetMs = TEARDOWN_TOTAL_BUDGET_MS,
+                // issue #165 的诊断开关保持有效：DILINK_TEARDOWN_TRACE=0 只关普通步履行，
+                // 异常/超时/预算行仍走 err（那是现场必需的）。
+                log = { if (TEARDOWN_TRACE_ENABLED) log(it) },
+                err = { err(it) },
+                pendingDetail = {
+                    teardownPendingTasks.takeIf { it.isNotBlank() }?.let { "remainingTasks=$it" } ?: ""
+                },
+                onStepStart = { number, total, step -> teardownProgress = "$number/$total ${step.label}" },
+                // PR #208 评审：让后续步骤知道"前序步被放弃了"。目前只有一条硬编码依赖
+                // （DISPLAY_SNAPSHOT -> APPS_MOVED），这里记录最近一次被放弃的步骤，供
+                // VD 释放时告警。
+                onStepFinished = { step, outcome ->
+                    if (outcome != TeardownOutcome.COMPLETED) abandonedStep = step
+                }
+            ).run()
+            if (report.incomplete) {
+                // issue #199 C：明确标记"这次收尾没走完"，下一次启动据此做补偿清理。
+                markCleanupIncomplete("teardown")
+                log(
+                    "Cleanup incomplete (${report.elapsedMs}ms, first-bad=" +
+                        "${report.firstBadStep?.label ?: "<none>"})"
+                )
+            } else {
+                log("Cleanup complete")
+            }
+        } catch (e: Throwable) {
+            // 编排器内部已逐步兜异常；这里只兜"规划/收尾本身"出错。cleanupFinished
+            // 必须在 finally 里置位，否则 watchdog 会把它当成"挂死"直接 halt。
+            err("Cleanup: ${e.describe()}")
+        } finally {
+            cleanupFinished.set(true)
+            cleanupDone.countDown()
+        }
+    }
+
+    /**
+     * issue #199：主线程有界等待收尾落地（见 `run()` 的 finally）。
+     *
+     * 为什么必须等：`cleanup()` 的三个入口（Lifecycle reader、TouchReader、main）里，前两个
+     * 是 daemon 线程（`daemonThread`），而 main 抢不到 `cleanupStarted` 时会立刻返回 ——
+     * JVM 随后拆掉所有 daemon，收尾被就地杀死在 `virtual-display-released` 与
+     * `removeSessionFiles()` 之间。现场 2026-11-16 整份日志 0 条 `Cleanup complete`
+     * 就是这么来的（`.tmp/run-1116/vd-server.log` 的 245/384/802/1067/1693 行全停在 17/18）。
+     */
+    private fun awaitCleanupFinished(timeoutMs: Long) {
+        if (cleanupFinished.get()) return
+        try {
+            cleanupDone.await(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        if (!cleanupFinished.get()) {
+            err(
+                "Cleanup still not finished after ${timeoutMs}ms " +
+                    "(at ${teardownProgress.ifBlank { "<unknown>" }}) — exiting anyway"
+            )
+        }
+    }
+
+    /**
+     * issue #199 C：把"这次收尾没走完"落盘（[VdDeploy.CLEANUP_INCOMPLETE_PATH]）。
+     *
+     * 一行文本，含 pid / displayId / 停在哪一步 / 还没搬回的 task：下一次启动的
+     * [compensateIncompleteCleanup] 靠它定位，而不是再从"面板没恢复"倒推。
+     * 写失败不影响收尾（只是少了线索）。
+     */
+    private fun markCleanupIncomplete(reason: String) {
+        val line = "pid=$sessionPid display=$displayId step=${teardownProgress.ifBlank { "<unknown>" }} " +
+            "remainingTasks=${teardownPendingTasks.ifBlank { "[]" }} reason=$reason at=${System.currentTimeMillis()}"
+        if (!writeTextAtomically(VdDeploy.CLEANUP_INCOMPLETE_PATH, line)) {
+            err("[teardown-recover] failed to write $reason marker")
+        }
+    }
+
+    /**
+     * issue #199 C：上一次收尾没走完时的补偿清理（清场之后、建屏之前）。
+     *
+     * 被 watchdog `Runtime.halt(1)` 强杀的会话会留下 `cleanup-incomplete`；标记里记着停在
+     * 哪一步、哪些 task 还没搬回。这里只做两件事：把线索打进本会话日志（回签/现场第一眼
+     * 就能看到上一轮欠了什么），以及 best-effort 把仍挂在旧 VD 上的 task 搬回物理屏。
+     *
+     * 标记**只有搬迁返回 true 时才删**（PR #208 评审）：搬迁失败/预算不够时留着，下一轮
+     * 启动再试 —— 否则"补偿"两个字就只是日志，任务照样滞留在已销毁的 display 上。
+     */
+    private fun compensateIncompleteCleanup() {
+        val f = File(VdDeploy.CLEANUP_INCOMPLETE_PATH)
+        if (!f.exists()) return
+        val detail = runCatching { f.readText().trim() }.getOrNull().orEmpty()
+        err("[teardown-recover] previous cleanup incomplete: ${detail.ifBlank { "<empty>" }}")
+        val stale = Regex("display=(-?\\d+)").find(detail)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+        // 标记里没有合法 display id 时没有可补偿的动作，直接清掉。
+        val moved = if (stale >= 0) carCommands.moveAllTasksToDisplay(stale, 0) else true
+        if (!moved) {
+            err(
+                "[teardown-recover] W: compensation failed (staleDisplay=$stale, " +
+                    "moveAllTasksToDisplay=false：搬迁未完成或被预算截断) — marker kept for next session"
+            )
+            return
+        }
+        val removed = runCatching { f.delete() }.getOrDefault(false)
+        err("[teardown-recover] compensation done (staleDisplay=$stale, markerDeleted=$removed)")
     }
 }
 

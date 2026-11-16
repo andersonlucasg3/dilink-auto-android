@@ -127,6 +127,35 @@ class ProcessWatchdogTest {
     }
 
     @Test
+    fun timeoutMessageCarriesTheTeardownProgress() {
+        // issue #199：原来只有一句 "cleanup did not complete within 3000ms"，现场无法判断
+        // 卡在哪一步、还剩哪些 task。超时消息必须把编排器的进度一起带出来。
+        val messages = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+        val watchdog = ProcessWatchdog(
+            isRunning = { false },
+            isCleanedUp = { false },
+            onStopRequested = {},
+            onForceCleanup = {},
+            stopRequestPath = stopPath,
+            gracePeriodMs = 20,
+            pollIntervalMs = 10,
+            cleanupCheckIntervalMs = 10,
+            progress = { "at 05/18 apps-moved, remainingTasks=[717]" },
+            err = { messages += it },
+            exitProcess = {},
+            sleep = { /* no-op in test */ }
+        )
+
+        watchdog.runLoop()
+
+        assertTrue(
+            "超时消息要带当前步号与剩余 task：$messages",
+            messages.any { it.contains("05/18 apps-moved") && it.contains("remainingTasks=[717]") }
+        )
+    }
+
+    @Test
     fun cleanupStartedButHangsTriggersForceCleanupAndExit() {
         val running = AtomicBoolean(false)
         val cleanupFinished = AtomicBoolean(false)
