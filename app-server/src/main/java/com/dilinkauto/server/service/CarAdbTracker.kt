@@ -40,8 +40,11 @@ internal class CarAdbTracker(
      * `usbReady = true` → [onAdbReady] → `startConnection()`。用户点过「断开」之后
      * 这些入口必须先问一句；判定与抑制日志统一由 [CarSessionCoordinator.allowReconnect]
      * 持有，这里只负责不越过它。
+     *
+     * 必填、无默认值（issue #201 评审意见）：fail-open 的 `{ true }` 会让将来新增构造点
+     * 忘接线时静默放行，闸门形同虚设。
      */
-    private val autoReconnectAllowed: (ConnectTrigger) -> Boolean = { true },
+    private val autoReconnectAllowed: (ConnectTrigger) -> Boolean,
 ) {
     @Volatile var usbReady: Boolean = false
         internal set

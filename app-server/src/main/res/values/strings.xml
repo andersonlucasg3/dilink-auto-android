@@ -91,7 +91,10 @@
 
     <!-- Connection Status -->
     <string name="status_ready_to_connect">Ready to connect</string>
+    <!-- issue #201：用户主动断开是持久化状态，重启 App 也不会自动连，必须明确提示。 -->
+    <string name="status_disconnected_by_user">Disconnected as requested — press Reconnect to connect again</string>
     <string name="reconnect_button">Reconnect</string>
+    <string name="reconnect_button_after_disconnect">Reconnect now</string>
     <string name="status_connecting">Connecting…</string>
     <string name="status_connected">Connected</string>
     <string name="status_streaming">Streaming</string>

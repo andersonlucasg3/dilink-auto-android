@@ -76,6 +76,10 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
     // 能力位（service.phoneAudioSupported），不是车机自身 SDK。
     val audioEnabled by service.carPrefs.audioEnabledFlow.collectAsState()
     val phoneAudioSupported by service.phoneAudioSupported.collectAsState()
+    // issue #201：用户主动断开是**持久化**状态，进程重启后重新打开 App 也不会自动连，
+    // 只能点「重新连接」。IDLE 态必须据此换文案，否则「就绪，等待连接」会被当成故障。
+    // 普通读取即可：进入/离开 IDLE 都由上面被观察的 state 触发重组。
+    val disconnectedByUser = service.carPrefs.userDisconnected
 
     // Both layouts below render the very same card; hoisting the wiring here
     // keeps the 11-argument call and its callbacks in one place.
@@ -84,6 +88,7 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
             state = state,
             phoneName = phoneName,
             statusMessage = statusMessage,
+            disconnectedByUser = disconnectedByUser,
             devMode = devMode,
             onDevModeChange = { service.carPrefs.devMode = it },
             audioEnabled = audioEnabled,
@@ -243,6 +248,8 @@ private fun ConnectionStatusCard(
     state: CarConnectionService.State,
     phoneName: String,
     statusMessage: String,
+    /** issue #201：用户主动断开且标志仍持久化 —— IDLE 文案与按钮要据此改写。 */
+    disconnectedByUser: Boolean,
     devMode: Boolean,
     onDevModeChange: (Boolean) -> Unit,
     audioEnabled: Boolean,
@@ -288,7 +295,13 @@ private fun ConnectionStatusCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         when (state) {
-                            CarConnectionService.State.IDLE -> stringResource(R.string.status_ready_to_connect)
+                            // issue #201：IDLE 有两种含义 —— 从未连接 / 用户主动断开。
+                            // 后者是持久化的，必须明确告诉用户「要点重新连接才会连上」。
+                            CarConnectionService.State.IDLE ->
+                                stringResource(
+                                    if (disconnectedByUser) R.string.status_disconnected_by_user
+                                    else R.string.status_ready_to_connect
+                                )
                             CarConnectionService.State.CONNECTING -> stringResource(R.string.status_connecting)
                             CarConnectionService.State.CONNECTED -> stringResource(R.string.status_connected)
                             CarConnectionService.State.STREAMING -> stringResource(R.string.status_streaming)
@@ -296,7 +309,11 @@ private fun ConnectionStatusCard(
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White
                     )
-                    if (statusMessage.isNotEmpty()) {
+                    // issue #201：主动断开的 IDLE 态下，statusMessage 还是上一个会话的值
+                    // （「正在连接…」「等待视频流…」），与上方文案冲突，直接不显示。
+                    if (statusMessage.isNotEmpty() &&
+                        !(state == CarConnectionService.State.IDLE && disconnectedByUser)
+                    ) {
                         Spacer(Modifier.height(4.dp))
                         Text(
                             if (phoneName.isNotEmpty()) phoneName else statusMessage,
@@ -325,7 +342,13 @@ private fun ConnectionStatusCard(
                     onClick = onReconnect,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(stringResource(R.string.reconnect_button))
+                    Text(
+                        stringResource(
+                            // issue #201：主动断开时按钮文案与上方状态文案对齐，明确这是唯一入口。
+                            if (disconnectedByUser) R.string.reconnect_button_after_disconnect
+                            else R.string.reconnect_button
+                        )
+                    )
                 }
             }
 

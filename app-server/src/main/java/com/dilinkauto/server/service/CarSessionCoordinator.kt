@@ -321,6 +321,9 @@ internal class CarSessionCoordinator(
     }
 
     fun connectManual(host: String, port: Int = Ports.DEFAULT_PORT) {
+        // issue #201 评审意见：先过闸门再推进状态，避免出现「状态已 CONNECTING、
+        // 却没有连接 Job」的中间态（用户触发一定放行，这里只是不让时序倒置）。
+        if (!allowReconnect(ConnectTrigger.USER_MANUAL_IP)) return
         _state.value = CarConnectionService.State.CONNECTING
         beginConnect(host, port, ConnectTrigger.USER_MANUAL_IP)
     }
