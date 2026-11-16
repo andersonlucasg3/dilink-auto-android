@@ -283,6 +283,82 @@ class AudioPipelineTest {
         assertFalse(RecordingSink().isFailed())
     }
 
+    // ── issue #194：发送侧诊断（编码前全零 PCM、编码后字节数窗口） ──
+
+    @Test
+    fun allZeroPcmOnlyLooksAtTheRequestedLength() {
+        val pcm = ByteArray(8)
+        pcm[6] = 1
+        assertTrue(isPcmAllZero(pcm, 4))
+        assertFalse(isPcmAllZero(pcm, 8))
+        assertTrue(isPcmAllZero(ByteArray(0), 0))
+    }
+
+    @Test
+    fun allZeroPcmDetectsASingleNonZeroByte() {
+        val pcm = ByteArray(4096)
+        pcm[4095] = 1
+        assertFalse(isPcmAllZero(pcm, pcm.size))
+        assertTrue(isPcmAllZero(ByteArray(4096), 4096))
+    }
+
+    @Test
+    fun txDiagEmitsOneWindowLinePerHundredFrames() {
+        val diag = AudioTxDiag()
+        val silence = ByteArray(4096)
+        val real = ByteArray(4096).also { it[0] = 7 }
+        // 100 帧里前 3 帧全零；编码后字节数 100..199（avg = 14950 / 100）。
+        repeat(100) { i ->
+            diag.onPcm(if (i < 3) silence else real, 4096)
+            val line = diag.onEncoded(100 + i)
+            if (i < 99) {
+                assertNull("窗口未满时不许打日志（避免刷屏）", line)
+            } else {
+                assertEquals(
+                    "AudioDiag tx frames=100 allZeroPcm=3 encMin=100 encAvg=149 encMax=199",
+                    line,
+                )
+            }
+        }
+        // 累计值供 close() 收尾行使用。
+        assertEquals(3L, diag.allZeroPcmTotal)
+        assertEquals(100L, diag.emittedFrames)
+    }
+
+    @Test
+    fun txDiagResetsWindowCountersAfterEachLine() {
+        val diag = AudioTxDiag(windowFrames = 4)
+        val zero = ByteArray(16)
+        val real = ByteArray(16) { 1 }
+
+        repeat(4) { i ->
+            diag.onPcm(zero, 16)
+            val line = diag.onEncoded(10)
+            if (i < 3) assertNull(line) else
+                assertEquals("AudioDiag tx frames=4 allZeroPcm=4 encMin=10 encAvg=10 encMax=10", line)
+        }
+        // 第二个窗口：全零 PCM 归零、字节数 20..23（avg = 86 / 4 = 21）。
+        repeat(4) { i ->
+            diag.onPcm(real, 16)
+            val line = diag.onEncoded(20 + i)
+            if (i < 3) assertNull(line) else
+                assertEquals("AudioDiag tx frames=4 allZeroPcm=0 encMin=20 encAvg=21 encMax=23", line)
+        }
+        // 累计全零帧数跨窗口保留。
+        assertEquals(4L, diag.allZeroPcmTotal)
+    }
+
+    @Test
+    fun txDiagReportsZerosWhenTheWindowHasNoPayload() {
+        val diag = AudioTxDiag(windowFrames = 2)
+        diag.onPcm(ByteArray(8), 8)
+        assertNull(diag.onEncoded(0))
+        assertEquals(
+            "AudioDiag tx frames=2 allZeroPcm=1 encMin=0 encAvg=0 encMax=0",
+            diag.onEncoded(0),
+        )
+    }
+
     /** 记录收到的 CONFIG / FRAME，用于纯 JVM 上的降级路径断言。 */
     private class RecordingSink : AudioPipeline.Sink {
         var configCount = 0

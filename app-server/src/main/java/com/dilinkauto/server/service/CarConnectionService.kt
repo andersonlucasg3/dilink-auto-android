@@ -212,6 +212,9 @@ class CarConnectionService : Service() {
         audioPlayer.onFatal = { reason ->
             logWriter.sendUnconditional("[AudioPlayer][E] $reason", "E")
         }
+        // issue #194：AudioDiag 周期诊断行必须绕过 enabled（release 下默认 false），
+        // 否则正式包上车后 `grep AudioDiag` 什么都抓不到。
+        audioPlayer.diagSink = { msg -> logWriter.sendUnconditional(msg) }
 
         // issue #9 / #75 / #163：两端共用 protocol-core 的 SyncRequestGate（滑动窗口：1s 内最多 2 次）
         videoDecoder.onNeedsSyncFrame = {

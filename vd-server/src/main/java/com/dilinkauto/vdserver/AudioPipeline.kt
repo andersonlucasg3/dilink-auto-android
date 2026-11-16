@@ -92,6 +92,12 @@ internal class AudioPipeline(
     private val silenceFrames = AtomicLong(0)
     private val droppedInputs = AtomicLong(0)
 
+    /**
+     * issue #194：发送侧诊断统计（编码前 PCM 是否全 0、编码后单帧字节数）。
+     * 只由采集线程访问；每 100 帧打一行 `AudioDiag tx ...`。
+     */
+    private val txDiag = AudioTxDiag()
+
     /** 已交给 [Sink.onFrame] 的帧数（不含 CONFIG）。S6 的「线性增长」判据用它。 */
     val frameCount: Long get() = frames.get()
 
@@ -196,7 +202,12 @@ internal class AudioPipeline(
         // safeRelease 内部已经 runCatching { stop() }，无需再补一次 stop()。
         codec?.safeRelease()
         codec = null
-        log("Audio: capture stopped (frames=${frames.get()}, silence=${silenceFrames.get()})")
+        // issue #194：累计 allZeroPcm 追加在右括号**之后**，避免打断 S23 场景在
+        // `scripts/scenarios/s23-audio-stream.sh:63` 用的 `Audio: capture stopped \(frames=…, silence=…\)` 正则。
+        log(
+            "Audio: capture stopped (frames=${frames.get()}, silence=${silenceFrames.get()}) " +
+                "allZeroPcm=${txDiag.allZeroPcmTotal}"
+        )
     }
 
     private fun fail(reason: String) {
@@ -355,6 +366,8 @@ internal class AudioPipeline(
         }
         try {
             enc.queueInputBuffer(inputId, 0, len, ptsUsForFrame(frameIndex, spec), 0)
+            // issue #194：只统计真正喂进编码器的 PCM，保证分母与编码输出一一对应。
+            txDiag.onPcm(pcm, len)
         } catch (e: Exception) {
             logErr("Audio: queueInputBuffer failed: ${e.describe()}")
         }
@@ -431,6 +444,8 @@ internal class AudioPipeline(
             outBuf.get(data)
             sink.onFrame(AudioPayload.Frame(ptsMs = info.presentationTimeUs / 1000L, data = data))
             frames.incrementAndGet()
+            // issue #194：窗口满 100 帧才返回一行，≈2 s 一条，不会刷屏。
+            txDiag.onEncoded(data.size)?.let(log)
         } finally {
             runCatching { enc.releaseOutputBuffer(outputId, false) }
         }
@@ -481,6 +496,98 @@ internal fun shouldContinueCapture(
     pipelineRunning: Boolean,
     sinkFailed: Boolean
 ): Boolean = sessionRunning && pipelineRunning && !sinkFailed
+
+/** issue #194：发送侧诊断窗口（帧）。46.875 fps ⇒ 100 帧约 2.1 s 一行。 */
+internal const val AUDIO_DIAG_TX_WINDOW_FRAMES = 100
+
+/**
+ * 判定一段 PCM（只看前 [len] 字节）是否整块全 0（issue #194）。
+ *
+ * 与 `AudioPlayerPolicy.isPcmSilent` 同一口径，但**允许指定长度**：采集侧凑帧时
+ * `acc` 是整帧数组，实际有效长度由 `accLen` 给出，不能把尾巴上的残留算进来。
+ */
+internal fun isPcmAllZero(pcm: ByteArray, len: Int = pcm.size): Boolean {
+    val end = len.coerceAtMost(pcm.size)
+    for (i in 0 until end) {
+        if (pcm[i].toInt() != 0) return false
+    }
+    return true
+}
+
+/**
+ * issue #194 发送侧诊断统计（纯 JVM 可测）。
+ *
+ * 现场三种可能里，发送侧只能回答第一种：**编码前的 PCM 是不是本来就全 0**。
+ * - [onPcm]：每帧喂给编码器后调用，统计全零帧数（含 `AudioPacing` 补的静音帧——
+ *   它们本来就是 0，正常会话里占比应与 `silence` 对得上）；
+ * - [onEncoded]：每帧编码输出后调用，记单帧字节数的 min/avg/max；
+ * - 编码输出累计满 [windowFrames] 帧时返回一行 `AudioDiag tx ...`（**窗口值**，
+ *   便于直接算 `allZeroPcm / frames` 的比例），然后窗口计数归零；
+ * - [allZeroPcmTotal] 跨窗口累计，供 `close()` 收尾行使用。
+ *
+ * 为什么用编码输出帧数做窗口边界：编码器一进一出，而 PCM 可能因输入缓冲不可用被丢，
+ * 用输出侧计数才能保证「每个窗口都能打出一行」。
+ */
+internal class AudioTxDiag(
+    private val windowFrames: Int = AUDIO_DIAG_TX_WINDOW_FRAMES,
+) {
+    private var windowAllZero = 0L
+    private var windowEncoded = 0L
+    private var windowEncMin = Int.MAX_VALUE
+    private var windowEncMax = 0
+    private var windowEncSum = 0L
+
+    /** 已交给 [Sink.onFrame] 的编码帧总数（窗口外累计）。 */
+    var emittedFrames = 0L
+        private set
+
+    /**
+     * 编码前全零 PCM 的累计帧数（跨窗口，`close()` 收尾行用）。
+     *
+     * `close()` 可能在采集线程 join 超时后仍读取（`AudioPipeline.close()` 的 1.5 s 有界
+     * join），所以这里用 AtomicLong，保证读到的是一个完整累计值。
+     */
+    private val allZeroPcmTotalValue = AtomicLong(0)
+
+    /** 编码前全零 PCM 的累计帧数（跨窗口）。 */
+    val allZeroPcmTotal: Long get() = allZeroPcmTotalValue.get()
+
+    /** 记录一帧真正喂进编码器的 PCM。 */
+    fun onPcm(pcm: ByteArray, len: Int = pcm.size) {
+        if (isPcmAllZero(pcm, len)) {
+            windowAllZero++
+            allZeroPcmTotalValue.incrementAndGet()
+        }
+    }
+
+    /**
+     * 记录一帧编码输出；窗口满时返回日志行，否则返回 null。
+     */
+    fun onEncoded(size: Int): String? {
+        emittedFrames++
+        windowEncoded++
+        if (size > 0) {
+            if (size < windowEncMin) windowEncMin = size
+            if (size > windowEncMax) windowEncMax = size
+            windowEncSum += size
+        }
+        if (windowEncoded < windowFrames) return null
+        val min = if (windowEncMin == Int.MAX_VALUE) 0 else windowEncMin
+        val avg = if (windowEncoded > 0) windowEncSum / windowEncoded else 0L
+        val line = "AudioDiag tx frames=$windowEncoded allZeroPcm=$windowAllZero " +
+            "encMin=$min encAvg=$avg encMax=$windowEncMax"
+        resetWindow()
+        return line
+    }
+
+    private fun resetWindow() {
+        windowAllZero = 0
+        windowEncoded = 0
+        windowEncMin = Int.MAX_VALUE
+        windowEncMax = 0
+        windowEncSum = 0
+    }
+}
 
 /** 释放 `AudioRecord`，任何异常都不穿透。 */
 private fun AudioRecord.safeRelease() {
