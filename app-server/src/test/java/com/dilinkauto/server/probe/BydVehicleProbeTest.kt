@@ -157,6 +157,214 @@ class BydVehicleProbeTest {
         assertEquals("探针日志必须以 TAG 开头，否则手机端 grep 失效", "[BydProbe]", BydVehicleProbe.TAG)
         assertTrue("所有行都要带 TAG：$lines", lines.all { it.startsWith(BydVehicleProbe.TAG) })
     }
+
+    /**
+     * #195 对照 1：`getInstance` 之后 SDK 里存的是不是我们传入的 wrapper。
+     * 如果被换成 ApplicationContext，wrapper 的作用范围就不覆盖 getter 的权限检查。
+     */
+    @Test
+    fun `stored context field is reported as wrapper`() {
+        val lines = runProbe(classLookup = { name -> deviceClassFor(name, StoredContextDevice::class.java) })
+
+        assertTrue("必须逐字段打印并认出 wrapper：$lines", lines.any { it.contains("ctxStored=wrapper=true field=mContext") })
+        assertTrue("必须给出聚合结论：$lines", lines.any { it.contains("ctxStored=state=wrapper") })
+    }
+
+    /** 反向对照：字段里存的不是 wrapper 时必须报 false，否则「context 被换掉」这条永远看不出来。 */
+    @Test
+    fun `stored context field that is not our wrapper is reported as false`() {
+        val lines = runProbe(classLookup = { name -> deviceClassFor(name, SwappedContextDevice::class.java) })
+
+        assertTrue("字段存在但不是 wrapper 时必须报 false：$lines", lines.any { it.contains("ctxStored=wrapper=false field=mContext") })
+        assertTrue("聚合结论不能是 wrapper：$lines", lines.any { it.contains("ctxStored=state=not-wrapper") })
+        assertFalse("不得误报成 wrapper：$lines", lines.any { it.contains("ctxStored=wrapper=true") })
+    }
+
+    /**
+     * #195 对照 1 的假阳面：父类/无关 Context 字段混进来时，「任一字段是 wrapper」会
+     * 让 context-swapped 分支永远不可达。必须单独报 mixed 并让判定退化为 unclear。
+     */
+    @Test
+    fun `mixed context fields are reported as mixed`() {
+        val lines = runProbe(classLookup = { name -> deviceClassFor(name, MixedContextDevice::class.java) })
+
+        assertTrue("必须逐字段打印：$lines", lines.any { it.contains("ctxStored=wrapper=true field=mContext") })
+        assertTrue("必须逐字段打印：$lines", lines.any { it.contains("ctxStored=wrapper=false field=mOther") })
+        assertTrue("混合必须单独成态：$lines", lines.any { it.contains("ctxStored=state=mixed") })
+        assertTrue("mixed 不得给出强结论：$lines", lines.any { it.contains("verdict=unclear") })
+    }
+
+    /**
+     * #195 对照 2：wrapper 的 `checkSelfPermission` 不能代表 SDK 实际入口，
+     * 必须把 `checkCallingOrSelfPermission` 的结果并列打出来。
+     */
+    @Test
+    fun `permission contrast prints wrapper self check and sdk entry`() {
+        val lines = runProbe()
+
+        assertTrue("必须打印 wrapper 视角：$lines", lines.any { it.contains("permSelf=") && it.contains("checkCallingOrSelf=") })
+        assertTrue("必须打印真实 context 视角：$lines", lines.any { it.contains("permReal=") })
+    }
+
+    /**
+     * #195 对照 3：真实 ApplicationContext 重新实例化并调用 getter。
+     * 这一行是「应用侧校验只被 wrapper 绕过」与「服务端拒绝」的分水岭。
+     */
+    @Test
+    fun `real context call is classified as sentinel ok`() {
+        val lines = runProbe(classLookup = { name -> deviceClassFor(name, StoredContextDevice::class.java) })
+
+        assertTrue("真实 context 调用必须单独成行：$lines", lines.any { it.contains("realCtxCall=ok:8191(sentinel)") })
+    }
+
+    /** 真实 context 被客户端权限挡住时要把 SecurityException 打出来，而不是只写 err。 */
+    @Test
+    fun `real context call reports security exception`() {
+        val lines = runProbe(
+            classLookup = { name -> deviceClassFor(name, RealDeniedDevice::class.java) },
+            realContext = android.content.ContextWrapper(null),
+        )
+
+        assertTrue("必须记录 SecurityException：$lines", lines.any { it.contains("realCtxCall=err:SecurityException:") })
+    }
+
+    /**
+     * #195 对照 4：同权限的其它 getter。若冷却液/机油/超速警告也全是哨兵，
+     * 说明不是单个 feature 的问题，更支持「服务端按 uid 拒绝」。
+     */
+    @Test
+    fun `same permission getters are printed for comparison`() {
+        val lines = runProbe(classLookup = { name -> deviceClassFor(name, StoredContextDevice::class.java) })
+
+        assertTrue("必须读冷却液：$lines", lines.any { it.contains("engine coolant=ok:8191") })
+        assertTrue("必须读机油：$lines", lines.any { it.contains("oil=ok:65535") })
+        assertTrue("必须读超速警告：$lines", lines.any { it.contains("speedWarn=ok:8191") })
+    }
+
+    /**
+     * #195 对照 5：`AbsBYDAutoEngineListener` 是抽象类，Proxy 不可用；
+     * 找不到具体 Listener 时必须显式 skip，不能硬造一个假实现让结论失真。
+     */
+    @Test
+    fun `abstract listener class is skipped explicitly`() {
+        val lines = runProbe()
+
+        assertTrue("抽象类必须报 skip：$lines", lines.any { it.contains("listener=skip(abstract-class)") })
+    }
+
+    /** 全哨兵 + wrapper 保留 + 真实 context 被 SecurityException 拒绝 → 服务端拒绝。 */
+    @Test
+    fun `sentinel readings with denied real context conclude server permission`() {
+        val lines = runProbe(
+            classLookup = { name -> deviceClassFor(name, RealDeniedDevice::class.java) },
+            realContext = android.content.ContextWrapper(null),
+        )
+
+        assertTrue("必须自动给出结论：$lines", lines.any { it.contains("verdict=server-permission") })
+    }
+
+    /**
+     * 墙钟守卫：某次反射卡住时不能把整段车机会话拖死。到点要留一行 deadline 并收尾，
+     * 不能静默消失（否则会被误读成「读不到」）。
+     */
+    @Test
+    fun `wall clock budget stops the probe and still wraps up`() {
+        var now = 0L
+        val lines = runProbe(clockMs = { now += 5_000; now })
+
+        assertTrue("到点必须留证据：$lines", lines.any { it.contains("deadline reached — skip remaining") })
+        assertTrue("收尾要给结论：$lines", lines.any { it.contains("verdict=") })
+        assertTrue("收尾要写 done：$lines", lines.any { it.contains("done") })
+    }
+
+    /**
+     * 判定纯函数的分支表。#195 的结论只能靠日志自动化得出，
+     * 人眼看「8191 + SecurityException」很容易把两种根因看反。
+     */
+    @Test
+    fun `verdict rules cover every documented outcome`() {
+        val allSentinel = listOf(8191, 8191, 65535, 8191)
+
+        assertEquals(
+            "真实 context 被 SecurityException 拒绝 + wrapper 保留 → 服务端拒绝",
+            "server-permission",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.DENIED, allSentinel, ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "ctx 归属读不到但真实 context 被拒 → 仍可归到服务端拒绝",
+            "server-permission",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.UNKNOWN, RealContextCall.DENIED, allSentinel, ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "真实 context 也拿哨兵但没被拒 → 无法排除引擎未就绪",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.OK_SENTINEL, allSentinel, ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "SDK 存的不是 wrapper 且真实 context 不被拒 → 先修 wrapper 传递",
+            "context-swapped",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.NOT_WRAPPER, RealContextCall.OK_SENTINEL, allSentinel, ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "Context 字段混合 → 归属有歧义，不下结论",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.MIXED, RealContextCall.DENIED, allSentinel, ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "仅注册 listener 不够，必须真的回调出真实值",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.SKIPPED, allSentinel, ListenerState.REGISTERED)),
+        )
+        assertEquals(
+            "事件通道真的回调出真实值 → 需要 listener",
+            "listener-required",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.SKIPPED, allSentinel, ListenerState.REGISTERED_REAL_VALUE)),
+        )
+        assertEquals(
+            "出现真实值 → 未复现",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.DENIED, listOf(1234, 8191, 8191, 8191), ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "读数缺失 → 证据不足",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.DENIED, emptyList(), ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "部分 getter 抛异常 → 证据混杂",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.DENIED, listOf(8191, null, 8191, 8191), ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "既不知道 ctx 归属、也没有真实 context 对照 → 不能下结论",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.UNKNOWN, RealContextCall.SKIPPED, allSentinel, ListenerState.SKIP_ABSTRACT)),
+        )
+    }
+
+    /** 统一构造探针，默认把 listener 类映射为抽象类，模拟实车上的 `AbsBYDAutoEngineListener`。 */
+    private fun runProbe(
+        classLookup: (String) -> Class<*>? = { name -> deviceClassFor(name, FakeDevice::class.java) },
+        context: android.content.Context? = android.content.ContextWrapper(null),
+        realContext: android.content.Context? = null,
+        clockMs: () -> Long = { 0L },
+    ): List<String> {
+        val lines = mutableListOf<String>()
+        BydVehicleProbe(
+            context = context,
+            sink = { lines += it },
+            classLookup = classLookup,
+            sleepMs = { },
+            // 生产默认取 applicationContext；mockable android.jar 上取不到，回落到 probe context。
+            realContext = realContext ?: context,
+            clockMs = clockMs,
+        ).run()
+        return lines
+    }
+
+    /** listener 抽象类走单独的类，设备类由各用例指定。 */
+    private fun deviceClassFor(name: String, device: Class<*>): Class<*>? =
+        if (name.endsWith("AbsBYDAutoEngineListener")) AbstractEngineListener::class.java else device
 }
 
 /**
@@ -191,3 +399,82 @@ internal class ThrowingDevice {
             throw SecurityException("client check bypassed, server denied")
     }
 }
+
+/**
+ * #195 假设备：像 SDH 一样把传入的 context 原样存进实例字段，
+ * 并且所有同权限 getter 都返回哨兵值 —— 复现实车上的 `getEngineSpeed()=8191`。
+ */
+internal class StoredContextDevice(private val mContext: android.content.Context) {
+    fun getEngineSpeed(): Int = 8191
+    fun getEnginePower(): Int = 0
+    fun getEngineCoolantLevel(): Int = 8191
+    fun getOilLevel(): Int = 65535
+    fun getEngineSpeedWarningValue(): Int = 8191
+    fun getElecPercentageValue(): Double = 55.0
+    fun getCurrentSpeed(): Double = 0.0
+    fun getTemprature(area: Int): Int = 27
+
+    companion object {
+        @JvmStatic
+        fun getInstance(context: android.content.Context): StoredContextDevice = StoredContextDevice(context)
+    }
+}
+
+/** #195 假设备：`getInstance` 把 wrapper 换成别的 context，用来验证 `ctxStored=false` 分支。 */
+internal class SwappedContextDevice(private val mContext: android.content.Context) {
+    fun getEngineSpeed(): Int = 8191
+    fun getEnginePower(): Int = 0
+    fun getEngineCoolantLevel(): Int = 8191
+    fun getOilLevel(): Int = 8191
+    fun getEngineSpeedWarningValue(): Int = 8191
+
+    companion object {
+        @JvmStatic
+        fun getInstance(context: android.content.Context): SwappedContextDevice =
+            SwappedContextDevice(android.content.ContextWrapper(context))
+    }
+}
+
+/**
+ * #195 假设备：同时存在两个 Context 字段，一个保留 wrapper、一个被换成普通 Context，
+ * 用来锁住「任一字段是 wrapper 就算成功」的假阳面。
+ */
+internal class MixedContextDevice(
+    private val mContext: android.content.Context,
+    private val mOther: android.content.Context,
+) {
+    fun getEngineSpeed(): Int = 8191
+    fun getEnginePower(): Int = 0
+    fun getEngineCoolantLevel(): Int = 8191
+    fun getOilLevel(): Int = 8191
+    fun getEngineSpeedWarningValue(): Int = 8191
+
+    companion object {
+        @JvmStatic
+        fun getInstance(context: android.content.Context): MixedContextDevice =
+            MixedContextDevice(context, android.content.ContextWrapper(context))
+    }
+}
+
+/**
+ * #195 假设备：只有 wrapper 才放行，真实 context 直接抛 `SecurityException` ——
+ * 复现「客户端权限检查只被 wrapper 绕过」的那一半。
+ */
+internal class RealDeniedDevice(private val mContext: android.content.Context) {
+    fun getEngineSpeed(): Int = 8191
+    fun getEnginePower(): Int = 0
+    fun getEngineCoolantLevel(): Int = 8191
+    fun getOilLevel(): Int = 8191
+    fun getEngineSpeedWarningValue(): Int = 8191
+
+    companion object {
+        @JvmStatic
+        fun getInstance(context: android.content.Context): RealDeniedDevice? {
+            if (context !is BydPermissionContext) throw SecurityException("real context denied")
+            return RealDeniedDevice(context)
+        }
+    }
+}
+
+/** 模拟 `AbsBYDAutoEngineListener`：抽象类，`java.lang.reflect.Proxy` 无法代理。 */
+internal abstract class AbstractEngineListener
