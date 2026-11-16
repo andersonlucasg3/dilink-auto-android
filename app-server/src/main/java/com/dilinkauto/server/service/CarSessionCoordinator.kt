@@ -259,7 +259,13 @@ internal class CarSessionCoordinator(
         logWriter.setEnabled(com.dilinkauto.server.BuildConfig.DEBUG)
         // `[Connect]` 行跨会话保留（issue #201）：抑制发生在断线瞬间，只进得到离线缓冲，
         // 下个会话的 beginSession 若清掉它，手机侧就永远看不到「谁被挡下来了」。
-        logWriter.beginSession(BydVehicleProbe.TAG, AutoReconnectPolicy.LOG_MARKER)
+        // `codec generation=` 同理（issue #205）：断线瞬间的 `Stopping decoder` / `released`
+        // 若被清掉，现场就只剩「建 5 次停 4 次」这种无法配对的假象。
+        logWriter.beginSession(
+            BydVehicleProbe.TAG,
+            AutoReconnectPolicy.LOG_MARKER,
+            VideoDecoder.LIFECYCLE_LOG_MARKER,
+        )
         // 放在 beginSession 之后：这行要随新会话一起送到手机，用来回答「谁发起的重连」。
         logWriter.sendUnconditional("${AutoReconnectPolicy.LOG_MARKER} start (trigger=${trigger.label})")
         _state.value = CarConnectionService.State.CONNECTING
@@ -953,8 +959,10 @@ internal class CarSessionCoordinator(
      *
      * 两个触发源共用这一个入口，绝不允许绕过闸门：
      *  - 解码器参考链断裂（[VideoDecoder.onNeedsSyncFrame]）；
-     *  - Surface 重绑失败后的解码器重建（issue #198）：`stop()` 会清掉 `cachedKeyFrame`，
-     *    不补一拍 IDR 就要等下一个自然 GOP，用户看到的是「重建后仍然黑几秒」。
+     *  - Surface 重绑失败后的解码器重建（issue #198 / #207）：`stop()` 会清掉
+     *    `cachedKeyFrame`，不补一拍 IDR 就要等下一个自然 GOP，用户看到的是「重建后仍然
+     *    黑几秒」。该请求由 `VideoDecoder.recreateDecoder()` 内的**唯一**调用点
+     *    `requestSyncAfterRebuild()` 经 `onNeedsSyncFrame` 发出，调用方不要再额外请求一次。
      */
     fun requestSyncFrame(reason: String) {
         val now = SystemClock.elapsedRealtime()
@@ -1054,12 +1062,13 @@ internal class CarSessionCoordinator(
                     } else {
                         // 回退重建：cached CONFIG 仍在，但 stop() 会清掉 cachedKeyFrame，
                         // 不补一拍 IDR 就要等下一个自然 GOP（issue #198）。
+                        // issue #205：重建统一走 recreateDecoder()，旧 codec 一定先释放、
+                        // generation 递增，日志里 created/released 才能配对。
+                        // issue #207：IDR 补偿收进 recreateDecoder（单个请求点），这里不再
+                        // 额外调用 requestSyncFrame —— 否则一次重建会占掉闸门里两个名额。
                         carLogSend("[MirrorScreen] surface rebind failed — rebuilding decoder on the new surface", "W")
-                        videoDecoder.stop()
-                        videoDecoder.start(surface, vdWidth, vdHeight, targetFps)
+                        videoDecoder.recreateDecoder(surface, vdWidth, vdHeight, targetFps, "surface rebind failed")
                         carLogSend("[MirrorScreen] Decoder rebuilt on SurfaceView surface")
-                        // 走与参考链断裂同一个滑动窗口闸门（issue #75 / #163），不绕过限流。
-                        requestSyncFrame("decoder rebuilt after surface rebind failure")
                     }
                 }
             }
@@ -1085,6 +1094,13 @@ internal class CarSessionCoordinator(
         disconnectAllConnections(clearListeners = true)
         phoneHost = null
         _state.value = CarConnectionService.State.IDLE
+        // issue #205：把生命周期对账排在解码器执行器末尾 —— 在 stop() 之后、执行器结束之前，
+        // 既能看到真实残留，也不会把「stop 还在排队」误报成泄漏。
+        try {
+            decoderExecutor.execute { videoDecoder.logUnreleasedCodecs() }
+        } catch (_: Exception) {
+            videoDecoder.logUnreleasedCodecs()
+        }
         decoderExecutor.shutdown()
         audioExecutor.shutdown()
     }
