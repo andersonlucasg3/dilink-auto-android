@@ -94,8 +94,15 @@ fun HomeContent(
     val playbackState by service.playbackState.collectAsState()
 
     Column(Modifier.fillMaxSize()) {
+        // issue #198：应用磁贴不再以 `state == STREAMING` 为门禁。
+        // STREAMING 的新前置条件是「解码器已绑定当前 Surface 且渲染过帧」，而第一帧必须
+        // 先进入 APP 屏（SurfaceView 可见）才可能有 Surface；若这里仍要求 STREAMING，
+        // 就会出现死锁：看不到磁贴 -> 点不了应用 -> 永远没有 Surface。连接就绪即可选应用，
+        // 画面是否就绪由 CarContentArea 的 videoReady 遮罩控制。
+        val sessionConnected = state == CarConnectionService.State.STREAMING ||
+            state == CarConnectionService.State.CONNECTED
         // Main content
-        if (state == CarConnectionService.State.STREAMING && appList.isEmpty()) {
+        if (sessionConnected && appList.isEmpty()) {
             // Connected but no apps in the allowlist — show an explanatory empty state
             // instead of the connection screen, which would imply the link is down.
             Box(
@@ -111,7 +118,7 @@ fun HomeContent(
                     textAlign = TextAlign.Center
                 )
             }
-        } else if (state == CarConnectionService.State.STREAMING && appList.isNotEmpty()) {
+        } else if (sessionConnected && appList.isNotEmpty()) {
             AppGrid(
                 apps = appList,
                 onAppClick = onAppClick,
