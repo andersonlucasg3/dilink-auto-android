@@ -20,7 +20,9 @@ import java.io.File
  */
 class SyncFrameRequestGateSourceTest {
 
-    private val carPath = "app-server/src/main/java/com/dilinkauto/server/service/CarConnectionService.kt"
+    // issue #198：IDR 请求（含「Surface 重绑失败后重建解码器」这条新触发源）统一收敛到
+    // CarSessionCoordinator.requestSyncFrame，共享闸门也随之落在那里。
+    private val carPath = "app-server/src/main/java/com/dilinkauto/server/service/CarSessionCoordinator.kt"
     private val phonePath = "vd-server/src/main/java/com/dilinkauto/vdserver/GlPipeline.kt"
     private val corePath = "protocol-core/src/main/java/com/dilinkauto/protocol/VideoConfig.kt"
     private val gatePath = "protocol-core/src/main/java/com/dilinkauto/protocol/SyncRequestGate.kt"
@@ -38,13 +40,17 @@ class SyncFrameRequestGateSourceTest {
     fun `car applies the shared gate state machine`() {
         assertTrue(
             "车机端必须持并推进共享的 SyncRequestGate（单一来源），当前源码未匹配到",
-            car.contains("sessionCoordinator.syncRequestGate.get()") &&
+            car.contains("syncRequestGate.get()") &&
                 car.contains("tryAcquire(now)") &&
                 car.contains("compareAndSet("),
         )
         assertFalse(
             "车机端不得再回到旧的硬性间隔判定（issue #163）",
             car.contains("syncFrameRequestAllowed"),
+        )
+        assertTrue(
+            "IDR 请求必须只有一个入口 requestSyncFrame（参考链断裂 / 重建解码器共用闸门，issue #198）",
+            car.contains("fun requestSyncFrame(reason: String)"),
         )
     }
 

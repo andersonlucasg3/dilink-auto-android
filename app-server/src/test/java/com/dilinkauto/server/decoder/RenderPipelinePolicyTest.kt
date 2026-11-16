@@ -71,6 +71,22 @@ class RenderPipelinePolicyTest {
         )
     }
 
+    @Test
+    fun `stream stalled after the first rendered frame still becomes ready`() {
+        // issue #200：首帧已上屏后码流可能停住（现场 6 秒停滞），不会再有「下一帧」来采样。
+        // 判据只看「当前 Surface 上渲染过帧」，不要求刚好收到新帧，所以重复采样必须都是 true。
+        repeat(3) {
+            assertTrue(
+                "首帧已上屏后码流停住，也必须能进 STREAMING（不能一直卡在等待遮罩）",
+                RenderPipelinePolicy.canEnterStreaming(
+                    decoderRunning = true,
+                    outputSurfaceValid = true,
+                    framesRenderedOnSurface = 5L,
+                ),
+            )
+        }
+    }
+
     // ─── 2. surfaceCreated 分派 ───
 
     @Test
@@ -196,6 +212,52 @@ class RenderPipelinePolicyTest {
         )
     }
 
+    /**
+     * issue #200：就绪判定不能只在「收帧」时采样，否则首帧渲染后流停住就永远翻不过来。
+     * 这里把「首帧上屏 → 回调 → 协调器再判定一次」整条链路钉成可执行断言。
+     */
+    @Test
+    fun `first rendered frame triggers the readiness check without waiting for another frame`() {
+        val coordinator = sourceOf(COORDINATOR_PATH)
+        val service = sourceOf(SERVICE_PATH)
+        val decoder = sourceOf(DECODER_PATH)
+
+        assertTrue("VideoDecoder 首帧上屏必须有回调出口", decoder.contains("onFirstFrameOnSurface?.invoke()"))
+        assertTrue(
+            "CarConnectionService 必须把首帧上屏回调接到协调器",
+            service.contains("onFirstFrameRenderedOnSurface()"),
+        )
+        assertTrue("协调器必须暴露首帧上屏入口", coordinator.contains("fun onFirstFrameRenderedOnSurface()"))
+        assertTrue(
+            "收帧路径与首帧回调必须共用同一个就绪判定（一次性翻转，不是轮询）",
+            coordinator.contains("private fun tryMarkVideoReady()"),
+        )
+    }
+
+    /**
+     * issue #198 评审：重绑失败回退重建后 cachedKeyFrame 通常已被 stop() 清空，
+     * 必须补一拍 IDR，且要走 #75 / #163 的同一个滑动窗口闸门。
+     */
+    @Test
+    fun `decoder rebuild after a failed rebind requests an IDR through the shared gate`() {
+        val coordinator = sourceOf(COORDINATOR_PATH)
+        val service = sourceOf(SERVICE_PATH)
+
+        assertTrue(
+            "重建分支必须请求 IDR",
+            coordinator.contains("requestSyncFrame(\"decoder rebuilt after surface rebind failure\")"),
+        )
+        assertTrue(
+            "IDR 请求必须走共享闸门入口 requestSyncFrame",
+            coordinator.contains("fun requestSyncFrame(reason: String)") &&
+                coordinator.contains("tryAcquire(now)"),
+        )
+        assertFalse(
+            "CarConnectionService 不得再各自实现一份闸门（单一来源）",
+            service.contains("tryAcquire(now)"),
+        )
+    }
+
     private class FakeSurface(private var valid: Boolean) : Surface(SurfaceTexture(0)) {
         override fun isValid(): Boolean = valid
     }
@@ -214,6 +276,8 @@ class RenderPipelinePolicyTest {
     private companion object {
         const val COORDINATOR_PATH =
             "app-server/src/main/java/com/dilinkauto/server/service/CarSessionCoordinator.kt"
+        const val SERVICE_PATH =
+            "app-server/src/main/java/com/dilinkauto/server/service/CarConnectionService.kt"
         const val DECODER_PATH =
             "app-server/src/main/java/com/dilinkauto/server/decoder/VideoDecoder.kt"
     }

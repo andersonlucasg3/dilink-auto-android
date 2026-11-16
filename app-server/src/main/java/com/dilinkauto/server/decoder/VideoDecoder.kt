@@ -214,6 +214,19 @@ class VideoDecoder {
     @Volatile
     var onContentBlackPersistent: (() -> Unit)? = null
 
+    /**
+     * 当前 Surface 上**第一帧真正上屏**时回调（issue #198 / #200）。
+     *
+     * 从喂帧线程、且持有 [codecLock] 的路径里触发，实现方只能做轻量投递
+     * （例如切回自己的协程），绝不能在回调里做阻塞 IO 或状态机工作。
+     *
+     * 存在的意义：就绪判定在「收帧」路径上采样，一旦首帧渲染后码流停住（#200 的 6 秒停滞），
+     * 就再也没有下一次收帧来采样，UI 会一直停在「等待视频」。这条回调把「已渲染过帧」
+     * 这个事实直接送出去，不依赖后续帧。
+     */
+    @Volatile
+    var onFirstFrameOnSurface: (() -> Unit)? = null
+
     /** Reset the black-screen detector so a fresh session starts clean. */
     fun resetBlackScreenState() = blackScreen.reset()
 
@@ -564,6 +577,8 @@ class VideoDecoder {
                         framesRenderedOnSurface++
                         if (framesRenderedOnSurface == 1L) {
                             log("First frame rendered on bound surface — output is visible")
+                            // 在 codecLock 内，只允许轻量回调（实现方自己切线程）。
+                            onFirstFrameOnSurface?.invoke()
                         }
                     }
                     if (renderCount <= 3 || renderCount % 30 == 0L) {

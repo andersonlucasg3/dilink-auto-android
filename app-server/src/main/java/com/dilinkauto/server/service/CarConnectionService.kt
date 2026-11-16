@@ -11,7 +11,6 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Binder
 import android.os.IBinder
-import android.os.SystemClock
 import android.view.Surface
 import com.dilinkauto.protocol.*
 import com.dilinkauto.server.CarCrashHandler
@@ -216,30 +215,17 @@ class CarConnectionService : Service() {
         // 否则正式包上车后 `grep AudioDiag` 什么都抓不到。
         audioPlayer.diagSink = { msg -> logWriter.sendUnconditional(msg) }
 
-        // issue #9 / #75 / #163：两端共用 protocol-core 的 SyncRequestGate（滑动窗口：1s 内最多 2 次）
+        // issue #9 / #75 / #163 / #198：两端共用 protocol-core 的 SyncRequestGate（滑动窗口：
+        // 1s 内最多 2 次）。IDR 请求统一走 sessionCoordinator.requestSyncFrame —— 参考链断裂
+        // 与「Surface 重绑失败后重建解码器」共用同一闸门，任何一方都不能绕过限流。
         videoDecoder.onNeedsSyncFrame = {
-            val now = SystemClock.elapsedRealtime()
-            var granted = false
-            while (true) {
-                val current = sessionCoordinator.syncRequestGate.get()
-                // 窗口已满：拒绝；放行则 CAS 换上新状态，CAS 失败说明有并发请求，重读再判。
-                val next = current.tryAcquire(now) ?: break
-                if (sessionCoordinator.syncRequestGate.compareAndSet(current, next)) {
-                    granted = true
-                    break
-                }
-            }
-            if (granted) {
-                carLogSend("[VideoDecoder] requesting IDR from phone (reference chain broken)")
-                sessionCoordinator.sendCommandToVd(ControlMsg.REQUEST_SYNC_FRAME)
-            } else {
-                val lastGrant = sessionCoordinator.syncRequestGate.get().grantsMs.lastOrNull()
-                carLogSend(
-                    "[VideoDecoder] IDR request throttled (window ${VideoConfig.SYNC_FRAME_REQUEST_WINDOW_MS}ms, " +
-                        "max ${VideoConfig.SYNC_FRAME_REQUEST_MAX_PER_WINDOW} grants, " +
-                        "last grant ${lastGrant?.let { now - it } ?: -1L}ms ago)"
-                )
-            }
+            sessionCoordinator.requestSyncFrame("reference chain broken")
+        }
+
+        // issue #200：首帧真正上屏后就绪判定必须能被触发一次。喂帧线程只在持有 codecLock
+        // 时回调，协调器内部只做轻量投递；这样「首帧渲染后码流停住」也不会卡在等待遮罩。
+        videoDecoder.onFirstFrameOnSurface = {
+            sessionCoordinator.onFirstFrameRenderedOnSurface()
         }
 
         videoDecoder.onContentBlackPersistent = {
