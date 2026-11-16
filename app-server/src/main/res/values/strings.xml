@@ -48,6 +48,12 @@
     <string name="startup_dpi_title">Startup DPI</string>
     <string name="startup_dpi_desc">0 = auto-calibrate (recommended for most cars)</string>
     <string name="startup_dpi_hint">Higher DPI = larger UI. Values 120–480. May squeeze portrait-only apps.</string>
+    <string name="dpi_hint_static">Inputs outside 120–480 or above this viewport\'s cap fall back to the auto-calibrated DPI</string>
+    <string name="dpi_hint_basis">(based on the previous session\'s viewport)</string>
+    <string name="dpi_hint_auto">Last session ran at %1$d dpi; viewport cap %2$d dpi %3$s</string>
+    <string name="dpi_hint_in_range">Last session ran at %1$d dpi; viewport cap %2$d dpi, %3$d dpi will be used as-is %4$s</string>
+    <string name="dpi_hint_over_cap">Last session ran at %1$d dpi; viewport cap %2$d dpi, %3$d dpi exceeds the cap so the auto-calibrated value is used %4$s</string>
+    <string name="dpi_hint_invalid">Last session ran at %1$d dpi; viewport cap %2$d dpi, %3$d dpi is out of range so the auto-calibrated value is used %4$s</string>
 
     <!-- Video Bitrate Settings -->
     <string name="video_bitrate_title">Video Bitrate</string>

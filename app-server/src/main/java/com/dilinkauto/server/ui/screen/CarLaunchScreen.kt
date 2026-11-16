@@ -100,7 +100,7 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
             onAudioEnabledChange = { service.carPrefs.audioEnabled = it },
             startupDpi = startupDpi,
             onStartupDpiChange = { service.carPrefs.startupDpi = it },
-            dpiNote = VdDpiHintText.text(startupDpi, effectiveVdDpi, effectiveVdSafeMaxDpi),
+            dpiNote = dpiHintText(DpiHint.of(startupDpi, effectiveVdDpi, effectiveVdSafeMaxDpi)),
             startupFps = startupFps,
             onStartupFpsChange = { service.setStartupFps(it) },
             measuredFps = measuredFps,
@@ -262,7 +262,7 @@ private fun ConnectionStatusCard(
     onAudioEnabledChange: (Boolean) -> Unit,
     startupDpi: Int,
     onStartupDpiChange: (Int) -> Unit,
-    /** issue #202：DPI 输入框下方的"实际生效值 / 视口上限"提示（[VdDpiHintText]）。 */
+    /** issue #202：DPI 输入框下方的"实际生效值 / 视口上限"提示（[DpiHint] + `stringResource`）。 */
     dpiNote: String,
     startupFps: Int,
     onStartupFpsChange: (Int) -> Unit,

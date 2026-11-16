@@ -10,8 +10,8 @@ import org.junit.Test
  * issue #202 A：DPI 单一来源解析器的优先级表。
  *
  * 优先级（高 → 低）：用户设置（且不超过本视口安全上限）> 自动标定 > 默认回落。
- * 这里只测纯决策，不碰 Android：现场无法起 VD 的部分（位置/时序）靠 vd-server 的
- * `VdReusePolicy` / `ContentSettleWindow` 单测与实车日志兜底。
+ * 这里只测纯决策，不碰 Android：现场无法起 VD 的部分（建屏后的沉降时序）靠 vd-server 的
+ * `ContentSettleWindow` 单测与实车日志兜底。
  */
 class VdDpiResolverTest {
 
