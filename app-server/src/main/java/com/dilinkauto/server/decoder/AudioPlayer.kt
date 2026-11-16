@@ -67,8 +67,23 @@ class AudioPlayer(
      */
     var onFatal: ((String) -> Unit)? = null
 
+    /**
+     * issue #194：诊断行的强制上报通道。
+     *
+     * 周期统计行（`[AudioPlayer] ...` 与 `AudioDiag rx ...`）必须走
+     * `CarLogWriter.sendUnconditional()`：普通 [logSink] 最终落到 `CarLogWriter.send()`，
+     * 而它在 `enabled=false`（release 构建默认值 `BuildConfig.DEBUG`）时直接 return，
+     * 否则正式包上车后一行诊断都看不到。接线同 #191 的 [onFatal]。
+     */
+    var diagSink: ((String) -> Unit)? = null
+
     private fun emit(line: String) {
         logSink?.invoke(line) ?: Log.i(TAG, line)
+    }
+
+    /** 诊断行：优先走 [diagSink]（绕过 enabled），未接线时退回普通日志。 */
+    private fun emitDiag(line: String) {
+        diagSink?.invoke(line) ?: emit(line)
     }
 
     private fun log(msg: String) = emit("[AudioPlayer] $msg")
@@ -640,7 +655,7 @@ class AudioPlayer(
     private fun emitStatLine() {
         // issue #194：outRmsMax 是窗口值，取走即复位，避免下一行继续报旧值。
         val rmsMax = diag.consumeWindowRmsMax()
-        emit(
+        emitDiag(
             audioPlayerStatLine(
                 decoded = decodedFrames.get(),
                 starved = starvedFrames.get(),
@@ -656,7 +671,7 @@ class AudioPlayer(
             )
         )
         // 单独一行便于 `grep AudioDiag` 同时抓发送侧与接收侧，不依赖上面那行是否被改动。
-        emit(
+        emitDiag(
             audioRxDiagLine(
                 inFrames = diag.inFrames,
                 inZero = diag.inZero,

@@ -38,9 +38,13 @@ import java.util.concurrent.locks.LockSupport
  * （issue #164 的原始形态）；两个都不涨而 `underrun` 仍涨 → 帧写进去了却没播出去
  * （设备/路由问题，属候选 C 的范畴）。
  *
- * issue #194 新增的四个字段用于区分「传输清零 / 解码器吐 0 / 采集侧就是静音」：
- * - `inZero`：收到的 payload 中整块全 0 的累计帧数（与 `silence`/`outZero` 分开计数）；
- * - `inMin`/`inMax`：单帧 payload 字节数的会话范围（帧边界异常时会偏离几百字节）；
+ * issue #194 新增的四个字段把「静音出在哪一段」拆开；三条口径**不许互相反证**：
+ * - `inZero`：**到达车机**的 AAC payload 整块全 0 的累计帧数。AAC 码流天然不会全 0，
+ *   所以 `inZero > 0` 能证明「到达即被清零」；但 `inZero ≈ 0` **不能**反证传输正常
+ *   （payload 被覆盖成非零垃圾一样解不出声）。采集侧是否静音只能看发送侧的
+ *   `AudioDiag tx allZeroPcm`，不是这里的字段。
+ * - `inMin`/`inMax`：单帧 AAC 字节数的会话范围（正常约 300~420B）。它只用于与发送侧
+ *   `encMin/encAvg/encMax` 对表，**不能**用来判断帧边界错位（错位后长度仍在同一量级）。
  * - `outRmsMax`：**本窗口**（2.5 s）解码输出的最大 RMS —— 用来识别「有内容但极轻」。
  */
 internal fun audioPlayerStatLine(
@@ -145,11 +149,14 @@ internal fun audioPadSilenceFrames(
 }
 
 /**
- * 判定 PCM 16-bit 缓冲是否纯静音（issue #84 / Refs #79）。
+ * 判定一段 16-bit PCM 缓冲是否纯静音（issue #84 / Refs #79）。
  *
  * AAC-LC 解码出来的 PCM 每样本 2 字节（小端 16-bit signed）。
  * 当且仅当字节流全部为 0 时判定为静音（与 vd-server 端 silenceFrame(spec) 全 0 数组对称）。
  * 若缓冲为空，返回 true。
+ *
+ * issue #194 起它同时用于「到达的 AAC payload 是否全 0」——那里的含义只有
+ * 「字节全为 0」，不涉及 PCM 语义。
  */
 internal fun isPcmSilent(pcm: ByteArray): Boolean {
     for (b in pcm) {
@@ -189,10 +196,14 @@ internal fun pcm16Rms(pcm: ByteArray, len: Int = pcm.size): Int {
  *
  * 三个口径必须**分开**累计，否则又会回到「只看到 99% 静音、不知道是传输还是解码」的
  * 状态：
- * - [inZero]：收到的 payload 整块全 0（含稍后被抖动缓冲丢最旧的帧）—— 对应「传输/打包把 payload 清零」；
- * - [outZero]：解码输出整块全 0（与历史 `silence` 同一口径）—— 对应「解码器吐 0」；
+ * - [inZero]：收到的 **AAC payload** 整块全 0（含稍后被抖动缓冲丢最旧的帧）。
+ *   它只能证明「到达的字节全 0」；`inZero≈0` 不能反证传输正常。
+ * - [outZero]：解码输出 PCM 整块全 0（与历史 `silence` 同一口径）—— 对应「解码器吐 0」；
  * - [inFrames]/[outFrames]：两端口径各自的分母，避免拿一个分母去算两个比例。
  *   `inFrames != decoded` 本身就说明有帧在入队/喂解码器环节被丢。
+ *
+ * [inMinBytes]/[inMaxBytes] 是 AAC 单帧长度（正常约 300~420B），价值仅在于与发送侧
+ * `encMin/encAvg/encMax` 对表，**不是**帧边界错位的判据。
  *
  * [windowRmsMax] 是**窗口**值：由 [consumeWindowRmsMax] 取走并清零，让 2.5 s 统计行
  * 报「本窗口最大 RMS」而不是会话历史最大值；累计字段只由 [reset] 清零（`start()` 时）。
@@ -212,28 +223,28 @@ internal class AudioRxDiag {
     @Volatile
     private var windowRmsMaxValue = 0
 
-    /** 收到的 payload 累计帧数（通过入队闸门即计入）。 */
+    /** 收到的 AAC payload 累计帧数（通过入队闸门即计入）。 */
     val inFrames: Long get() = inFramesValue.get()
 
-    /** 其中整块全 0 的累计帧数。 */
+    /** 其中整块全 0 的 AAC payload 累计帧数。 */
     val inZero: Long get() = inZeroValue.get()
 
-    /** 单帧 payload 的会话最小字节数（无输入时为 0）。 */
+    /** 单帧 AAC payload 的会话最小字节数（无输入时为 0）。 */
     val inMinBytes: Int get() = if (inMinBytesValue == Int.MAX_VALUE) 0 else inMinBytesValue
 
-    /** 单帧 payload 的会话最大字节数（无输入时为 0）。 */
+    /** 单帧 AAC payload 的会话最大字节数（无输入时为 0）。 */
     val inMaxBytes: Int get() = inMaxBytesValue
 
-    /** 解码输出累计帧数。 */
+    /** 解码输出 PCM 累计帧数。 */
     val outFrames: Long get() = outFramesValue.get()
 
-    /** 解码输出整块全 0 的累计帧数。 */
+    /** 解码输出 PCM 整块全 0 的累计帧数。 */
     val outZero: Long get() = outZeroValue.get()
 
     /** 当前窗口的最大 RMS（[consumeWindowRmsMax] 取走后归零）。 */
     val windowRmsMax: Int get() = windowRmsMaxValue
 
-    /** 记录一帧收到的 payload（网络线程调用，计数器线程安全）。 */
+    /** 记录一帧收到的 AAC payload（网络线程调用，计数器线程安全）。 */
     fun onInput(payload: ByteArray) {
         inFramesValue.incrementAndGet()
         if (isPcmSilent(payload)) inZeroValue.incrementAndGet()

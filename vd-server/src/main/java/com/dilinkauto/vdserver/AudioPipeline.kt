@@ -541,15 +541,22 @@ internal class AudioTxDiag(
     var emittedFrames = 0L
         private set
 
-    /** 编码前全零 PCM 的累计帧数（跨窗口，`close()` 收尾行用）。 */
-    var allZeroPcmTotal = 0L
-        private set
+    /**
+     * 编码前全零 PCM 的累计帧数（跨窗口，`close()` 收尾行用）。
+     *
+     * `close()` 可能在采集线程 join 超时后仍读取（`AudioPipeline.close()` 的 1.5 s 有界
+     * join），所以这里用 AtomicLong，保证读到的是一个完整累计值。
+     */
+    private val allZeroPcmTotalValue = AtomicLong(0)
+
+    /** 编码前全零 PCM 的累计帧数（跨窗口）。 */
+    val allZeroPcmTotal: Long get() = allZeroPcmTotalValue.get()
 
     /** 记录一帧真正喂进编码器的 PCM。 */
     fun onPcm(pcm: ByteArray, len: Int = pcm.size) {
         if (isPcmAllZero(pcm, len)) {
             windowAllZero++
-            allZeroPcmTotal++
+            allZeroPcmTotalValue.incrementAndGet()
         }
     }
 
