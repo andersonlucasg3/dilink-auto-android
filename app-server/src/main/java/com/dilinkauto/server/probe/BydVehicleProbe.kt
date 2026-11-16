@@ -53,28 +53,67 @@ internal class BydVehicleProbe(
      * 会回落到调用方给的 context。
      */
     private val realContext: Context? = context?.let { runCatching { it.applicationContext }.getOrNull() } ?: context,
+    /** 墙钟接缝（毫秒单调时钟）：单测注入假时钟验证总时长守卫，避免真等 15 秒。 */
+    private val clockMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     /** 单次会话最多采几拍转速（500ms 一拍 → 约 3 秒）。 */
     private val speedSamples = 6
 
+    /** 探针总时长上限。某次反射卡住时不能把整段车机会话拖死。 */
+    private val deadlineMs = 15_000L
+
+    private var startedAtMs = 0L
+    private var deadlineHit = false
+
     fun run() {
+        startedAtMs = clockMs()
         emit("start pkg=${context?.packageName ?: "-"} uid=${runCatching { context?.applicationInfo?.uid }.getOrNull() ?: -1} sdk=${Build.VERSION.SDK_INT} debug=${com.dilinkauto.server.BuildConfig.DEBUG}")
         emit("note rpm 8191/65535 = invalid sentinel; speed raw unit varies by model")
-        if (abortedAt("start")) return
+        if (abortedAt("start")) {
+            finishAfterStop(EngineEvidence())
+            return
+        }
         reportPermission()
         val evidence = EngineEvidence()
-        // 每个 probe 返回 false 表示会话已结束；`verdict` 与 `done` 只在全部跑完时才出现，
-        // 否则日志读者会把「断线截断」当成「跑完了但读不到」。
-        if (!probeEngine(evidence)) return
-        if (!probeStatistic()) return
-        if (!probeSpeed()) return
-        if (!probeAc()) return
+        // 每个 probe 返回 false 表示会话已结束（断线或超时）；断线不写 `verdict`/`done`，
+        // 超时则写 `verdict` + `done` 并注明 deadline，避免把「没跑完」误读成「读不到」。
+        if (!probeEngine(evidence)) {
+            finishAfterStop(evidence)
+            return
+        }
+        if (!probeStatistic()) {
+            finishAfterStop(evidence)
+            return
+        }
+        if (!probeSpeed()) {
+            finishAfterStop(evidence)
+            return
+        }
+        if (!probeAc()) {
+            finishAfterStop(evidence)
+            return
+        }
         emitVerdict(evidence)
         emit("done")
     }
 
-    /** 会话已结束就停下，并把停在哪一步记下来（避免把「没跑完」误读成「读不到」）。 */
+    /** 超时是受控收尾：把已收集的证据落成 `verdict` 再写 `done`；断线仍然直接中止。 */
+    private fun finishAfterStop(evidence: EngineEvidence) {
+        if (!deadlineHit) return
+        emitVerdict(evidence)
+        emit("done")
+    }
+
+    /**
+     * 会话已结束或超过总时长就停下，并把停在哪一步记下来
+     * （避免把「没跑完」误读成「读不到」）。
+     */
     private fun abortedAt(where: String): Boolean {
+        if (clockMs() - startedAtMs > deadlineMs) {
+            deadlineHit = true
+            emit("deadline reached — skip remaining at $where")
+            return true
+        }
         if (!shouldAbort()) return false
         emit("aborted at $where")
         return true
@@ -107,7 +146,7 @@ internal class BydVehicleProbe(
     private fun probeEngine(evidence: EngineEvidence): Boolean {
         val device = obtainDevice(ENGINE_DEVICE, "engine")
         // 对照 1：SDK 内部存的 context 是否还是我们的 wrapper（被换掉则 wrapper 失效）。
-        evidence.storedContextIsWrapper = probeStoredContext(device)
+        evidence.storedContext = probeStoredContext(device)
         if (device == null) {
             evidence.listener = probeListener(null)
             return true
@@ -122,11 +161,6 @@ internal class BydVehicleProbe(
         }
         if (abortedAt("engine power")) return false
         emit("engine power=${callInt(device, "getEnginePower")}")
-
-        // 对照 3：真实 context 走同一条 getter。抛 SecurityException 说明客户端检查只被
-        // wrapper 绕过；仍返回哨兵说明 binder 之后也没有真实数据。
-        if (abortedAt("engine real ctx")) return false
-        evidence.realContextCall = probeRealContextCall()
 
         // 对照 4：同权限的其它 getter。全哨兵 → 不是单个 feature 的问题。
         if (abortedAt("engine coolant")) return false
@@ -146,6 +180,12 @@ internal class BydVehicleProbe(
 
         // 对照 5：事件通道。
         evidence.listener = probeListener(device)
+
+        // 对照 3 必须放在最后：`getInstance(realContext)` 可能返回同一单例并覆盖它的
+        // `mContext`，之后任何 getter 都会落到真实 context 的权限检查上；先跑会把
+        // coolant/oil/speedWarn 变成 SecurityException，整轮证据作废。
+        if (abortedAt("engine real ctx")) return false
+        evidence.realContextCall = probeRealContextCall()
         return true
     }
 
@@ -153,13 +193,14 @@ internal class BydVehicleProbe(
      * #195 对照 1：反射遍历设备对象及其父类的非静态 `Context` 字段，逐个读值并判断是否
      * 还是 [BydPermissionContext]。
      *
-     * 返回 `true` = 至少有一个字段仍是我们传进去的 wrapper；`false` = 读到了字段但都不是；
-     * `null` = 没有可读的 Context 字段（无法判断，判定函数会退化为 `unclear`）。
+     * 结论取三态（[CtxStored]）：全部是 wrapper = [CtxStored.WRAPPER]；全部不是 =
+     * [CtxStored.NOT_WRAPPER]；混着出现 = [CtxStored.MIXED]（父类/无关字段会干扰，
+     * 不能拿「任一是 wrapper」冒充成功）；没有可读字段 = [CtxStored.UNKNOWN]。
      */
-    private fun probeStoredContext(device: Any?): Boolean? {
+    private fun probeStoredContext(device: Any?): CtxStored {
         if (device == null) {
             emit("ctxStored=skip(no-instance)")
-            return null
+            return CtxStored.UNKNOWN
         }
         val fields = mutableListOf<Field>()
         var cls: Class<*>? = device.javaClass
@@ -173,30 +214,39 @@ internal class BydVehicleProbe(
         }
         if (fields.isEmpty()) {
             emit("ctxStored=skip(no-context-field)")
-            return null
+            return CtxStored.UNKNOWN
         }
         var readable = 0
-        var sawWrapper = false
+        var wrapperFields = 0
         for (field in fields) {
             val read = runCatching {
                 field.isAccessible = true
                 field.get(device)
             }
             if (read.isFailure) {
+                // Android 9+ 的 hidden-API 限制会让 setAccessible 抛 InaccessibleObjectException /
+                // NoSuchFieldException；原样记录类型与消息，别让「读不到」被当成「不是 wrapper」。
                 emit("ctxStored=err field=${field.name} ${describe(read.exceptionOrNull()!!)}")
                 continue
             }
             readable++
             val value = read.getOrNull()
             val isWrapper = value is BydPermissionContext
-            if (isWrapper) sawWrapper = true
+            if (isWrapper) wrapperFields++
             emit("ctxStored=wrapper=$isWrapper field=${field.name} ctx=${value?.javaClass?.simpleName ?: "null"}")
         }
-        if (readable == 0) {
-            emit("ctxStored=skip(unreadable-field)")
-            return null
+        val state = when {
+            readable == 0 -> {
+                // 字段存在但一个都读不到：反射被拦，无法判断归属（含 hidden-API 限制）。
+                emit("ctxStored=skip(unreadable-field) hint=hidden-api-or-reflection")
+                CtxStored.UNKNOWN
+            }
+            wrapperFields == readable -> CtxStored.WRAPPER
+            wrapperFields == 0 -> CtxStored.NOT_WRAPPER
+            else -> CtxStored.MIXED
         }
-        return sawWrapper
+        emit("ctxStored=state=${state.tag} readable=$readable wrapperFields=$wrapperFields")
+        return state
     }
 
     /** #195 对照 3：用真实 context（非 wrapper）重新实例化并调用转速 getter。 */
@@ -272,7 +322,7 @@ internal class BydVehicleProbe(
         val snapshot = evidence.snapshot()
         val sentinel = snapshot.engineReadings.count { it != null && it in BYD_SENTINEL_VALUES }
         emit(
-            "verdict=${decideSpeedVerdict(snapshot)} ctxStored=${snapshot.storedContextIsWrapper ?: "unknown"} " +
+            "verdict=${decideSpeedVerdict(snapshot)} ctxStored=${snapshot.storedContext.tag} " +
                 "realCtx=${snapshot.realContextCall.tag} sentinel=$sentinel/${snapshot.engineReadings.size} " +
                 "listener=${snapshot.listener.tag}",
         )
@@ -368,13 +418,13 @@ internal class BydVehicleProbe(
 
     /** 判定用的可变累积器，跑完再拍成不可变的 [BydSpeedEvidence] 交给纯函数。 */
     private class EngineEvidence {
-        var storedContextIsWrapper: Boolean? = null
+        var storedContext: CtxStored = CtxStored.UNKNOWN
         var realContextCall: RealContextCall = RealContextCall.SKIPPED
         var listener: ListenerState = ListenerState.NOT_ATTEMPTED
         val readings = mutableListOf<Int?>()
 
         fun snapshot(): BydSpeedEvidence =
-            BydSpeedEvidence(storedContextIsWrapper, realContextCall, readings.toList(), listener)
+            BydSpeedEvidence(storedContext, realContextCall, readings.toList(), listener)
     }
 
     companion object {
@@ -413,26 +463,49 @@ internal enum class RealContextCall(val tag: String) {
     SKIPPED("skipped"),
 }
 
+/** `ctxStored` 的归属结论（三态 + 未知），单独成行便于 grep。 */
+internal enum class CtxStored(val tag: String) {
+    /** 所有可读的 Context 字段都还是我们传进去的 wrapper。 */
+    WRAPPER("wrapper"),
+
+    /** 所有可读字段都不是 wrapper（SDK 换成了别的 context）。 */
+    NOT_WRAPPER("not-wrapper"),
+
+    /** 多个 Context 字段里有的时 wrapper、有的不是：父类/无关字段干扰，不能下强结论。 */
+    MIXED("mixed"),
+
+    /** 没有实例、没有 Context 字段，或反射被 hidden-API 拦住。 */
+    UNKNOWN("unknown"),
+}
+
 /** 事件通道（listener）的尝试结果。 */
 internal enum class ListenerState(val tag: String) {
     NOT_ATTEMPTED("not-attempted"),
     SKIP_ABSTRACT("skip(abstract-class)"),
+
+    /**
+     * 注册成功，但本轮**没有**采集到回调值（抽象类造不出子类，也没有采集窗口）。
+     * 注册不抛异常本身不构成「必须走事件通道」的证据。
+     */
     REGISTERED("registered"),
+
+    /** 只有真正回调出非哨兵值时才允许判成 `listener-required`。 */
+    REGISTERED_REAL_VALUE("real-value"),
+
     ERROR("error"),
 }
 
 /**
  * #195 判定所需的证据快照。字段顺序与探针输出顺序一致，便于回看日志。
  *
- * @param storedContextIsWrapper `ctxStored` 的结论：`true`=SDK 仍持有我们的 wrapper；
- *   `false`=被换成别的 context；`null`=没有可读字段。
+ * @param storedContext `ctxStored` 的归属结论；[CtxStored.MIXED]/[CtxStored.UNKNOWN] 都会让判定退化。
  * @param realContextCall 真实 context 的对照调用分类。
  * @param engineReadings 同 `BYDAUTO_ENGINE_GET` 权限的 getter 读数（转速首拍 + 冷却液 + 机油 + 超速警告）；
  *   `null` 表示该 getter 抛异常。
  * @param listener 事件通道的尝试结果。
  */
 internal data class BydSpeedEvidence(
-    val storedContextIsWrapper: Boolean?,
+    val storedContext: CtxStored,
     val realContextCall: RealContextCall,
     val engineReadings: List<Int?>,
     val listener: ListenerState,
@@ -449,13 +522,15 @@ internal const val VERDICT_UNCLEAR = "unclear"
 /**
  * #195 的定性规则（纯函数，单测钉死）。
  *
- * 优先级说明：
- * 1. 真实 context **也**返回哨兵 → 与 wrapper 无关，只能是服务端不给数据；
- * 2. SDK 存的不是 wrapper → 先怀疑 wrapper 传递失效，其它结论都不可信；
- * 3. 同步 getter 全哨兵但事件通道能注册 → 需要沿 `onEngineSpeedChanged` 继续验证；
- * 4. wrapper 被保留、读数全哨兵 → 客户端检查确实被绕过，binder 之后仍然拿哨兵 = 服务端拒绝；
- * 5. 真实 context 被 `SecurityException` 挡住而其它证据不足时，也归到服务端拒绝；
- * 6. 其余（未复现、读数缺失、混合值）一律 `unclear`，不硬下结论。
+ * 口径故意收窄 —— 只回答「是不是服务端把数据挡掉了」，回答不了「数据未就绪/未使能」：
+ * 1. 读数缺失 / 有 getter 抛异常 / 出现非哨兵值 → `unclear`（证据链不完整或未复现）；
+ * 2. 只有事件通道真的回调出非哨兵值 → `listener-required`（同步 getter 不可信）；
+ * 3. `ctxStored=mixed` → `unclear`：wrapper 归属有歧义，任何强结论都不可信；
+ * 4. 只有 `realCtxCall=denied`（客户端被 `SecurityException` 挡住）**且** ctx 归属是
+ *    wrapper/unknown 时才给 `server-permission`；`ok-sentinel` 无法排除「引擎未就绪」，
+ *    一律 `unclear`；
+ * 5. 全部可读字段都不是 wrapper 且真实 context 不被拒 → `context-swapped`；
+ * 6. 其余 → `unclear`。
  */
 internal fun decideSpeedVerdict(evidence: BydSpeedEvidence): String {
     val readings = evidence.engineReadings
@@ -464,11 +539,18 @@ internal fun decideSpeedVerdict(evidence: BydSpeedEvidence): String {
     // 出现非哨兵值：本轮的哨兵现象没有复现（或混合），不下结论。
     if (readings.any { it != null && it !in BYD_SENTINEL_VALUES }) return VERDICT_UNCLEAR
 
-    if (evidence.realContextCall == RealContextCall.OK_SENTINEL) return VERDICT_SERVER_PERMISSION
-    if (evidence.storedContextIsWrapper == false) return VERDICT_CONTEXT_SWAPPED
-    if (evidence.listener == ListenerState.REGISTERED) return VERDICT_LISTENER_REQUIRED
-    if (evidence.storedContextIsWrapper == true) return VERDICT_SERVER_PERMISSION
-    if (evidence.realContextCall == RealContextCall.DENIED) return VERDICT_SERVER_PERMISSION
+    if (evidence.listener == ListenerState.REGISTERED_REAL_VALUE) return VERDICT_LISTENER_REQUIRED
+    if (evidence.storedContext == CtxStored.MIXED) return VERDICT_UNCLEAR
+
+    if (evidence.realContextCall == RealContextCall.DENIED) {
+        return when (evidence.storedContext) {
+            // 客户端检查只被 wrapper 绕过，binder 之后仍拿哨兵 → 只能是服务端拒绝。
+            CtxStored.WRAPPER, CtxStored.UNKNOWN -> VERDICT_SERVER_PERMISSION
+            // ctx 归属与「真实 context 被拒」互相矛盾，不下结论。
+            CtxStored.NOT_WRAPPER, CtxStored.MIXED -> VERDICT_UNCLEAR
+        }
+    }
+    if (evidence.storedContext == CtxStored.NOT_WRAPPER) return VERDICT_CONTEXT_SWAPPED
     return VERDICT_UNCLEAR
 }
 

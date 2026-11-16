@@ -167,6 +167,7 @@ class BydVehicleProbeTest {
         val lines = runProbe(classLookup = { name -> deviceClassFor(name, StoredContextDevice::class.java) })
 
         assertTrue("必须逐字段打印并认出 wrapper：$lines", lines.any { it.contains("ctxStored=wrapper=true field=mContext") })
+        assertTrue("必须给出聚合结论：$lines", lines.any { it.contains("ctxStored=state=wrapper") })
     }
 
     /** 反向对照：字段里存的不是 wrapper 时必须报 false，否则「context 被换掉」这条永远看不出来。 */
@@ -175,7 +176,22 @@ class BydVehicleProbeTest {
         val lines = runProbe(classLookup = { name -> deviceClassFor(name, SwappedContextDevice::class.java) })
 
         assertTrue("字段存在但不是 wrapper 时必须报 false：$lines", lines.any { it.contains("ctxStored=wrapper=false field=mContext") })
+        assertTrue("聚合结论不能是 wrapper：$lines", lines.any { it.contains("ctxStored=state=not-wrapper") })
         assertFalse("不得误报成 wrapper：$lines", lines.any { it.contains("ctxStored=wrapper=true") })
+    }
+
+    /**
+     * #195 对照 1 的假阳面：父类/无关 Context 字段混进来时，「任一字段是 wrapper」会
+     * 让 context-swapped 分支永远不可达。必须单独报 mixed 并让判定退化为 unclear。
+     */
+    @Test
+    fun `mixed context fields are reported as mixed`() {
+        val lines = runProbe(classLookup = { name -> deviceClassFor(name, MixedContextDevice::class.java) })
+
+        assertTrue("必须逐字段打印：$lines", lines.any { it.contains("ctxStored=wrapper=true field=mContext") })
+        assertTrue("必须逐字段打印：$lines", lines.any { it.contains("ctxStored=wrapper=false field=mOther") })
+        assertTrue("混合必须单独成态：$lines", lines.any { it.contains("ctxStored=state=mixed") })
+        assertTrue("mixed 不得给出强结论：$lines", lines.any { it.contains("verdict=unclear") })
     }
 
     /**
@@ -236,12 +252,29 @@ class BydVehicleProbeTest {
         assertTrue("抽象类必须报 skip：$lines", lines.any { it.contains("listener=skip(abstract-class)") })
     }
 
-    /** 全哨兵 + wrapper 保留 + 真实 context 也拿到哨兵 → 服务端拒绝。 */
+    /** 全哨兵 + wrapper 保留 + 真实 context 被 SecurityException 拒绝 → 服务端拒绝。 */
     @Test
-    fun `sentinel readings with preserved wrapper conclude server permission`() {
-        val lines = runProbe(classLookup = { name -> deviceClassFor(name, StoredContextDevice::class.java) })
+    fun `sentinel readings with denied real context conclude server permission`() {
+        val lines = runProbe(
+            classLookup = { name -> deviceClassFor(name, RealDeniedDevice::class.java) },
+            realContext = android.content.ContextWrapper(null),
+        )
 
         assertTrue("必须自动给出结论：$lines", lines.any { it.contains("verdict=server-permission") })
+    }
+
+    /**
+     * 墙钟守卫：某次反射卡住时不能把整段车机会话拖死。到点要留一行 deadline 并收尾，
+     * 不能静默消失（否则会被误读成「读不到」）。
+     */
+    @Test
+    fun `wall clock budget stops the probe and still wraps up`() {
+        var now = 0L
+        val lines = runProbe(clockMs = { now += 5_000; now })
+
+        assertTrue("到点必须留证据：$lines", lines.any { it.contains("deadline reached — skip remaining") })
+        assertTrue("收尾要给结论：$lines", lines.any { it.contains("verdict=") })
+        assertTrue("收尾要写 done：$lines", lines.any { it.contains("done") })
     }
 
     /**
@@ -253,44 +286,59 @@ class BydVehicleProbeTest {
         val allSentinel = listOf(8191, 8191, 65535, 8191)
 
         assertEquals(
-            "真实 context 也拿到哨兵 → 服务端拒绝",
+            "真实 context 被 SecurityException 拒绝 + wrapper 保留 → 服务端拒绝",
             "server-permission",
-            decideSpeedVerdict(BydSpeedEvidence(null, RealContextCall.OK_SENTINEL, allSentinel, ListenerState.SKIP_ABSTRACT)),
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.DENIED, allSentinel, ListenerState.SKIP_ABSTRACT)),
         )
         assertEquals(
-            "SDK 存的不是 wrapper → 先修 wrapper 传递",
+            "ctx 归属读不到但真实 context 被拒 → 仍可归到服务端拒绝",
+            "server-permission",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.UNKNOWN, RealContextCall.DENIED, allSentinel, ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "真实 context 也拿哨兵但没被拒 → 无法排除引擎未就绪",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.OK_SENTINEL, allSentinel, ListenerState.SKIP_ABSTRACT)),
+        )
+        assertEquals(
+            "SDK 存的不是 wrapper 且真实 context 不被拒 → 先修 wrapper 传递",
             "context-swapped",
-            decideSpeedVerdict(BydSpeedEvidence(false, RealContextCall.DENIED, allSentinel, ListenerState.SKIP_ABSTRACT)),
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.NOT_WRAPPER, RealContextCall.OK_SENTINEL, allSentinel, ListenerState.SKIP_ABSTRACT)),
         )
         assertEquals(
-            "wrapper 被保留但真实 context 被拒 → 服务端拒绝",
-            "server-permission",
-            decideSpeedVerdict(BydSpeedEvidence(true, RealContextCall.DENIED, allSentinel, ListenerState.SKIP_ABSTRACT)),
+            "Context 字段混合 → 归属有歧义，不下结论",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.MIXED, RealContextCall.DENIED, allSentinel, ListenerState.SKIP_ABSTRACT)),
         )
         assertEquals(
-            "同步 getter 全哨兵但事件通道可用 → 需要 listener",
+            "仅注册 listener 不够，必须真的回调出真实值",
+            "unclear",
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.SKIPPED, allSentinel, ListenerState.REGISTERED)),
+        )
+        assertEquals(
+            "事件通道真的回调出真实值 → 需要 listener",
             "listener-required",
-            decideSpeedVerdict(BydSpeedEvidence(true, RealContextCall.SKIPPED, allSentinel, ListenerState.REGISTERED)),
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.SKIPPED, allSentinel, ListenerState.REGISTERED_REAL_VALUE)),
         )
         assertEquals(
             "出现真实值 → 未复现",
             "unclear",
-            decideSpeedVerdict(BydSpeedEvidence(true, RealContextCall.DENIED, listOf(1234, 8191, 8191, 8191), ListenerState.SKIP_ABSTRACT)),
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.DENIED, listOf(1234, 8191, 8191, 8191), ListenerState.SKIP_ABSTRACT)),
         )
         assertEquals(
             "读数缺失 → 证据不足",
             "unclear",
-            decideSpeedVerdict(BydSpeedEvidence(true, RealContextCall.DENIED, emptyList(), ListenerState.SKIP_ABSTRACT)),
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.DENIED, emptyList(), ListenerState.SKIP_ABSTRACT)),
         )
         assertEquals(
             "部分 getter 抛异常 → 证据混杂",
             "unclear",
-            decideSpeedVerdict(BydSpeedEvidence(true, RealContextCall.DENIED, listOf(8191, null, 8191, 8191), ListenerState.SKIP_ABSTRACT)),
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.WRAPPER, RealContextCall.DENIED, listOf(8191, null, 8191, 8191), ListenerState.SKIP_ABSTRACT)),
         )
         assertEquals(
             "既不知道 ctx 归属、也没有真实 context 对照 → 不能下结论",
             "unclear",
-            decideSpeedVerdict(BydSpeedEvidence(null, RealContextCall.SKIPPED, allSentinel, ListenerState.SKIP_ABSTRACT)),
+            decideSpeedVerdict(BydSpeedEvidence(CtxStored.UNKNOWN, RealContextCall.SKIPPED, allSentinel, ListenerState.SKIP_ABSTRACT)),
         )
     }
 
@@ -299,6 +347,7 @@ class BydVehicleProbeTest {
         classLookup: (String) -> Class<*>? = { name -> deviceClassFor(name, FakeDevice::class.java) },
         context: android.content.Context? = android.content.ContextWrapper(null),
         realContext: android.content.Context? = null,
+        clockMs: () -> Long = { 0L },
     ): List<String> {
         val lines = mutableListOf<String>()
         BydVehicleProbe(
@@ -308,6 +357,7 @@ class BydVehicleProbeTest {
             sleepMs = { },
             // 生产默认取 applicationContext；mockable android.jar 上取不到，回落到 probe context。
             realContext = realContext ?: context,
+            clockMs = clockMs,
         ).run()
         return lines
     }
@@ -382,6 +432,27 @@ internal class SwappedContextDevice(private val mContext: android.content.Contex
         @JvmStatic
         fun getInstance(context: android.content.Context): SwappedContextDevice =
             SwappedContextDevice(android.content.ContextWrapper(context))
+    }
+}
+
+/**
+ * #195 假设备：同时存在两个 Context 字段，一个保留 wrapper、一个被换成普通 Context，
+ * 用来锁住「任一字段是 wrapper 就算成功」的假阳面。
+ */
+internal class MixedContextDevice(
+    private val mContext: android.content.Context,
+    private val mOther: android.content.Context,
+) {
+    fun getEngineSpeed(): Int = 8191
+    fun getEnginePower(): Int = 0
+    fun getEngineCoolantLevel(): Int = 8191
+    fun getOilLevel(): Int = 8191
+    fun getEngineSpeedWarningValue(): Int = 8191
+
+    companion object {
+        @JvmStatic
+        fun getInstance(context: android.content.Context): MixedContextDevice =
+            MixedContextDevice(context, android.content.ContextWrapper(context))
     }
 }
 
