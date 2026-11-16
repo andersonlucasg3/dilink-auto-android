@@ -603,10 +603,16 @@ class ConnectionService : Service() {
         // issue #153 PB：档位随握手下发，手机在这一次建屏时取用；不在会话中 resize。
         // 老车机不带该尾字段 → decode 出 0 = VdAreaTier.AUTO（默认档）。
         val areaTier = VdAreaTier.normalize(request.vdAreaTier)
-        val (vdWidth, vdHeight, displayDpi) = VdDimensions.compute(
-            request, phoneRealW, phoneRealH, areaTier
-        )
-        FileLog.i(TAG, "VD: ${vdWidth}x${vdHeight} @${displayDpi}dpi (car ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi, phone real ${phoneRealW}x${phoneRealH}, override=${request.dpiOverride}, areaTier=$areaTier)")
+        // issue #202 A：尺寸与 DPI 都由 VdDimensions.resolve 单点决策，这里只取结果与来源。
+        // 旧实现把 override 直接交给 coerceDpiOverride（越界夹到边界 480），于是
+        // 「手滑输入 560」会被保存成一个看起来合法的 480 并在每次重连复现。
+        val vd = VdDimensions.resolve(request, phoneRealW, phoneRealH, areaTier)
+        val vdWidth = vd.width
+        val vdHeight = vd.height
+        val displayDpi = vd.dpi
+        FileLog.i(TAG, "VD: ${vdWidth}x${vdHeight} @${displayDpi}dpi (car ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi, phone real ${phoneRealW}x${phoneRealH}, override=${request.dpiOverride}, areaTier=$areaTier, dpiSource=${vd.token})")
+        // 非法/越界 override 已回落到自动标定值：这里必须是 W 级，现场才能解释"为什么不是 480"。
+        vd.warning?.let { FileLog.w(TAG, it) }
 
         // Open lifecycle channel if not already open (survives re-handshakes).
         // A-03: created under vdLock so a concurrent handshake cannot double-bind.
@@ -688,7 +694,7 @@ class ConnectionService : Service() {
 
             // If Shizuku is available, deploy VD server directly BEFORE waiting for lifecycle connection
             if (useShizuku) {
-                startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight, displayDpi, vdJarCrc)
+                startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight, displayDpi, vdJarCrc, vd.token)
             }
 
             // Wait for VD to connect on the lifecycle channel already opened.
@@ -739,7 +745,7 @@ class ConnectionService : Service() {
      * without waiting for the car's USB ADB connection. The VD server will
      * reverse-connect to localhost:19647 as usual.
      */
-    private suspend fun startVdServerViaShizuku(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int, dpi: Int = VideoConfig.DEFAULT_FALLBACK_DPI, jarCrc: Long = -1L) {
+    private suspend fun startVdServerViaShizuku(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int, dpi: Int = VideoConfig.DEFAULT_FALLBACK_DPI, jarCrc: Long = -1L, dpiSource: String = "-") {
         try {
             val allowedPackages = appListBuilder.allowedPackages().orEmpty()
             val outcome = ShizukuVdDeployer.deploy(
@@ -751,7 +757,8 @@ class ConnectionService : Service() {
                 targetFps = targetFps,
                 targetBitrate = targetBitrate,
                 carHost = controlConnection?.remoteAddress ?: VdDeployArgs.CAR_HOST_ANY,
-                allowedPackages = allowedPackages
+                allowedPackages = allowedPackages,
+                dpiSource = dpiSource
             ) ?: return
 
             if (outcome.forcedKill) {

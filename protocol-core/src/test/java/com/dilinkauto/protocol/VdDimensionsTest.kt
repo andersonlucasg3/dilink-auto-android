@@ -108,11 +108,31 @@ class VdDimensionsTest {
     }
 
     @Test
-    fun dpiOverride_beyondBoundsIsClampedTo480() {
-        val (_, _, dpi) = VdDimensions.compute(
+    fun dpiOverride_beyondBoundsFallsBackToAuto() {
+        // issue #202 A：越界 override 不再夹到边界 480，而是回落到自动标定值 + W 日志。
+        val fallen = VdDimensions.resolve(
             defaultRequest(dpiOverride = 999), 1368, 3192
         )
-        assertEquals(480, dpi)
+        val auto = VdDimensions.resolve(
+            defaultRequest(dpiOverride = 0), 1368, 3192
+        )
+        assertEquals(VdDpiSource.FALLBACK, fallen.source)
+        assertEquals(auto.dpi, fallen.dpi)
+        assertTrue("回落必须带 W 日志", fallen.warning?.startsWith("W:") == true)
+    }
+
+    @Test
+    fun dpiOverride_aboveViewportSafeMaxFallsBackToAuto() {
+        // 现场（2026-11-16 实车）：车机 1204x660 @160dpi、手机 1368x3192、默认档
+        // → VD 1926x1054，安全上限 234；override=480 曾原样生效（竖屏应用被压成细条）。
+        val r = VdDimensions.resolve(
+            defaultRequest(carW = 1204, carH = 660, dpiOverride = 480), 1368, 3192
+        )
+        assertEquals(1926, r.width)
+        assertEquals(1054, r.height)
+        assertEquals(VdDpiSource.FALLBACK, r.source)
+        assertEquals(VideoConfig.maxSafeDpi(r.width, r.height), r.dpi)
+        assertTrue("必须打 W 日志: ${r.warning}", r.warning?.startsWith("W:") == true)
     }
 
     @Test
@@ -257,12 +277,14 @@ class VdDimensionsTest {
 
     @Test
     fun dpiOverrideIsTierIndependent() {
+        // issue #202 之后 override 仍与档位无关，但必须落在**每个档位各自**的安全上限内：
+        // 默认档 (1926x1054) 上限 234、兼容档 (2560x1402) 上限 311，取 200 对两档都合法。
         for (tier in listOf(VdAreaTier.AUTO, VdAreaTier.COMPAT_2560)) {
             val (_, _, dpi) = VdDimensions.compute(
-                defaultRequest(carW = 1204, carH = 660, dpiOverride = 300),
+                defaultRequest(carW = 1204, carH = 660, dpiOverride = 200),
                 1368, 3192, tier
             )
-            assertEquals(300, dpi)
+            assertEquals(200, dpi)
         }
     }
 

@@ -452,12 +452,12 @@ All VD server lifecycle commands are defined in `VdDeploy.kt` (protocol module) 
 
 ### VD Server argv (`VdDeployArgs`)
 
-`PipelineServer.main()` parses `W H DPI PHONE_HOST EW EH FPS [BITRATE] [CAR_HOST] [ALLOWED] [SESSION]`:
+`PipelineServer.main()` parses `W H DPI PHONE_HOST EW EH FPS [BITRATE] [CAR_HOST] [ALLOWED] [SESSION] [DPI_SOURCE]`:
 
 | Slot | Source / clamping |
 |------|-------------------|
-| `W H` | VirtualDisplay dims. Phone-side: `VdDimensions.compute` (car viewport, even-aligned, anti-crop scaled to the phone's physical long edge). Car-side: native car viewport |
-| `DPI` | Auto-calibrated (`VideoConfig.calculateOptimalDpi`) or the car's coerced `dpiOverride` |
+| `W H` | VirtualDisplay dims. Phone-side: `VdDimensions.resolve` (car viewport, even-aligned, anti-crop scaled to the phone's physical long edge). Car-side: native car viewport |
+| `DPI` | 单一来源（issue #202）：`VdDpiResolver` 依次取 用户 override（协议区间 120..480 **且不超过 `VideoConfig.maxSafeDpi`**）> 自动标定（`calculateOptimalDpi`）> 默认回落。越界/超上限不夹边界，回落自动值并打 W 日志 |
 | `PHONE_HOST` | Host the VD server reverse-connects to on `LIFECYCLE_PORT` |
 | `EW EH` | Encoder dims, proportionally scaled to fit 1920x1080, then floored to even |
 | `FPS` | Target frame rate; all pipeline timeouts derive from it |
@@ -465,6 +465,7 @@ All VD server lifecycle commands are defined in `VdDeploy.kt` (protocol module) 
 | `CAR_HOST` | Trailing, optional. Dotted-quad IPv4 or hostname; blank or malformed degrades to `-` (= accept any peer) rather than failing the deploy. Pins the engine's 9638/9639 accepts to the receiver it serves |
 | `ALLOWED` | issue #21: comma-joined package names (`[A-Za-z0-9._]{1,255}`) the user allows onto the car screen; `-` / empty / all-invalid = no allowlist filtering (car/desktop ADB deploys cannot read the phone prefs). Bounds `RecentsParser.pickQuickSwitchTarget` so a private app is never pulled into the VD |
 | `SESSION` | issue #180: the session token generated at deploy time (`[A-Za-z0-9_-]{1,64}`, 32 hex chars from a UUID), also used to name this session's stop sentinel. `-` / invalid = legacy engine, listening on the fixed `stop-request` with pid content addressing + mtime fallback |
+| `DPI_SOURCE` | issue #202: DPI 来源令牌（`auto` / `user-240` / `fallback-480-234`，`[A-Za-z0-9._-]{1,48}`），引擎只把它打进 `Starting:` 行；`-` / 缺省 = 旧部署端未上报（日志记 `unknown`） |
 
 ### Launch command line
 

@@ -309,7 +309,10 @@ class PipelineServer(
             val allowed = VdDeployArgs.parseAllowedPackages(args.getOrNull(9))
             // issue #180 第三版：第 11 个槽位是本次会话的 token，`-`/缺省 = 旧格式固定名。
             val sessionToken = VdDeployArgs.parseSessionToken(args.getOrNull(10))
-            log("Starting: VD=${w}x${h} @${d}dpi, encode=${ew}x${eh}, phoneHost=$ph, fps=$f, bitrate=${br/1_000_000}M, carHost=${carHost ?: "ANY"}")
+            // issue #202 A：第 12 槽位是部署端解析出的 DPI 来源（`auto`/`user-240`/`fallback-480-234`）。
+            // 引擎只把最终生效值与来源打进启动行，现场不必再靠猜"这个 dpi 是谁定的"。
+            val dpiSource = VdDpiResolver.parseToken(args.getOrNull(11))
+            log("Starting: VD=${w}x${h} @${d}dpi (dpiSource=$dpiSource), encode=${ew}x${eh}, phoneHost=$ph, fps=$f, bitrate=${br/1_000_000}M, carHost=${carHost ?: "ANY"}")
             log("Allowlist: ${if (allowed.isEmpty()) "not handed down (no recents filtering)" else "${allowed.size} packages"}")
             log(
                 "Stop sentinel: " + if (sessionToken.isEmpty()) {
@@ -457,6 +460,9 @@ class PipelineServer(
 
     private fun createVirtualDisplay(): Boolean {
         val vdSurf = vdInputSurface ?: return false
+        // issue #202 结论：跨进程复用 VD 不可行 —— 一个会话一个 app_process，
+        // `createVirtualDisplay()` 全仓只有启动序列一个调用点，且 `virtualDisplay`
+        // 是建屏之后才赋值，所以这里不存在"本进程已有 VD"的分支（评审阻塞项 1）。
         // Snapshot the system state we are about to change — BEFORE changing it.
         // This used to run after VirtualDisplayCreator.create(), which itself
         // wrote screen_off_timeout=SessionScreenTimeout.SESSION_TIMEOUT_SENTINEL /

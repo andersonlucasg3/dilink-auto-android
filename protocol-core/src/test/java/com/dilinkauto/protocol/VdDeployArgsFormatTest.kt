@@ -8,22 +8,22 @@ import org.junit.Test
 /**
  * VdDeployArgs.format / coerceDpiOverride 单测。
  * （sanitizeCarHost 与"默认 carHost='-'"已由 AuditProtocolFixesTest 覆盖，这里只补
- * 精确 11 字段布局、等比缩放钳制、bitrate 边界、allowlist 槽位（issue #21）与
- * 会话 token 槽位（issue #180 第三版）。）
+ * 精确 12 字段布局、等比缩放钳制、bitrate 边界、allowlist 槽位（issue #21）、
+ * 会话 token 槽位（issue #180 第三版）与 DPI 来源槽位（issue #202）。
  *
  * format 是 PipelineServer.main() 的 argv 契约，字段顺序/钳制一旦漂移，部署参数就错位。
  */
 class VdDeployArgsFormatTest {
 
     @Test
-    fun `format emits exact eleven field layout with empty trailing sentinels`() {
+    fun `format emits exact twelve field layout with empty trailing sentinels`() {
         val out = VdDeployArgs.format(
             vdWidth = 1280, vdHeight = 720, dpi = 160, phoneHost = "127.0.0.1",
             encodeWidth = 1280, encodeHeight = 720, fps = 24,
             bitrate = 4_000_000, carHost = "10.0.0.7"
         )
-        assertEquals("1280 720 160 127.0.0.1 1280 720 24 4000000 10.0.0.7 - -", out)
-        assertEquals(11, out.split(" ").size)
+        assertEquals("1280 720 160 127.0.0.1 1280 720 24 4000000 10.0.0.7 - - -", out)
+        assertEquals(12, out.split(" ").size)
     }
 
     @Test
@@ -35,10 +35,10 @@ class VdDeployArgsFormatTest {
             allowedPackages = listOf("com.autonavi.minimap", "com.baidu.BaiduMap")
         )
         assertEquals(
-            "1280 720 160 127.0.0.1 1280 720 24 4000000 10.0.0.7 com.autonavi.minimap,com.baidu.BaiduMap -",
+            "1280 720 160 127.0.0.1 1280 720 24 4000000 10.0.0.7 com.autonavi.minimap,com.baidu.BaiduMap - -",
             out
         )
-        assertEquals(11, out.split(" ").size)
+        assertEquals(12, out.split(" ").size)
     }
 
     @Test
@@ -49,7 +49,23 @@ class VdDeployArgsFormatTest {
             allowedPackages = listOf("com.autonavi.minimap; rm -rf /", "com.baidu.BaiduMap", " ", "com.baidu.BaiduMap")
         )
         assertEquals("com.baidu.BaiduMap", out.split(" ")[9])
-        assertEquals(11, out.split(" ").size)
+        assertEquals(12, out.split(" ").size)
+    }
+
+    @Test
+    fun `format appends the dpi source token as the twelfth field`() {
+        // issue #202 A：来源令牌只用于引擎启动行取证，非法字符必须退化成未上报哨兵。
+        val out = VdDeployArgs.format(
+            vdWidth = 1280, vdHeight = 720, dpi = 234, phoneHost = "127.0.0.1",
+            encodeWidth = 1280, encodeHeight = 720, fps = 24,
+            dpiSource = "fallback-480-234"
+        )
+        assertEquals("fallback-480-234", out.split(" ")[11])
+        assertEquals(VdDpiResolver.SOURCE_UNKNOWN, VdDeployArgs.format(
+            vdWidth = 1280, vdHeight = 720, dpi = 234, phoneHost = "127.0.0.1",
+            encodeWidth = 1280, encodeHeight = 720, fps = 24,
+            dpiSource = "a b;reboot"
+        ).split(" ")[11])
     }
 
     @Test
@@ -122,11 +138,12 @@ class VdDeployArgsFormatTest {
         // encodeWidth/Height=0 → scale 仍为 1（除以 0f 得 Inf，被 minOf 排除），不崩，EW/EH=0
         val out = VdDeployArgs.format(1280, 720, 160, "127.0.0.1", encodeWidth = 0, encodeHeight = 0, fps = 24)
         val f = out.split(" ")
-        assertEquals(11, f.size)
+        assertEquals(12, f.size)
         assertEquals("0", f[4])
         assertEquals("0", f[5])
         assertEquals("-", f[9])
         assertEquals("-", f[10])
+        assertEquals("-", f[11])
     }
 
     @Test

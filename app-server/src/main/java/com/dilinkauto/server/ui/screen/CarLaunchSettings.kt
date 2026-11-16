@@ -79,7 +79,12 @@ internal fun SettingSection(
     selectedPresetValue: Int,
     onValueChange: (Int) -> Unit,
     coerceManualValue: (String) -> Int,
-    manualSuffix: String = ""
+    manualSuffix: String = "",
+    /**
+     * issue #202 评审第 2 条：输入框下方的"实际生效值 / 视口上限"提示。
+     * null = 这一段不需要（比特率/帧率/档位只有 DPI 会被视口上限削减）。
+     */
+    note: String? = null
 ) {
     val focusManager = LocalFocusManager.current
 
@@ -194,6 +199,17 @@ internal fun SettingSection(
             style = MaterialTheme.typography.bodySmall,
             lineHeight = 16.sp
         )
+        // issue #202：越界回落对用户不可见的问题在这里补齐 —— 用 WarningColor 与普通
+        // hint 区分开，明确"填的不是实际生效的那个数"。
+        if (note != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                note,
+                color = WarningColor,
+                style = MaterialTheme.typography.bodySmall,
+                lineHeight = 16.sp
+            )
+        }
     }
 }
 

@@ -357,12 +357,14 @@ object VdDeploy {
         background: Boolean,
         carHost: String = VdDeployArgs.CAR_HOST_ANY,
         allowedPackages: Collection<String> = emptyList(),
-        sessionToken: String? = null
+        sessionToken: String? = null,
+        /** issue #202 A：DPI 来源令牌，只用于引擎启动行取证（`-` = 不上报）。 */
+        dpiSource: String = VdDpiResolver.SOURCE_UNKNOWN
     ): DeployPlan {
         val token = sessionToken?.trim()?.takeIf { isValidSessionToken(it) } ?: newSessionToken()
         val args = VdDeployArgs.format(
             vdWidth, vdHeight, dpi, phoneHost, encodeWidth, encodeHeight, fps, bitrate, carHost,
-            allowedPackages, token
+            allowedPackages, token, dpiSource
         )
         return DeployPlan(
             args = args,

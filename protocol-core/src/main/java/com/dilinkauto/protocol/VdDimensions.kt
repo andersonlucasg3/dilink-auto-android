@@ -32,12 +32,11 @@ package com.dilinkauto.protocol
  *    @560dpi) reports a 2992px long edge, so the VD came out 2992 wide while
  *    the IME rendered at the true 3192, overhanging the VD by 200px (~6.7%)
  *    identically at DPI 120/200/300/400.
- *  - DPI: a car-side override (coerced to [120, 480]) bypasses the
- *    portrait-app-safe cap; otherwise auto-calibrate for a ~380dp logical
- *    width in landscape. **The car-reported density is scaled by the same
- *    anti-crop factor as the viewport** — the car reports density for its own
- *    (smaller) viewport, so using it verbatim on the enlarged VD makes the UI
- *    render too small (issue #20).
+ *  - DPI: 用户 override 只有在 [VdDeployArgs.DPI_OVERRIDE_MIN]..[VdDeployArgs.DPI_OVERRIDE_MAX]
+ *    **且不超过 [VideoConfig.maxSafeDpi]（本视口上限）**时才生效；否则回落到自动标定并打
+ *    W 级日志（issue #202：`override=480` 曾无条件绕过上限，把竖屏应用压成细条）。
+ *    自动标定按横屏 ~380dp 逻辑宽标定。**车机上报的密度按与视口相同的 anti-crop 系数放大**
+ *    —— 车机报的是它自己（更小）视口的密度，直接用在放大后的 VD 上会让 UI 过小（issue #20）。
  */
 object VdDimensions {
 
@@ -101,6 +100,38 @@ object VdDimensions {
         phoneRealHeight: Int,
         areaTier: Int = VdAreaTier.AUTO,
     ): Triple<Int, Int, Int> {
+        val r = resolve(request, phoneRealWidth, phoneRealHeight, areaTier)
+        return Triple(r.width, r.height, r.dpi)
+    }
+
+    /**
+     * 一次 VD 参数解析的完整结果（issue #202 A：参数单一来源）。
+     *
+     * [token] 是 DPI 来源令牌（`auto` / `user-240` / `fallback-480-234`），由部署端原样
+     * 透传到引擎 argv，让 `vd-server.log` 的 `Starting:` 行能直接说明"这个 dpi 是谁定的"。
+     */
+    data class Resolution(
+        val width: Int,
+        val height: Int,
+        val dpi: Int,
+        val source: VdDpiSource,
+        val token: String,
+        /** 非 null = 需要打 W 级日志（用户设置非法/越界已回落）。 */
+        val warning: String?
+    )
+
+    /**
+     * [compute] 的带来源版本（issue #202 A）。
+     *
+     * 尺寸逻辑与 [compute] 完全一致；DPI 交给 [VdDpiResolver] 做唯一一次决策：
+     * 用户 override（且不超过 [VideoConfig.maxSafeDpi]）> 自动标定 > 默认回落。
+     */
+    fun resolve(
+        request: HandshakeRequest,
+        phoneRealWidth: Int,
+        phoneRealHeight: Int,
+        areaTier: Int = VdAreaTier.AUTO,
+    ): Resolution {
         var vdWidth = DimAlign.even(request.screenWidth)
         var vdHeight = DimAlign.even(request.screenHeight)
 
@@ -124,17 +155,25 @@ object VdDimensions {
             vdHeight = DimAlign.even(((vdHeight.toLong() * targetWidth) / sourceWidth).toInt())
         }
 
-        val dpi = if (request.dpiOverride > 0) {
-            VdDeployArgs.coerceDpiOverride(request.dpiOverride)
-        } else {
-            // 未放大时 scale = 1，行为与原来完全一致；放大后把车机上报密度
-            // 一起放大，否则 120..320 区间内会被原样保留，导致 UI 相对 VD 过小。
-            VideoConfig.calculateOptimalDpi(
-                vdWidth,
-                vdHeight,
-                (request.screenDpi * scale).toInt(),
-            )
-        }
-        return Triple(vdWidth, vdHeight, dpi)
+        // 自动标定值：未放大时 scale = 1，行为与原来完全一致；放大后把车机上报密度
+        // 一起放大，否则 120..320 区间内会被原样保留，导致 UI 相对 VD 过小。
+        val autoDpi = VideoConfig.calculateOptimalDpi(
+            vdWidth,
+            vdHeight,
+            (request.screenDpi * scale).toInt(),
+        )
+        val dpi = VdDpiResolver.resolve(
+            requestedOverride = request.dpiOverride,
+            autoDpi = autoDpi,
+            safeMaxDpi = VideoConfig.maxSafeDpi(vdWidth, vdHeight),
+        )
+        return Resolution(
+            width = vdWidth,
+            height = vdHeight,
+            dpi = dpi.dpi,
+            source = dpi.source,
+            token = dpi.token,
+            warning = dpi.warning
+        )
     }
 }

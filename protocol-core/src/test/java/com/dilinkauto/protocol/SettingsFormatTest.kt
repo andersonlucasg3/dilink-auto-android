@@ -81,16 +81,18 @@ class SettingsFormatTest {
     }
 
     @Test
-    fun coerceDpi_matchesTheDeploySideRule() {
-        // The UI field and the deploy path must agree, or the car shows one
-        // number while the pipeline is built with another.
-        for (dpi in listOf(0, 1, 60, 119, 120, 160, 240, 480, 481, 10_000)) {
-            assertEquals(VdDeployArgs.coerceDpiOverride(dpi), SettingsFormat.coerceDpi(dpi))
-        }
+    fun coerceDpi_rejectsOutOfRangeInsteadOfClamping() {
+        // issue #202：设置项的语义是"用户输入是否可用"，越界回落 Auto，不夹到边界。
+        // 夹到边界（560 → 480）正是现场 @480dpi 残留值的制造方式。
         assertEquals(SettingsFormat.DPI_AUTO, SettingsFormat.coerceDpi(0))
+        for (dpi in listOf(1, 60, 119, 481, 560, 10_000)) {
+            assertEquals("dpi=$dpi 应回落 Auto", SettingsFormat.DPI_AUTO, SettingsFormat.coerceDpi(dpi))
+        }
         for (dpi in SettingsFormat.DPI_PRESETS) {
             assertEquals(dpi, SettingsFormat.coerceDpi(dpi))
         }
+        assertEquals(VdDeployArgs.DPI_OVERRIDE_MIN, SettingsFormat.coerceDpi(VdDeployArgs.DPI_OVERRIDE_MIN))
+        assertEquals(VdDeployArgs.DPI_OVERRIDE_MAX, SettingsFormat.coerceDpi(VdDeployArgs.DPI_OVERRIDE_MAX))
     }
 
     @Test

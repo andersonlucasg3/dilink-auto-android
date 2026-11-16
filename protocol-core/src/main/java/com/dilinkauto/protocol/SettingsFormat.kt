@@ -67,6 +67,18 @@ object SettingsFormat {
     /** Clamp a frame rate to the range the settings UI accepts. */
     fun coerceFps(fps: Int): Int = fps.coerceIn(VideoConfig.MIN_FPS, VideoConfig.MAX_FPS)
 
-    /** Clamp a DPI override, delegating to the shared deploy-side rule (0 = Auto). */
-    fun coerceDpi(dpi: Int): Int = VdDeployArgs.coerceDpiOverride(dpi)
+    /**
+     * 校验设置项里的 DPI override（issue #202 A）。
+     *
+     * 与部署侧的 [VdDeployArgs.coerceDpiOverride] **语义不同**：那里是"把线上值夹进协议区间"
+     * （历史配置/桌面配置要保持可部署），这里是"用户输入是否可用"。越界值回落
+     * [DPI_AUTO] 而不是夹到边界 —— 夹到边界正是 issue #202 现场 `@480dpi` 的制造方式：
+     * 手滑输入 560 被夹成 480，看起来像一个合法设置，并在之后每次重连复现。
+     */
+    fun coerceDpi(dpi: Int): Int =
+        if (dpi == DPI_AUTO || dpi in VdDeployArgs.DPI_OVERRIDE_MIN..VdDeployArgs.DPI_OVERRIDE_MAX) {
+            dpi
+        } else {
+            DPI_AUTO
+        }
 }

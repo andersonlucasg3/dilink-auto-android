@@ -36,6 +36,8 @@ object ShizukuVdDeployer {
         targetBitrate: Int,
         carHost: String = VdDeployArgs.CAR_HOST_ANY,
         allowedPackages: Collection<String> = emptyList(),
+        /** issue #202 A：DPI 来源令牌，透传到引擎启动行（`-` = 不上报）。 */
+        dpiSource: String = "-",
         jarPath: String = VdDeploy.JAR_PATH,
         logPath: String = VdDeploy.LOG_PATH,
         dirPath: String = VdDeploy.DIR_PATH,
@@ -66,7 +68,8 @@ object ShizukuVdDeployer {
             bitrate = targetBitrate,
             background = true,
             carHost = carHost,
-            allowedPackages = allowedPackages
+            allowedPackages = allowedPackages,
+            dpiSource = dpiSource
         )
 
         val executor = executorOverride ?: object : VdDeployExecutor {

@@ -48,6 +48,11 @@ internal class CarCommandRouter(
      * 才能覆盖移动命令序列与新增诊断日志。默认值保证行为不变。
      */
     private val sdkInt: () -> Int = { android.os.Build.VERSION.SDK_INT },
+    /**
+     * issue #202 C：建屏后判定"无可见窗口"之前的沉降窗口。生产用默认 500ms，
+     * 单测注入假时钟 + no-op sleep，验证"窗口内探到内容就不报/不搬"。
+     */
+    private val settleWindow: ContentSettleWindow = ContentSettleWindow(),
 ) {
     private val healer = VdDisplayHealer(execOut, displayId, repairLayerTree)
 
@@ -185,8 +190,8 @@ internal class CarCommandRouter(
      * 不搬 launcher/home 任务：`type=home` 任务跨 display 迁移没有实机证据，VD 释放时
      * home task 的回收语义也不明确（有连 launcher 一起销毁的风险）。
      *
-     * 同步执行（创建期命令本来就在同一线程串行）：2 次 dumpsys + 1 次 am start +
-     * 400ms 复查，远小于 30s 的 car accept 超时；失败只记日志，绝不阻塞会话。
+     * 同步执行（创建期命令本来就在同一线程串行）：沉降窗口 ≤500ms + 2 次 dumpsys +
+     * 1 次 am start + 400ms 复查，远小于 30s 的 car accept 超时；失败只记日志，绝不阻塞会话。
      */
     fun ensureDisplayHasContent(id: Int) {
         if (id < 0) return
@@ -194,6 +199,19 @@ internal class CarCommandRouter(
             val sec = ActivityDumpParser.displaySection(execOut("dumpsys activity activities 2>/dev/null") ?: "", id)
             if (sec != null && sec.contains("Task{") && ActivityDumpParser.isTopTaskVisible(sec)) {
                 PipeLog.log("ensureContent: display=$id already has a visible task")
+                return
+            }
+            // issue #202 C：新建 VD 后"暂时没有可见窗口"是正常过渡态（现场 display=6
+            // 建屏后立刻判定无内容，几百毫秒后任务就能被拉回来）。先给一个沉降窗口，
+            // 窗口内探到可见任务就直接返回 —— 不误报、也不再搬任务。
+            val settled = settleWindow.awaitContent {
+                val probe = ActivityDumpParser.displaySection(
+                    execOut("dumpsys activity activities 2>/dev/null") ?: "", id
+                )
+                probe != null && ActivityDumpParser.isTopTaskVisible(probe)
+            }
+            if (settled) {
+                PipeLog.log("ensureContent: display=$id became visible within the ${ContentSettleWindow.DEFAULT_SETTLE_MS}ms settle window — nothing to restore")
                 return
             }
             val current = sec?.let { ActivityDumpParser.TOP_ACTIVITY_RE.find(it) }?.groupValues?.get(2)?.toIntOrNull()
