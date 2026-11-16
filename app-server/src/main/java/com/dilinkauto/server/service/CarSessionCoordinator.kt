@@ -1,11 +1,14 @@
 package com.dilinkauto.server.service
 
 import android.content.Context
+import android.os.SystemClock
 import android.view.Surface
 import com.dilinkauto.protocol.*
 import com.dilinkauto.server.R
 import com.dilinkauto.server.adb.WifiGatewayProbe
 import com.dilinkauto.server.decoder.AudioPlayer
+import com.dilinkauto.server.decoder.RenderPipelinePolicy
+import com.dilinkauto.server.decoder.SurfaceWaitLogger
 import com.dilinkauto.server.decoder.VideoDecoder
 import com.dilinkauto.server.probe.BydVehicleProbe
 import kotlinx.coroutines.*
@@ -87,6 +90,12 @@ internal class CarSessionCoordinator(
     private var blackScreenRebuilds = 0
     @Volatile private var blackScreenRecoveryInFlight = false
     private var videoFrameCount = 0L
+
+    /**
+     * 「等 Surface / 等首帧」诊断节奏（issue #198）：状态停在 CONNECTED 时每 2s 一行，
+     * 实车回签时能直接区分「SurfaceView 不可见、没有 Surface」与「有 Surface 但没出帧」。
+     */
+    private val surfaceWait = SurfaceWaitLogger()
 
     /**
      * IDR 补帧请求闸门状态（issue #75 / #163）：与手机端共用 protocol-core 的 [SyncRequestGate]，
@@ -174,6 +183,7 @@ internal class CarSessionCoordinator(
         shizukuMode = false
         handshakeDone = false
         _videoReady.value = false
+        surfaceWait.reset()
         adbTracker.resetAdbReadiness()
 
         logWriter.setEnabled(com.dilinkauto.server.BuildConfig.DEBUG)
@@ -482,10 +492,32 @@ internal class CarSessionCoordinator(
             carLogSend("Video ${if (isConfig) "CONFIG" else "FRAME"} size=${frame.payload.size} total=$videoFrameCount")
         }
 
+        // issue #198：收到帧只证明手机在发流，不证明车机有可见输出。此前这里「收到非 CONFIG
+        // 帧即 ready」，于是 SurfaceView 不可见（用户在主页）、解码器从未启动的会话也会报
+        // `Video ready — streaming`，整段零画面。现在必须解码器在跑 + Surface 有效 +
+        // 当前 Surface 上真的渲染过帧，才允许推进到 STREAMING。
         if (!_videoReady.value && !isConfig) {
-            _videoReady.value = true
-            carLogSend("First video frame — VD stream ready")
-            checkAndAdvance()
+            if (RenderPipelinePolicy.canEnterStreaming(
+                    decoderRunning = videoDecoder.isRunning,
+                    outputSurfaceValid = videoDecoder.outputSurfaceValid,
+                    framesRenderedOnSurface = videoDecoder.framesRenderedOnSurface,
+                )
+            ) {
+                _videoReady.value = true
+                surfaceWait.reset()
+                carLogSend("Video pipeline live — first frame rendered on surface, streaming")
+                checkAndAdvance()
+            } else {
+                surfaceWait.onNotReady(SystemClock.elapsedRealtime())?.let { waitedSec ->
+                    carLogSend(
+                        "[Video] waiting for surface ${waitedSec}s " +
+                            "(decoderRunning=${videoDecoder.isRunning} " +
+                            "surfaceValid=${videoDecoder.outputSurfaceValid} " +
+                            "renderedOnSurface=${videoDecoder.framesRenderedOnSurface})",
+                        "W"
+                    )
+                }
+            }
         }
         videoDecoder.onFrameReceived(isConfig, frame.payload)
     }
@@ -647,6 +679,7 @@ internal class CarSessionCoordinator(
         videoDecoder.resetBlackScreenState()
 
         _videoReady.value = false
+        surfaceWait.reset()
         wifiReady = false
         vdServerStarted = false
         handshakeDone = false
@@ -708,6 +741,7 @@ internal class CarSessionCoordinator(
 
         _phoneName.value = ""
         _videoReady.value = false
+        surfaceWait.reset()
         videoFrameCount = 0
         touchSender.resetCounters()
         wifiReady = false
@@ -831,12 +865,33 @@ internal class CarSessionCoordinator(
     fun onMirrorSurfaceCreated(surface: Surface) {
         decoderExecutor.execute {
             carLogSend("[MirrorScreen] SurfaceView surface created, decoder.isRunning=${videoDecoder.isRunning}")
-            if (videoDecoder.isRunning) {
-                videoDecoder.switchSurface(surface)
-                carLogSend("[MirrorScreen] Decoder surface switched to SurfaceView (no restart)")
-            } else {
-                videoDecoder.start(surface, vdWidth, vdHeight, targetFps)
-                carLogSend("[MirrorScreen] Decoder started on SurfaceView surface")
+            // issue #198：分派判据抽到 RenderPipelinePolicy，Surface 已失效时不做无用重绑。
+            when (RenderPipelinePolicy.onSurfaceCreated(
+                decoderRunning = videoDecoder.isRunning,
+                surfaceValid = surface.isValid,
+            )) {
+                RenderPipelinePolicy.SurfaceAction.IGNORE ->
+                    carLogSend("[MirrorScreen] surface already invalid — waiting for the next callback", "W")
+
+                RenderPipelinePolicy.SurfaceAction.START_DECODER -> {
+                    videoDecoder.start(surface, vdWidth, vdHeight, targetFps)
+                    carLogSend("[MirrorScreen] Decoder started on SurfaceView surface")
+                }
+
+                RenderPipelinePolicy.SurfaceAction.SWITCH_SURFACE -> {
+                    // 重绑结果必须看返回值（issue #198）：旧实现无论成败都打成功日志，
+                    // setOutputSurface 抛异常时渲染闸门永久关闭 → 整段黑屏却看不出问题。
+                    if (videoDecoder.switchSurface(surface)) {
+                        carLogSend("[MirrorScreen] Decoder surface switched to SurfaceView (no restart)")
+                    } else {
+                        // 回退重建：cached CONFIG + cached IDR 让新实例立即有参考帧，
+                        // 不必等手机补一个 IDR。
+                        carLogSend("[MirrorScreen] surface rebind failed — rebuilding decoder on the new surface", "W")
+                        videoDecoder.stop()
+                        videoDecoder.start(surface, vdWidth, vdHeight, targetFps)
+                        carLogSend("[MirrorScreen] Decoder rebuilt on SurfaceView surface")
+                    }
+                }
             }
         }
     }

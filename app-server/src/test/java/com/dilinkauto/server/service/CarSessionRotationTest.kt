@@ -83,6 +83,10 @@ class CarSessionRotationTest {
         val videoReadyField = CarSessionCoordinator::class.java.getDeclaredField("_videoReady").apply { isAccessible = true }
         videoReadyField.set(coordinator, MutableStateFlow(true))
 
+        // issue #198：新依赖（等 Surface 诊断节奏），Unsafe 构造不会跑字段初始化器。
+        val surfaceWaitField = CarSessionCoordinator::class.java.getDeclaredField("surfaceWait").apply { isAccessible = true }
+        surfaceWaitField.set(coordinator, com.dilinkauto.server.decoder.SurfaceWaitLogger())
+
         // 配置各路真实连接
         val ctrlConn = createConnection(testScope)
         val videoConn = createConnection(testScope)

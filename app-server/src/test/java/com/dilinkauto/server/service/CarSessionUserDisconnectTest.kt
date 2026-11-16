@@ -133,6 +133,8 @@ class CarSessionUserDisconnectTest {
         setField(coordinator, "carPrefs", carPrefs)
         setField(coordinator, "teardownGuard", AtomicBoolean(false))
         setField(coordinator, "reHandshakeInFlight", false)
+        // issue #198：新依赖（等 Surface 诊断节奏），Unsafe 构造不会跑字段初始化器。
+        setField(coordinator, "surfaceWait", com.dilinkauto.server.decoder.SurfaceWaitLogger())
         setField(
             coordinator,
             "viewportGate",

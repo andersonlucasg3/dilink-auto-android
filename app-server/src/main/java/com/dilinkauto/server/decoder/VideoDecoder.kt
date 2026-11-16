@@ -85,6 +85,16 @@ class VideoDecoder {
     @Volatile
     internal var outputSurfaceValid = false
 
+    /**
+     * 当前绑定的 Surface 上**真正上屏**过的帧数（issue #198）。
+     *
+     * 只在 `releaseOutputBuffer(..., render = true)` 时自增 —— 与 [renderCount] 不同，
+     * 后者在渲染闸门关闭（Surface 已销毁）时也会自增，因此不能当作「画面可见」的证据。
+     * `start` / `switchSurface` / `invalidateSurface` 归零，状态机据此判断能否报 STREAMING。
+     */
+    @Volatile
+    internal var framesRenderedOnSurface = 0L
+
     // CONFIG data is cached separately so it's never lost, even if it arrives
     // before start() is called or while the queue is full.
     @Volatile
@@ -309,6 +319,8 @@ class VideoDecoder {
             }
 
             outputSurfaceValid = true
+            // 新解码器实例还没有在它绑定的 Surface 上出过帧（issue #198）。
+            framesRenderedOnSurface = 0
             log("MediaCodec created: name=${newCodec.name} dims=${width}x${height} operatingRate=$effectiveFps")
 
             frameCount = 0
@@ -543,8 +555,17 @@ class VideoDecoder {
             while (true) {
                 val outputIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)
                 if (outputIndex >= 0) {
-                    decoder.releaseOutputBuffer(outputIndex, outputSurfaceValid) // render to surface only if valid
+                    // 一次读闸门：render=false 时只解不上屏（Surface 已销毁）。
+                    // 只有真正交给 Surface 的帧才算「可见输出」（issue #198）。
+                    val render = outputSurfaceValid
+                    decoder.releaseOutputBuffer(outputIndex, render) // render to surface only if valid
                     renderCount++
+                    if (render) {
+                        framesRenderedOnSurface++
+                        if (framesRenderedOnSurface == 1L) {
+                            log("First frame rendered on bound surface — output is visible")
+                        }
+                    }
                     if (renderCount <= 3 || renderCount % 30 == 0L) {
                         log("Rendered frame #$renderCount size=${bufferInfo.size} flags=${bufferInfo.flags}")
                     }
@@ -641,32 +662,40 @@ class VideoDecoder {
      * Switches the decoder output to a new Surface without stopping/restarting.
      * Uses MediaCodec.setOutputSurface() — available since API 23 (Android 10+ BYD).
      * Eliminates the keyframe-drop storm that happens with stop()+start().
+     *
+     * 返回**真实结果**（issue #198）：调用方此前无从判断重绑是否成功，于是在失败时
+     * 也打「switched」成功日志，渲染闸门永久关闭 → 整段黑屏且日志看不出问题。
+     * 失败时调用方必须回退到重建解码器。
      */
-    fun switchSurface(newSurface: Surface) {
+    fun switchSurface(newSurface: Surface): Boolean {
         if (!newSurface.isValid) {
             logW("switchSurface: newSurface is not valid, ignoring")
-            return
+            return false
         }
         synchronized(codecLock) {
             val c = codec
             if (c == null) {
                 logW("switchSurface: codec is null, ignoring")
-                return
+                return false
             }
             if (!running.get()) {
                 logW("switchSurface: decoder is not running, ignoring")
-                return
+                return false
             }
             if (!newSurface.isValid) {
                 logW("switchSurface: newSurface became invalid before switch, ignoring")
-                return
+                return false
             }
             try {
                 c.setOutputSurface(newSurface)
                 outputSurfaceValid = true
+                // 新 Surface 上还没出过帧，STREAMING 门槛要重新攒（issue #198）。
+                framesRenderedOnSurface = 0
                 log("Switched decoder output to new Surface")
+                return true
             } catch (e: Exception) {
                 logE("switchSurface failed: ${e.message}")
+                return false
             }
         }
     }
@@ -676,6 +705,8 @@ class VideoDecoder {
      *  re-attaches a valid surface. */
     fun invalidateSurface() {
         outputSurfaceValid = false
+        // 旧 Surface 上的出帧数不再代表「当前有可见输出」（issue #198）。
+        framesRenderedOnSurface = 0
     }
 
     /**
