@@ -118,6 +118,23 @@ internal fun pipelineMpixPerSec(frames: Long, width: Int, height: Int, windowMs:
     return frames.toDouble() * width.toLong() * height * 1000.0 / windowMs / 1_000_000.0
 }
 
+/**
+ * 本窗口的实际帧率（帧/秒，issue #203）：`帧增量 × 1000 / 窗口毫秒`。
+ *
+ * 与 [pipelineMpixPerSec] **同一时间口径**（墙钟差），不按「拍数 / 目标 fps」反推 ——
+ * 那会在慢机 tick 变短时高估帧率，也会让同一行日志里出现两套互相矛盾的 fps。
+ * 传 `win.frames` 得「已发帧率」，传 `win.texUpdates` 得「VD 交付的新帧率」。
+ *
+ * @param windowMs 本窗口墙钟长度；<= 0 时返回 0，避免日志里出现 `Infinity`。
+ */
+internal fun pipelineFps(frames: Long, windowMs: Long): Double {
+    if (windowMs <= 0L) return 0.0
+    return frames.toDouble() * 1000.0 / windowMs
+}
+
+/** 帧率的日志文本（一位小数，locale 无关）。 */
+internal fun pipelineFpsText(fps: Double): String = String.format(Locale.US, "%.1f", fps)
+
 /** 组装 `Pipeline:` 周期行；新增字段一律带 `win` 前缀，避免与累计字段混淆。 */
 internal fun pipelineStatLine(
     totals: PipelineSnapshot,
@@ -129,11 +146,15 @@ internal fun pipelineStatLine(
         Locale.US, "%.1f",
         pipelineMpixPerSec(win.frames, width, height, win.windowMs)
     )
+    // issue #203：把「实际生效帧率」摆进同一条周期行，避免只凭刷新率调用成功下结论。
+    // effFps = 本窗口已发帧率；newFps = 本窗口 VD 交付的新帧率（两者同为墙钟口径）。
     return "Pipeline: ${totals.frames} frames ${totals.bitrateMbps}Mbps keys=${totals.keys} " +
         "tex=${totals.texUpdates} cb=${totals.callbacks} swapFails=${totals.swapFails} " +
         "q=${totals.queued} sendDrops=${totals.sendDrops} maxW=${totals.maxWriteMs}ms " +
         "ts=${totals.timestamp} glErr=${totals.glError} ticks=${totals.ticks} " +
         "mpixPerSec=$mpix idleSkip=${totals.idleSkips} keepAlive=${totals.keepAlives} " +
+        "effFps=${pipelineFpsText(pipelineFps(win.frames, win.windowMs))} " +
+        "newFps=${pipelineFpsText(pipelineFps(win.texUpdates, win.windowMs))} " +
         "winMs=${win.windowMs} winFrames=${win.frames} winTicks=${win.ticks} " +
         "winIdle=${win.idleSkips} winKeepAlive=${win.keepAlives} " +
         "winTexUpdates=${win.texUpdates} winCb=${win.callbacks}"

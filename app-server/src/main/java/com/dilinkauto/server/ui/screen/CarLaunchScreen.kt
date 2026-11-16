@@ -67,6 +67,8 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
     val devMode by service.carPrefs.devModeFlow.collectAsState()
     val startupDpi by service.carPrefs.startupDpiFlow.collectAsState()
     val startupFps by service.carPrefs.startupFpsFlow.collectAsState()
+    // issue #203：解码器实测入帧帧率（0 = 还没有样本），只用于在设置页展示实际值。
+    val measuredFps by service.measuredFps.collectAsState()
     val startupBitrate by service.carPrefs.startupBitrateFlow.collectAsState()
     // VD 合成面积档位（issue #153 PB）：与上面三项同为启动设置，握手构造时读取。
     val vdAreaTier by service.carPrefs.vdAreaTierFlow.collectAsState()
@@ -91,6 +93,7 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
             onStartupDpiChange = { service.carPrefs.startupDpi = it },
             startupFps = startupFps,
             onStartupFpsChange = { service.setStartupFps(it) },
+            measuredFps = measuredFps,
             startupBitrate = startupBitrate,
             onStartupBitrateChange = { service.carPrefs.startupBitrate = it },
             vdAreaTier = vdAreaTier,
@@ -249,6 +252,8 @@ private fun ConnectionStatusCard(
     onStartupDpiChange: (Int) -> Unit,
     startupFps: Int,
     onStartupFpsChange: (Int) -> Unit,
+    /** 解码器实测入帧帧率（issue #203），0 = 无样本。 */
+    measuredFps: Double,
     startupBitrate: Int,
     onStartupBitrateChange: (Int) -> Unit,
     vdAreaTier: Int,
@@ -457,10 +462,20 @@ private fun ConnectionStatusCard(
 
                 Spacer(Modifier.height(16.dp))
                 // FPS Settings & Presets
+                //
+                // issue #203：不禁用任何档位（30/60 是否可达要由实车回签判定，提前禁用会让
+                // 手机端真正生效的刷新率永远失去验证机会）。这里只把解码器**实测**帧率
+                // 显示出来，让用户自己看到「设了 30 实际拿到多少」。
                 SettingSection(
                     title = stringResource(R.string.video_fps_title),
                     subtitle = stringResource(R.string.video_fps_desc),
-                    hint = stringResource(R.string.video_fps_hint),
+                    hint = if (measuredFps > 0.0) {
+                        stringResource(
+                            R.string.video_fps_hint_measured,
+                            String.format(java.util.Locale.US, "%.1f", measuredFps),
+                            startupFps,
+                        )
+                    } else stringResource(R.string.video_fps_hint),
                     currentValueText = stringResource(R.string.fps_value, startupFps),
                     manualSeed = SettingsFormat.manualSeed(startupFps, SettingsFormat.FPS_PRESETS),
                     presets = listOf(

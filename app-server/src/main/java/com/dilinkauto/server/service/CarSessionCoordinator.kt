@@ -126,6 +126,20 @@ internal class CarSessionCoordinator(
     private val _videoReady = MutableStateFlow(false)
     val videoReady: StateFlow<Boolean> = _videoReady.asStateFlow()
 
+    /**
+     * 解码器实测入帧帧率（issue #203），0 = 还没有样本。
+     *
+     * 由 [VideoDecoder] 每喂满 30 帧回调一次（墙钟口径），只用于设置页展示实际值 ——
+     * 既不禁用任何档位，也不参与任何调度判定。
+     */
+    private val _measuredFps = MutableStateFlow(0.0)
+    val measuredFps: StateFlow<Double> = _measuredFps.asStateFlow()
+
+    /** [VideoDecoder.onMeasuredFps] 的投递口（喂帧线程调用，只写 StateFlow）。 */
+    fun onMeasuredFps(fps: Double) {
+        _measuredFps.value = fps
+    }
+
     private val _statusMessage = MutableStateFlow("")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
