@@ -90,6 +90,17 @@ class Connection(
     @Volatile
     private var lastFrameReceivedAt = System.currentTimeMillis()
 
+    /**
+     * 是否已经真正读到过一帧（issue #200 评审）。
+     *
+     * [lastFrameReceivedAt] 的初始值是**构造时刻**，`start()` 还会把它重置成启动时刻 ——
+     * 两者都不代表对端发过任何东西。若拿这两个时刻当基线，「握手/VD 引擎启动慢于阈值」
+     * 就会被读成「静默 N 秒 = 死链」，进而触发一次 3.7~4.9s 的主动重建，比现状更糟。
+     * 所以未收到过帧时 [msSinceLastFrameReceived] 一律返回 -1（调用方按「无法判断」处理）。
+     */
+    @Volatile
+    private var hasReceivedFrame = false
+
     private val keepAlive = ConnectionKeepAlive(
         scope = scope,
         isConnected = { connected.get() },
@@ -105,6 +116,19 @@ class Connection(
     )
 
     val isConnected: Boolean get() = connected.get() && channel.isOpen
+
+    /**
+     * 距离上一次读到任意帧（含心跳）已过去的毫秒数（issue #200）。
+     *
+     * 只读诊断量，不参与任何超时判定（看门狗仍走 [ConnectionKeepAlive]）。车机端用它
+     * 区分「链路断」（控制帧一起停）与「编码停」（控制帧照常、只有视频不动）；
+     * 手机端用它判断重关联后 socket 是否已经半死。
+     *
+     * @return 未收到过任何帧时返回 **-1**（构造/启动时刻不是「收到帧」的证据）
+     */
+    fun msSinceLastFrameReceived(): Long =
+        if (!hasReceivedFrame) -1L
+        else (System.currentTimeMillis() - lastFrameReceivedAt).coerceAtLeast(0L)
 
     /** Remote peer's IP address (e.g. for ADB connection to the car) */
     val remoteAddress: String? get() = try {
@@ -123,6 +147,8 @@ class Connection(
         this.activeWriteTimeoutMs = writeTimeoutMs
         log("Connection started: sendBuf=$actualSendBuf recvBuf=$actualRecvBuf tcpNoDelay=${channel.socket().tcpNoDelay} heartbeat=$enableHeartbeat writeTimeout=${activeWriteTimeoutMs}ms")
         lastFrameReceivedAt = System.currentTimeMillis()
+        // start() 只是重置看门狗基线；此刻仍然「一帧都没收到」，静默时长继续按 -1 上报。
+        hasReceivedFrame = false
 
         readerJob = scope.launch(Dispatchers.IO) {
             // 8x A53 has no big cores; mark the socket-drain thread urgent so
@@ -140,6 +166,7 @@ class Connection(
                     }
 
                     lastFrameReceivedAt = System.currentTimeMillis()
+                    hasReceivedFrame = true
 
                     if (frame.channel == Channel.CONTROL &&
                         frame.messageType == ControlMsg.HEARTBEAT

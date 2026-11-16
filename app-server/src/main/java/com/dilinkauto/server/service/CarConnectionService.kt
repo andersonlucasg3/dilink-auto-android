@@ -205,6 +205,16 @@ class CarConnectionService : Service() {
         logWriter.start()
         videoDecoder.logSink = { msg -> carLogSend(msg) }
         audioPlayer.logSink = { msg -> carLogSend(msg) }
+        // issue #200：把控制连接的静默时长接进解码器。GAP / STALLED 行带上它就能区分
+        // 「链路断」（控制帧一起停，现场 07.29→16.01 断了 ~8.7s）与「编码停」（控制帧
+        // 照常、只有视频不动）。只读快照，不参与任何超时判定。
+        videoDecoder.msSinceControlFrame = {
+            sessionCoordinator.controlConnection?.msSinceLastFrameReceived() ?: -1L
+        }
+        // issue #200 评审：LINK GAP / STALLED 是实车回签要 grep 的证据，release 下
+        // CarLogWriter 默认关闭（BuildConfig.DEBUG=false），必须走 sendUnconditional
+        // 才能保证车上抓得到（接线方式同 #191/#197 的 AudioPlayer.diagSink）。
+        videoDecoder.diagSink = { msg -> logWriter.sendUnconditional(msg) }
         // issue #181：播放线程因 CONFIG 永不到达 / 解码器创建失败等原因退出时，用
         // sendUnconditional 上报（release 下 send 会被 enabled=false 丢掉），保证
         // logcat 与手机侧 client.log 都能 grep 到 `[AudioPlayer][E]`。
