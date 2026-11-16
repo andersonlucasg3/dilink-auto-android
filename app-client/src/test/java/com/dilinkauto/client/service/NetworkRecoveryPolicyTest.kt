@@ -21,7 +21,7 @@ class NetworkRecoveryPolicyTest {
     private fun policy() = NetworkRecoveryPolicy()
 
     @Test
-    fun `现场 16_36_37 lost 后复核仍有 Wi-Fi —— 必须补一条 available`() {
+    fun `现场 16_36_37 lost 后复核同一条 Wi-Fi 恢复 —— 必须补一条 available`() {
         val p = policy()
         p.onAvailable() // 16:36:09.248 available: 122
         assertTrue(p.onLost("122", nowMs = 0L)) // 16:36:37.801 lost: 122
@@ -29,10 +29,30 @@ class NetworkRecoveryPolicyTest {
 
         assertEquals(
             Decision.REPORT_AVAILABLE,
-            p.onDebounceExpired(nowMs = 3_000L, recheck = Recheck(wifiNetId = "123")),
+            p.onDebounceExpired(nowMs = 3_000L, recheck = Recheck(wifiNetId = "122")),
         )
         assertEquals(Link.AVAILABLE, p.state)
         assertNull(p.pendingLostNetId)
+    }
+
+    @Test
+    fun `复核到另一条 Wi-Fi（netId 122 变成 201）—— 原链路没恢复，必须确认 lost`() {
+        val p = policy()
+        p.onAvailable()
+        p.onLost("122", nowMs = 0L)
+
+        // 评审阻塞项：手机从车机 AP 切到家里另一个 Wi-Fi 时 allNetworks 里确实有一条可用
+        // WIFI，但那条不是刚刚 lost 的链路，报 available 只会让上层在错的网段上反复探测。
+        assertEquals(
+            Decision.CONFIRM_LOST,
+            p.onDebounceExpired(nowMs = 3_000L, recheck = Recheck(wifiNetId = "201")),
+        )
+        assertEquals("切到另一条网络不代表原链路恢复，状态必须留在 lost", Link.LOST, p.state)
+        assertTrue("pending 仍是原链路的 netId", p.pendingLostNetId == "122")
+
+        // 真的恢复由握手回调兜底（方案 B）
+        assertTrue(p.onTrafficConfirmed())
+        assertEquals(Link.AVAILABLE, p.state)
     }
 
     @Test
@@ -80,7 +100,7 @@ class NetworkRecoveryPolicyTest {
         assertFalse("重复 lost 不该重新计时（否则 3s 窗口被无限延长）", p.onLost("122", nowMs = 1_000L))
         assertEquals(
             Decision.REPORT_AVAILABLE,
-            p.onDebounceExpired(nowMs = 3_000L, recheck = Recheck(wifiNetId = "123")),
+            p.onDebounceExpired(nowMs = 3_000L, recheck = Recheck(wifiNetId = "122")),
         )
     }
 

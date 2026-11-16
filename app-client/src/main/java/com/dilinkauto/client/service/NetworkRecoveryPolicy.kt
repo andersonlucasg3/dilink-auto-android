@@ -96,6 +96,11 @@ class NetworkRecoveryPolicy(
      * 会让状态永久停在 lost（日志也永久静默），而链路其实早就通了。所以这里以复核结果为准：
      * 复核可用 → 主动补一条 available；复核不可用 → 维持 lost，交给调用方走原有断开流程。
      *
+     * 复核还必须是**刚刚 lost 的那一条**链路：手机从车机 AP 切到另一个 Wi-Fi 时，`allNetworks`
+     * 里确实有一条可用 WIFI，但原链路并没有恢复，报 available 会让上层反复在错的网段上探测。
+     * 因此 netId 不同一律按 lost 处理（同一 SSID 重关联若换了 netId 也走这里，由握手回调
+     * `onTrafficConfirmed` 兜底把状态拉回可用）。
+     *
      * @param nowMs 单调时钟（`SystemClock.elapsedRealtime()`），只做差值比较
      */
     @Synchronized
@@ -103,6 +108,8 @@ class NetworkRecoveryPolicy(
         if (link != Link.LOST) return Decision.NONE
         if (nowMs < debounceDeadlineMs) return Decision.NONE
         if (!recheck.usable) return Decision.CONFIRM_LOST
+        // 复核到的是另一条 Wi-Fi（netId 变了）—— 原链路没恢复，不能当成 available。
+        if (recheck.wifiNetId != pendingNetId) return Decision.CONFIRM_LOST
         onAvailable()
         return Decision.REPORT_AVAILABLE
     }

@@ -124,11 +124,23 @@ class ClientNetworkMonitor(
                 listener.onNetworkAvailable(usableWifi ?: lostNetwork)
             }
             NetworkRecoveryPolicy.Decision.CONFIRM_LOST -> {
-                FileLog.i(
-                    TAG,
-                    "Network lost: $lostNetwork (callback=none, source=debounce-recheck, netId=${netIdOf(lostNetwork)}," +
-                        " recheck=no-wifi, state=${policy.state}) — confirmed after ${debounceDelayMs}ms",
-                )
+                val lostId = netIdOf(lostNetwork)
+                if (usableId != null && usableId != lostId) {
+                    // 手机切到了另一条 Wi-Fi：原链路没恢复，状态必须留在 lost，
+                    // 否则上层会在错的网段上反复探测。
+                    FileLog.w(
+                        TAG,
+                        "Network lost: $lostNetwork (callback=none, source=debounce-recheck, netId=$lostId," +
+                            " recheck=$usableId, state=${policy.state})" +
+                            " — Wi-Fi 已切换到另一条网络（netId $lostId→$usableId），不代表原链路恢复",
+                    )
+                } else {
+                    FileLog.i(
+                        TAG,
+                        "Network lost: $lostNetwork (callback=none, source=debounce-recheck, netId=$lostId," +
+                            " recheck=no-wifi, state=${policy.state}) — confirmed after ${debounceDelayMs}ms",
+                    )
+                }
                 listener.onNetworkLostConfirmed(lostNetwork)
             }
             NetworkRecoveryPolicy.Decision.NONE -> {
