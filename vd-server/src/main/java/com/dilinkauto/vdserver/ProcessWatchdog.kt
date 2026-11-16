@@ -47,6 +47,13 @@ internal class ProcessWatchdog(
     private val gracePeriodMs: Long = WATCHDOG_GRACE_MS,
     private val pollIntervalMs: Long = POLL_INTERVAL_MS,
     private val cleanupCheckIntervalMs: Long = CLEANUP_CHECK_INTERVAL_MS,
+    /**
+     * issue #199：超时时打出的收尾现场（当前步号 / 剩余 task）。
+     *
+     * 原来只有一句 "cleanup did not complete within 3000ms"，现场无法判断卡在哪一步；
+     * 编排器（[TeardownRunner]）已在 [PipelineServer] 侧维护进度，这里只负责落日志。
+     */
+    private val progress: () -> String = { "" },
     private val log: (String) -> Unit = { PipeLog.log(it) },
     private val err: (String) -> Unit = { PipeLog.err(it) },
     private val exitProcess: (Int) -> Unit = { Runtime.getRuntime().halt(it) },
@@ -92,7 +99,8 @@ internal class ProcessWatchdog(
             try { sleep(cleanupCheckIntervalMs) } catch (_: InterruptedException) { break }
         }
         if (!isCleanedUp()) {
-            err("Watchdog: cleanup did not complete within ${gracePeriodMs}ms — forcing panel restore + exit")
+            val where = progress().takeIf { it.isNotBlank() }?.let { " (at $it)" } ?: ""
+            err("Watchdog: cleanup did not complete within ${gracePeriodMs}ms — forcing panel restore + exit$where")
             try { onForceCleanup() } catch (e: Exception) { err("Watchdog cleanup error: ${e.describe()}") }
             // Give cleanup's restorePanel() time to land before
             // halt() tears the process down (halt bypasses ShutdownHook).
@@ -102,7 +110,15 @@ internal class ProcessWatchdog(
     }
 
     companion object {
-        const val WATCHDOG_GRACE_MS = 3000L
+        /**
+         * 收尾宽限（issue #199）。
+         *
+         * 原值 3000ms 只盯"总时长"，一步慢就把后面的恢复步骤整段掐掉（2026-11-16 现场两次
+         * `apps-moved` 3079ms → watchdog halt，17/18 之后再无日志）。现在宽限 = 编排器总预算
+         * + 余量：正常路径 ≈1~2s 就返回，只有真的挂死才会走到这里；余量保证编排器能先把
+         * "卡在哪一步 / 还剩哪些 task"打完再开火。
+         */
+        const val WATCHDOG_GRACE_MS = TEARDOWN_TOTAL_BUDGET_MS + TEARDOWN_WATCHDOG_MARGIN_MS
         const val POLL_INTERVAL_MS = 500L
         const val CLEANUP_CHECK_INTERVAL_MS = 200L
     }

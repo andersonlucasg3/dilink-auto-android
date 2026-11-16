@@ -150,6 +150,18 @@ object VdDeploy {
      */
     const val SESSION_TOKEN_PATH = "$DIR_PATH/$SESSION_TOKEN_NAME"
 
+    /**
+     * 收尾未完成标记文件名（issue #199）。
+     *
+     * 被 watchdog `Runtime.halt(1)` 强杀、或 teardown 编排报告有步骤超时/被预算跳过时，
+     * 引擎写这个文件；下一次启动据此做补偿清理（把仍挂在旧 display 上的 task 搬回，
+     * 避免"任务滞留已销毁 display"，见 #193/#199）。
+     */
+    const val CLEANUP_INCOMPLETE_NAME = "cleanup-incomplete"
+
+    /** 收尾未完成标记路径（内容是一行 `pid=.. display=.. step=.. remainingTasks=..`）。 */
+    const val CLEANUP_INCOMPLETE_PATH = "$DIR_PATH/$CLEANUP_INCOMPLETE_NAME"
+
     /** token 允许的字符集：只允许能安全进文件名的字符（长度 1..64）。 */
     private val SESSION_TOKEN_REGEX = Regex("[A-Za-z0-9_-]{1,64}")
 

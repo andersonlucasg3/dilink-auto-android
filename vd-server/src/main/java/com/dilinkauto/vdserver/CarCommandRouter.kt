@@ -315,12 +315,15 @@ internal class CarCommandRouter(
      * 尺寸取 `wm size -d <id>` 的首个 `WxH`（实机输出 "Physical size: 2340x1316"）。
      * 只对 freeform 任务生效；非 resizeable / 非 freeform 任务上 am 会打印
      * 错误并返回 —— best-effort，仅记日志。也用于 [quickSwitch]。
+     *
+     * @param dims issue #199：调用方已读到的目标屏尺寸（批量搬迁只读一次 `wm size -d`）。
+     *   为 null 时按老行为自己读一次。
      */
-    private fun fillTask(taskId: Int, id: Int) {
-        val size = execOut("wm size -d $id 2>/dev/null")
-        val dims = ActivityDumpParser.parseWmSize(size)
-        val w = dims?.first
-        val h = dims?.second
+    private fun fillTask(taskId: Int, id: Int, dims: Pair<Int, Int>? = null) {
+        val size = if (dims == null) execOut("wm size -d $id 2>/dev/null") else null
+        val parsed = dims ?: ActivityDumpParser.parseWmSize(size)
+        val w = parsed?.first
+        val h = parsed?.second
         if (taskId <= 0 || w == null || h == null) {
             PipeLog.log("fill: skipping task $taskId (display $id size='${size?.trim() ?: "<null>"}')")
             return
@@ -359,7 +362,12 @@ internal class CarCommandRouter(
         }
     }
 
-    fun moveTopApp(fromDisplay: Int, toDisplay: Int) {
+    /**
+     * @param probe issue #199：是否紧跟着回读一次目标 task 的配置（`[teardown-move]` 日志）。
+     *   teardown 里由 [moveAllTasksToDisplay] 用**一次** dumpsys 统一回读，这里传 `false`
+     *   可省掉 300ms 沉降 + 一次整份 dumpsys（现场 `apps-moved` 单步 3079ms 的主因之一）。
+     */
+    fun moveTopApp(fromDisplay: Int, toDisplay: Int, probe: Boolean = true) {
         if (fromDisplay < 0 || toDisplay < 0) return
         // `am display move-stack` was added in API 29 (Android 10). On API 26-28 the
         // subcommand is absent — am prints a usage error and exits non-zero. Skip the
@@ -396,7 +404,8 @@ internal class CarCommandRouter(
                 // issue #48：断开清理只搬顶层任务，被搬回的 task 可能还带着 VD 的
                 // bounds/密度。这里只读一次目标 task 的配置落日志，给现场取证用；
                 // 命令、顺序与返回值都不变（move-stack 仍是 fire-and-forget）。
-                logMovedTaskConfig(taskId?.toIntOrNull(), toDisplay)
+                // issue #199：teardown 批量路径传 probe=false，由 moveAllTasksToDisplay 统一回读。
+                if (probe) logMovedTaskConfig(taskId?.toIntOrNull(), toDisplay)
             } else {
                 PipeLog.log("moveTopApp: nothing to move (top=${topComponent ?: "<none>"}, task=${taskId ?: "-"}, self=$isSelf)")
             }
@@ -413,20 +422,48 @@ internal class CarCommandRouter(
      * （2026-11-13 实机：xhs `271dpi / Rect(718,0-1356,1020)`）。这里按段内 task id
      * 逐个 `am display move-stack`，再 `am task resize` 到物理屏尺寸；`fillTask`
      * 复用 `wm size -d <to>`，因此不需要另写一套尺寸解析。
+     *
+     * issue #199（A：把单步压到百毫秒级）：原来每个 task 各付一次「300ms 沉降 + 整份
+     * `dumpsys activity activities`」，耗时随残留 task 数线性膨胀（2026-11-16 现场 3 个
+     * task = 3079ms，4 个 task 直接把 18 步收尾顶穿）。现在固定成：1 次取列表 dumpsys
+     * → 逐条 move-stack → **1 次**沉降 → **1 次** `wm size -d` → 逐 task resize
+     * → **1 次** dumpsys 批量回读。
+     *
+     * @param budgetMs 本步软预算：到点立刻放弃剩余动作，并通过 [onPending] 交回还没搬回
+     *   的 task id（日志里能直接看到卡在哪一段、还剩哪些 task）。
+     * @param onPending 剩余 task id 回调（跑完时回调空列表）。
+     * @return true 表示全部 task 都走了 move + resize + 回读。
      */
-    fun moveAllTasksToDisplay(fromDisplay: Int, toDisplay: Int) {
-        if (fromDisplay < 0 || toDisplay < 0 || fromDisplay == toDisplay) return
+    fun moveAllTasksToDisplay(
+        fromDisplay: Int,
+        toDisplay: Int,
+        budgetMs: Long = TEARDOWN_PROBE_DELAY_MS * 4,
+        onPending: (List<Int>) -> Unit = {}
+    ): Boolean {
+        if (fromDisplay < 0 || toDisplay < 0 || fromDisplay == toDisplay) return true
+        val startedAt = System.nanoTime()
+        val elapsedMs = { (System.nanoTime() - startedAt) / 1_000_000 }
+        fun bail(stage: String, pending: List<Int>): Boolean {
+            PipeLog.err(
+                "[teardown-move-all] budget exceeded at $stage (${elapsedMs()}ms > ${budgetMs}ms) — " +
+                    "remainingTasks=${pending.joinToString(prefix = "[", postfix = "]")}"
+            )
+            onPending(pending)
+            return false
+        }
         val api = sdkInt()
         if (api < 29) {
             PipeLog.log("moveAllTasks: skipping, am display move-stack requires API 29 (current $api)")
-            return
+            onPending(emptyList())
+            return true
         }
         try {
-            val dump = execOut("dumpsys activity activities 2>/dev/null") ?: return
+            val dump = execOut("dumpsys activity activities 2>/dev/null") ?: return false
             val tasks = ActivityDumpParser.tasksInDisplay(dump, fromDisplay)
             if (tasks.isEmpty()) {
                 PipeLog.log("[teardown-move-all] display=$fromDisplay has no tasks, nothing to move")
-                return
+                onPending(emptyList())
+                return true
             }
             PipeLog.log(
                 "[teardown-move-all] from=$fromDisplay to=$toDisplay tasks=" +
@@ -436,14 +473,27 @@ internal class CarCommandRouter(
                 exec("am display move-stack $taskId $toDisplay")
                 PipeLog.log("[teardown-move-all] move task=$taskId")
             }
-            // move-stack 是异步入队；等一个与 logMovedTaskConfig 同量级的窗口再 resize/回读。
+            if (elapsedMs() > budgetMs) return bail("move", tasks)
+            // issue #199：一次沉降窗口覆盖**全部** move（原来每 task 各等一次 300ms）。
             Thread.sleep(TEARDOWN_PROBE_DELAY_MS)
+            if (elapsedMs() > budgetMs) return bail("settle", tasks)
+            // 目标屏尺寸只读一次（原来每 task 一次 `wm size -d`）。
+            val dims = ActivityDumpParser.parseWmSize(execOut("wm size -d $toDisplay 2>/dev/null"))
+            val resized = mutableListOf<Int>()
             for (taskId in tasks) {
-                fillTask(taskId, toDisplay)
-                logMovedTaskConfig(taskId, toDisplay)
+                if (elapsedMs() > budgetMs) return bail("resize", tasks.filterNot { it in resized })
+                fillTask(taskId, toDisplay, dims)
+                resized += taskId
             }
+            // 一次 dumpsys 批量回读（原来每 task 一次 dumpsys + 一次 300ms 沉降）。
+            val after = execOut("dumpsys activity activities 2>/dev/null")
+            for (taskId in tasks) logTaskConfig(after, taskId, toDisplay)
+            onPending(emptyList())
+            return true
         } catch (e: Exception) {
             PipeLog.err("[teardown-move-all] failed: ${e.message}")
+            onPending(emptyList())
+            return false
         }
     }
 
@@ -460,7 +510,20 @@ internal class CarCommandRouter(
         if (taskId == null || taskId <= 0) return
         try {
             Thread.sleep(TEARDOWN_PROBE_DELAY_MS)
-            val dump = execOut("dumpsys activity activities 2>/dev/null")
+            logTaskConfig(execOut("dumpsys activity activities 2>/dev/null"), taskId, toDisplay)
+        } catch (e: Exception) {
+            PipeLog.err("[teardown-move] task=$taskId probe failed: ${e.message}")
+        }
+    }
+
+    /**
+     * issue #199：从**已经读到的一份** dumpsys 里落 `[teardown-move]`（批量路径用）。
+     *
+     * 与 [logMovedTaskConfig] 的唯一区别：不自己 sleep、不自己执行 dumpsys —— 批量搬迁
+     * 用「一次沉降 + 一次 dumpsys」覆盖所有 task。日志格式逐字保持一致。
+     */
+    private fun logTaskConfig(dump: String?, taskId: Int, toDisplay: Int) {
+        try {
             val located = dump?.let { ActivityDumpParser.findTaskSection(it, taskId) }
             val block = located?.let { ActivityDumpParser.taskBlock(it.second, taskId) }
             val display = located?.first?.toString() ?: "<unknown>"

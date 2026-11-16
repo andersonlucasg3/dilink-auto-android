@@ -38,6 +38,8 @@ class CarCommandRouterDispatchTest {
         var windowDisplaysDump: String? = null
         /** 需要区分「移动前 / 移动后」两次 dump 时按序取用（issue #48）。 */
         var activitiesDumpSequence: java.util.concurrent.ConcurrentLinkedQueue<String>? = null
+        /** issue #199：给 dumpsys 加人为延迟，用来驱动「单步预算到点」分支。 */
+        var activitiesDumpDelayMs: Long = 0
 
         val router = CarCommandRouter(
             exec = { execs += it },
@@ -45,8 +47,10 @@ class CarCommandRouterDispatchTest {
                 execOuts += cmd
                 when {
                     cmd.startsWith("dumpsys activity recents") -> recentsDump
-                    cmd.startsWith("dumpsys activity activities") ->
+                    cmd.startsWith("dumpsys activity activities") -> {
+                        if (activitiesDumpDelayMs > 0) Thread.sleep(activitiesDumpDelayMs)
                         activitiesDumpSequence?.poll() ?: activitiesDump
+                    }
                     cmd.startsWith("dumpsys window displays") -> windowDisplaysDump
                     cmd.startsWith("wm size") -> "Physical size: 2340x1316"
                     cmd.contains("resolve-activity") && cmd.contains("android.intent.action.MAIN") -> launchResolve
@@ -559,6 +563,34 @@ Display #7 (activities from top to bottom):
             r.execOuts.filter { it.startsWith("am task resize") },
         )
         assertTrue(log.contains("[teardown-move-all] from=7 to=0 tasks=[2048, 2047]"))
+    }
+
+    @Test
+    fun `move all tasks bails out at the budget and reports remaining task ids`() {
+        // issue #199：单步预算到点必须放弃剩余动作并把「还没搬回的 task」交回去，
+        // 否则现场只知道 apps-moved 超时、不知道欠了谁。
+        val r = Rig()
+        r.activitiesDumpDelayMs = 10
+        r.activitiesDump = """
+Display #0 (activities from top to bottom):
+  * Task{a11 #0 type=standard A=10216:com.dilinkauto.client}
+Display #7 (activities from top to bottom):
+  * Task{a11 #2048 type=standard A=10216:com.twitter.android U=0 visible=true}
+    * ActivityRecord{751a1f5 u0 com.twitter.android/com.x.android.main.MainActivity t2048}
+  * Task{b22 #2047 type=standard A=10235:com.xingin.xhs U=0 visible=false}
+    * ActivityRecord{751a1f6 u0 com.xingin.xhs/.index.v2.IndexActivityV2 t2047}
+"""
+        val pending = java.util.concurrent.CopyOnWriteArrayList<List<Int>>()
+
+        // 预算 5ms，而首份 dumpsys 被拖了 10ms ⇒ 必然在 settle 之前就放弃。
+        val ok = r.router.moveAllTasksToDisplay(7, 0, budgetMs = 5) { pending += it }
+
+        assertTrue("预算到点必须返回 false", !ok)
+        assertEquals("必须交回全部还没搬回的 task", listOf(2048, 2047), pending.last())
+        assertTrue(
+            "批量路径只读一次源 dumpsys（原来每 task 一次回读）",
+            r.execOuts.count { it.startsWith("dumpsys activity activities") } == 1
+        )
     }
 
     @Test
