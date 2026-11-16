@@ -80,11 +80,17 @@ class NetworkRebuildPolicyTest {
     }
 
     @Test
-    fun `没有控制连接时不做判断`() {
+    fun `没有控制连接或从未收到帧时不做判断`() {
         val p = policy()
         assertEquals(
             NetworkRebuildPolicy.Action.NONE,
             p.onNetworkAvailable(nowMs = 1_000, streaming = true, controlSilenceMs = -1),
+        )
+        // 评审用例：`Connection.msSinceLastFrameReceived()` 在「一帧都没收到」时返回 -1，
+        // 即握手/VD 启动慢不能被读成死链 —— 否则会在还没开始投屏时拆掉会话。
+        assertEquals(
+            NetworkRebuildPolicy.Action.NONE,
+            p.onNetworkAvailable(nowMs = 20_000, streaming = true, controlSilenceMs = -1),
         )
     }
 

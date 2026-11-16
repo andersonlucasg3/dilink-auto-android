@@ -48,6 +48,20 @@ class VideoDecoder {
         logSink?.invoke("[VideoDecoder][E] $msg") ?: Log.e(TAG, msg)
     }
 
+    /**
+     * 必须绕过 `CarLogWriter.enabled` 的诊断行出口（issue #200，接线方式同 #191/#197 的
+     * `AudioPlayer.diagSink`）。
+     *
+     * `LINK GAP` / `STALLED` 正是实车回签时要 grep 的证据，而 release 包默认关闭普通日志；
+     * 走 [diagSink] → `CarLogWriter.sendUnconditional()` 才能保证车上抓得到。
+     */
+    var diagSink: ((String) -> Unit)? = null
+
+    /** 诊断行：优先走 [diagSink]（绕过 enabled），未接线时退回普通日志。 */
+    private fun logDiagW(msg: String) {
+        diagSink?.invoke("[VideoDecoder][W] $msg") ?: logW(msg)
+    }
+
     internal var codec: MediaCodec? = null
     private var feedThread: Thread? = null
     internal val running = AtomicBoolean(false)
@@ -113,7 +127,7 @@ class VideoDecoder {
      * 出现洞；旧实现只在连续 10 次输入失败后 flush，普通丢弃继续喂 P 帧 → 马赛克，
      * 直到下一个自然 IDR。现在统一走 [ResyncPolicy]：丢弃即停喂 P 帧，等到 IDR 再恢复。
      */
-    private val resync = ResyncPolicy()
+    internal val resync = ResyncPolicy()
 
     /** 渲染停顿诊断（issue #58）：喂帧线程每轮 tick 一次，停顿超阈值时打一行 STALL 汇总。 */
     private val renderStall = RenderStallDetector()
@@ -161,9 +175,15 @@ class VideoDecoder {
      * 重同步期间在**接收入口**被丢掉的 P 帧数（issue #200），与 [dropCount] 分开计数。
      *
      * [dropCount] 保留「参考链因积压/超时产生的洞」的原口径；这里的帧根本没进队列，
-     * 不会占满 8 槽、也不会挤掉关键帧。
+     * 不会占满 8 槽、也不会挤掉关键帧。`internal` 供行为级单测观察。
      */
-    private var resyncSkippedFrames = 0L
+    internal var resyncSkippedFrames = 0L
+
+    /**
+     * 当前接收队列里的帧数（只读）。仅用于行为级单测断言「重同步期的 P 帧没有入队」，
+     * 生产代码不应据此做控制流判断。
+     */
+    internal val queuedFrames: Int get() = frameQueue.size
 
     /**
      * 黑屏自愈的升级闸门（issue #11）。
@@ -273,7 +293,7 @@ class VideoDecoder {
      *
      * 缺口点分布在网络线程（队列丢弃）与喂帧线程（输入缓冲失败），[resync] 内部互斥。
      */
-    private fun noteGap() {
+    internal fun noteGap() {
         if (!resync.onGap()) return
         logW("Reference chain broken — waiting for next IDR (${dropCount} drops, ${inputFailCount} inputFails)")
         onNeedsSyncFrame?.invoke()
@@ -503,11 +523,11 @@ class VideoDecoder {
                             val ctrlSilent = controlSilenceText()
                             when (r.level) {
                                 StallEscalationPolicy.Level.GAP -> {
-                                    logW("LINK GAP ${r.gapMs}ms — no render advance (renders=$renderCount recv=$receiveCount fed=$frameCount drops=$dropCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent) — pre-arming resync + one IDR request")
+                                    logDiagW("LINK GAP ${r.gapMs}ms — no render advance (renders=$renderCount recv=$receiveCount fed=$frameCount drops=$dropCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent) — pre-arming resync + one IDR request")
                                     noteGap()
                                 }
                                 StallEscalationPolicy.Level.STALLED ->
-                                    logW("STALLED ${r.gapMs}ms — still no render advance (renders=$renderCount recv=$receiveCount fed=$frameCount drops=$dropCount inputFails=$inputFailCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent resync=${resync.awaitingIdr})")
+                                    logDiagW("STALLED ${r.gapMs}ms — still no render advance (renders=$renderCount recv=$receiveCount fed=$frameCount drops=$dropCount inputFails=$inputFailCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent resync=${resync.awaitingIdr})")
                             }
                         }
 

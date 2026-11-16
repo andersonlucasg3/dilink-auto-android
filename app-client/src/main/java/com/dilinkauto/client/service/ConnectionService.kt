@@ -15,6 +15,7 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
@@ -311,7 +312,8 @@ class ConnectionService : Service() {
                     // 只有「链路已恢复、控制通道却还在静默」（socket 半死）才重建。
                     val silence = controlConnection?.msSinceLastFrameReceived() ?: -1L
                     val action = networkRebuildPolicy.onNetworkAvailable(
-                        nowMs = System.currentTimeMillis(),
+                        // 单调时钟（与车机侧一致）：冷却窗口只比差值，墙钟跳变会算错。
+                        nowMs = SystemClock.elapsedRealtime(),
                         streaming = true,
                         controlSilenceMs = silence,
                     )

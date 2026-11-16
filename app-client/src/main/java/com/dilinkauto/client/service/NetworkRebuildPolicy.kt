@@ -28,9 +28,11 @@ class NetworkRebuildPolicy(
     private var lastRebuildMs = 0L
 
     /**
-     * @param nowMs 调用方时钟（手机端用 `System.currentTimeMillis()`，与 [controlSilenceMs] 同源）
+     * @param nowMs **单调时钟**（手机端 `SystemClock.elapsedRealtime()`，与车机侧一致）——
+     *   策略只做两次调用之间的差值比较，用墙钟会在 NTP 跳变时把冷却窗口算错
      * @param streaming 当前是否处于 `CONNECTED/STREAMING`（`WAITING` 由监听循环自己重启）
-     * @param controlSilenceMs 控制通道距上次收到帧的毫秒数；-1 表示没有控制连接
+     * @param controlSilenceMs 控制通道距上次收到帧的毫秒数；-1 表示「无法判断」
+     *   （没有控制连接，或还没收到过任何帧）
      */
     @Synchronized
     fun onNetworkAvailable(nowMs: Long, streaming: Boolean, controlSilenceMs: Long): Action {

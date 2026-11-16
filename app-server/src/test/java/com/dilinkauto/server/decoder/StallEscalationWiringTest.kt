@@ -84,6 +84,27 @@ class StallEscalationWiringTest {
         )
     }
 
+    /**
+     * issue #200 评审：`LINK GAP` / `STALLED` 是实车回签要 grep 的证据，release 包
+     * `CarLogWriter.enabled` 默认为 false，普通 `logSink → carLogSend` 会被直接丢掉
+     * （#191/#197 的教训）。
+     */
+    @Test
+    fun `分级日志必须绕过 enabled 才能上车`() {
+        val gapAndStall = decoder
+            .substringAfter("StallEscalationPolicy.Level.GAP")
+            .substringBefore("var frame = frameQueue.poll()")
+        assertTrue(
+            "LINK GAP / STALLED 必须走 logDiagW（diagSink），不能走受 enabled 限制的 logW",
+            gapAndStall.contains("logDiagW(") && !gapAndStall.contains("logW(\"LINK GAP"),
+        )
+        assertTrue(
+            "车机端必须把 diagSink 接到 CarLogWriter.sendUnconditional()",
+            carService.contains("videoDecoder.diagSink") &&
+                carService.contains("logWriter.sendUnconditional(msg)"),
+        )
+    }
+
     /** Gradle 测试工作目录不保证是仓库根，向上找到含源文件的目录。 */
     private fun sourceOf(relativePath: String): String {
         var dir: File? = File(".").absoluteFile

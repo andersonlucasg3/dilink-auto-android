@@ -34,6 +34,10 @@ class NetworkChangeWiringTest {
             "投屏中收到网络事件必须留下一行静默时长，便于下次实车对账",
             handler.contains("control silent"),
         )
+        assertTrue(
+            "冷却窗口用单调时钟（SystemClock.elapsedRealtime），墙钟跳变会算错",
+            handler.contains("SystemClock.elapsedRealtime()"),
+        )
     }
 
     @Test
