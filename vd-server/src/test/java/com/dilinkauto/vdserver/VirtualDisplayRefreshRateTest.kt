@@ -23,6 +23,20 @@ class VirtualDisplayRefreshRateTest {
         }
     }
 
+    /**
+     * issue #203：AOSP `VirtualDisplayConfig.Builder` 的真实方法名是
+     * `setRequestedRefreshRate(float)`（API 33+）。旧实现只反射 `setRefreshRate`，
+     * 该方法在 AOSP 上不存在，导致刷新率配置项从引入起就恒为 false。
+     */
+    private class FakeRequestedRefreshRateBuilder {
+        var rate: Float = -1f
+            private set
+
+        fun setRequestedRefreshRate(r: Float) {
+            rate = r
+        }
+    }
+
     private class BuilderWithoutRefreshRate
 
     private class ThrowingBuilder {
@@ -35,6 +49,16 @@ class VirtualDisplayRefreshRateTest {
     fun `applies refresh rate when builder exposes setRefreshRate`() {
         val builder = FakeBuilder()
         assertTrue(applyRefreshRate(builder, builder.javaClass, 30f))
+        assertEquals(30f, builder.rate, 0f)
+    }
+
+    @Test
+    fun `applies refresh rate through AOSP setRequestedRefreshRate`() {
+        val builder = FakeRequestedRefreshRateBuilder()
+        assertTrue(
+            "AOSP 的 Builder 只有 setRequestedRefreshRate，必须优先走这条路径",
+            applyRefreshRate(builder, builder.javaClass, 30f)
+        )
         assertEquals(30f, builder.rate, 0f)
     }
 
@@ -86,4 +110,93 @@ class VirtualDisplayRefreshRateTest {
         assertEquals(-1, legacy.displayId)
         assertEquals(-1, explicit.displayId)
     }
+
+    // ── issue #203：兜底分支的 Surface.setFrameRate 请求 ──
+
+    @Test
+    fun `surface frame rate is requested on API 30 and above`() {
+        val applied = mutableListOf<Float>()
+        val ok = applySurfaceFrameRate(
+            rate = 30f,
+            sdkInt = 30,
+            setter = FrameRateSetter { applied += it },
+        )
+        assertTrue(ok)
+        assertEquals(listOf(30f), applied)
+    }
+
+    @Test
+    fun `surface frame rate is skipped below API 30`() {
+        val applied = mutableListOf<Float>()
+        val logs = mutableListOf<String>()
+        val ok = applySurfaceFrameRate(
+            rate = 30f,
+            sdkInt = 29,
+            setter = FrameRateSetter { applied += it },
+            log = { logs += it },
+        )
+        assertFalse(ok)
+        assertTrue("API 29 上绝不能真的调用（会 NoSuchMethodError）", applied.isEmpty())
+        assertTrue(logs.single().contains("API 29"))
+    }
+
+    @Test
+    fun `surface rejection is downgraded to a log line`() {
+        val logs = mutableListOf<String>()
+        val ok = applySurfaceFrameRate(
+            rate = 30f,
+            sdkInt = 34,
+            setter = FrameRateSetter { throw IllegalArgumentException("Surface is not valid") },
+            log = { logs += it },
+        )
+        assertFalse(ok)
+        assertTrue(logs.single().contains("Surface.setFrameRate failed"))
+    }
+
+    @Test
+    fun `non positive rate is never sent to the surface`() {
+        val applied = mutableListOf<Float>()
+        assertFalse(applySurfaceFrameRate(0f, 34, FrameRateSetter { applied += it }))
+        assertTrue(applied.isEmpty())
+    }
+
+    /**
+     * 源码钉子（issue #203）：兜底分支必须真的在 VD 的输出 Surface 上请求帧率。
+     *
+     * `create()` 依赖 `DisplayManager`（JVM 单测里是空壳），行为无法直接跑；
+     * 这条断言保证「调用点 + FIXED_SOURCE 兼容性标志 + AOSP 方法名」三者不会被
+     * 后人顺手删掉 —— 删掉就会红。
+     */
+    @Test
+    fun `DisplayManager fallback calls Surface setFrameRate with fixed source compatibility`() {
+        val src = sourceOf("vd-server/src/main/java/com/dilinkauto/vdserver/VirtualDisplayCreator.kt")
+        assertTrue(
+            "兜底分支必须调用 applySurfaceFrameRate",
+            src.contains("applySurfaceFrameRate("),
+        )
+        assertTrue(
+            "必须用 FIXED_SOURCE：虚拟屏内容不是可变帧率的视频源",
+            src.contains("Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE"),
+        )
+        assertTrue(
+            "必须真的发到 VD 的输出 Surface 上",
+            src.contains("surface.setFrameRate("),
+        )
+        assertTrue(
+            "AOSP 的 Builder 方法名是 setRequestedRefreshRate，候选表里不能丢",
+            src.contains("listOf(\"setRequestedRefreshRate\", \"setRefreshRate\")"),
+        )
+    }
+
+    /** Gradle 测试工作目录不保证是仓库根，向上找到含源文件的目录。 */
+    private fun sourceOf(relativePath: String): String {
+        var dir: java.io.File? = java.io.File(".").absoluteFile
+        while (dir != null) {
+            val candidate = java.io.File(dir, relativePath)
+            if (candidate.isFile) return candidate.readText()
+            dir = dir.parentFile
+        }
+        error("找不到 $relativePath —— 测试工作目录：${java.io.File(".").absolutePath}")
+    }
 }
+

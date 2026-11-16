@@ -128,6 +128,8 @@ class CarConnectionService : Service() {
     val playbackState: StateFlow<PlaybackState?> get() = sessionCoordinator.playbackState
     val vdStackEmpty: SharedFlow<Unit> get() = sessionCoordinator.vdStackEmpty
     val videoReady: StateFlow<Boolean> get() = sessionCoordinator.videoReady
+    /** issue #203：解码器实测入帧帧率（0 = 无样本），设置页展示用。 */
+    val measuredFps: StateFlow<Double> get() = sessionCoordinator.measuredFps
     val statusMessage: StateFlow<String> get() = sessionCoordinator.statusMessage
     val appInfoData: StateFlow<AppInfoDataMessage?> get() = appListReceiver.appInfoData
 
@@ -237,6 +239,9 @@ class CarConnectionService : Service() {
         videoDecoder.onFirstFrameOnSurface = {
             sessionCoordinator.onFirstFrameRenderedOnSurface()
         }
+
+        // issue #203：实测入帧帧率（每 30 帧一次，墙钟口径）推给设置页展示。
+        videoDecoder.onMeasuredFps = { fps -> sessionCoordinator.onMeasuredFps(fps) }
 
         videoDecoder.onContentBlackPersistent = {
             carLogSend("[BLACK] decode alive but content still black — requesting phone-side display heal", "W")

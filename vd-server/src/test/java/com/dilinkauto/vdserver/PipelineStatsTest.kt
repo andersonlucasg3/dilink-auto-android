@@ -55,10 +55,35 @@ class PipelineStatsTest {
         assertEquals(
             "Pipeline: 131 frames 2Mbps keys=2 tex=16 cb=16 swapFails=0 q=0 sendDrops=0 " +
                 "maxW=2ms ts=593149264826592 glErr=0 ticks=960 mpixPerSec=13.5 idleSkip=883 " +
-                "keepAlive=61 winMs=4000 winFrames=15 winTicks=120 winIdle=112 " +
+                "keepAlive=61 effFps=3.8 newFps=0.0 winMs=4000 winFrames=15 winTicks=120 winIdle=112 " +
                 "winKeepAlive=8 winTexUpdates=0 winCb=0",
             pipelineStatLine(totals, win, 2560, 1402),
         )
+    }
+
+    // ── issue #203：实际生效帧率（墙钟口径，与 #206 的 mpixPerSec 同一套） ──
+
+    @Test
+    fun `fps is frames over the measured wall clock window`() {
+        // 实车 30fps 会话最后的窗口：4s 只发 15 帧 → 3.8fps（旧口径按拍数反推会给 3.75，
+        // 两者接近；但慢机 tick 变短时按拍反推会高估，墙钟口径不会）。
+        assertEquals(3.75, pipelineFps(15, 4000), 1e-9)
+        // 满速 30fps：4s 120 帧 → 30.0；20fps：6s 120 帧 → 20.0
+        assertEquals(30.0, pipelineFps(120, 4000), 1e-9)
+        assertEquals(20.0, pipelineFps(120, 6000), 1e-9)
+    }
+
+    @Test
+    fun `fps of an empty or zero-length window is zero`() {
+        assertEquals(0.0, pipelineFps(0, 4000), 0.0)
+        assertEquals(0.0, pipelineFps(15, 0), 0.0)
+        assertEquals(0.0, pipelineFps(15, -1), 0.0)
+    }
+
+    @Test
+    fun `fps text is locale independent`() {
+        assertEquals("17.2", pipelineFpsText(17.249))
+        assertEquals("30.0", pipelineFpsText(30.0))
     }
 
     @Test

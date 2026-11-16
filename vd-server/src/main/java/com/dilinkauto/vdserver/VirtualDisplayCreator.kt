@@ -32,8 +32,15 @@ internal class VirtualDisplayCreator(
     private val dpi: Int,
     /**
      * 目标刷新率（Hz），issue #153-PA。0（默认）= 不设置，保持旧行为。
-     * 只在 [createViaDisplayManagerGlobal] 的反射路径生效；DisplayManager
-     * 兜底路径的公开 `createVirtualDisplay` 没有这个参数，会记日志说明。
+     *
+     * issue #203：这里以前只在 `VirtualDisplayConfig.Builder` 上反射
+     * `setRefreshRate(Float)` —— AOSP 上根本没有这个方法（真名是
+     * `setRequestedRefreshRate(float)`，见 [applyRefreshRate]），而且本机 ROM
+     * 连 `DisplayManagerGlobal.createVirtualDisplay(VirtualDisplayConfig, …)` 都
+     * 不存在（实车日志 `NoSuchMethodException`），于是永远落到
+     * `DisplayManager.createVirtualDisplay` 兜底分支，日志固定打
+     * `not applied`。现在兜底分支会补一次 `Surface.setFrameRate` 请求，并且
+     * **真正的生效值只能看 `GlPipeline` 周期行的 effFps/newFps**。
      */
     private val refreshRate: Float = 0f,
     private val execShell: (String) -> Unit,
@@ -125,10 +132,10 @@ internal class VirtualDisplayCreator(
             // 60/90Hz 反复触发合成。隐藏 Builder 上该方法在部分 ROM 不存在 ——
             // 缺失时只记日志、VD 照常创建，绝不阻断建屏。
             if (refreshRate > 0f) {
-                if (applyRefreshRate(bld, bldClass, refreshRate)) {
+                if (applyRefreshRate(bld, bldClass, refreshRate, log = { log(it) })) {
                     log("VD refreshRate=$refreshRate")
                 } else {
-                    log("VD setRefreshRate unavailable on this ROM — keeping default")
+                    log("VD setRequestedRefreshRate/setRefreshRate unavailable on this ROM — keeping default")
                 }
             }
             val cfg = bldClass.getDeclaredMethod("build").apply { isAccessible = true }.invoke(bld)
@@ -158,7 +165,28 @@ internal class VirtualDisplayCreator(
             displayId = try { vd.display.displayId } catch (_: Exception) { findDisplayId("DiLinkAutoVD") }
             log("VD via DisplayManager: id=$displayId")
             if (refreshRate > 0f) {
-                log("VD refreshRate=$refreshRate not applied: DisplayManager fallback has no refreshRate parameter")
+                // issue #203：公开的 createVirtualDisplay 没有刷新率形参，VD 的显示模式只能
+                // 按系统默认值建立（这一步无法更改）。退而求其次，在 VD 输出 Surface 上打
+                // 「期望帧率」提示（API 30+ 的 Surface.setFrameRate），由 SurfaceFlinger 在
+                // 选拍时参考。
+                //
+                // 注意：这是**请求**，不是**生效**——该方法返回 void，调用成功不代表真的被
+                // 采纳（issue #203 明确要求不能只看调用成功）。真实生效值见 GlPipeline
+                // 周期行的 effFps（已发帧/秒）与 newFps（VD 交付新帧/秒）。
+                //noinspection NewApi — SDK 判定在 applySurfaceFrameRate 内部完成
+                val applied = applySurfaceFrameRate(
+                    rate = refreshRate,
+                    sdkInt = android.os.Build.VERSION.SDK_INT,
+                    setter = FrameRateSetter { r ->
+                        surface.setFrameRate(r, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
+                    },
+                    log = { log(it) },
+                )
+                if (applied) {
+                    log("VD refreshRate=$refreshRate requested via Surface.setFrameRate (builder path unavailable, 生效值以 Pipeline effFps/newFps 为准)")
+                } else {
+                    log("VD refreshRate=$refreshRate NOT applied: no refresh-rate parameter on the DisplayManager fallback and Surface.setFrameRate is unavailable")
+                }
             }
             return vd
         } catch (e: Exception) { err("DisplayManager: ${e.message}"); return null }
@@ -258,25 +286,95 @@ internal class VirtualDisplayCreator(
 }
 
 /**
- * 反射给 `VirtualDisplayConfig.Builder` 设刷新率（issue #153-PA）。
+ * 反射给 `VirtualDisplayConfig.Builder` 设刷新率（issue #153-PA / #203）。
  *
- * 抽成顶层函数是为了能纯 JVM 单测：注入一个带 / 不带 `setRefreshRate(Float)`
+ * 抽成顶层函数是为了能纯 JVM 单测：注入一个带 / 不带刷新率 setter
  * 的假 Builder 就能验证调用与容错，不必真的起 `DisplayManagerGlobal`。
  *
- * @return true = 设置成功；false = 该方法不存在或调用失败（调用方只记日志，
- *   VD 创建继续走原路径）。
+ * issue #203 的根因：旧实现只反射 `setRefreshRate(Float)`，但 AOSP
+ * `VirtualDisplayConfig.Builder` 上的真实方法名是
+ * `setRequestedRefreshRate(float)`（API 33+），所以这条路径在**所有** ROM 上
+ * 都会抛 `NoSuchMethodException`、恒返回 false，刷新率配置项从未生效过。
+ * 现在按顺序尝试两个名字：先 AOSP 的正式名，再兼容个别 ROM 的改名。
+ *
+ * @return true = 设置成功（内部日志会写明用的是哪个方法名）；
+ *   false = 两个名字都不存在或调用失败（调用方只记日志，VD 创建继续走原路径）。
  */
 internal fun applyRefreshRate(
     builder: Any,
     builderClass: Class<*>,
     rate: Float,
     log: (String) -> Unit = {},
-): Boolean = try {
-    val m = builderClass.getDeclaredMethod("setRefreshRate", java.lang.Float.TYPE)
-    m.isAccessible = true
-    m.invoke(builder, rate)
-    true
-} catch (e: Exception) {
-    log("setRefreshRate unavailable: ${e.javaClass.simpleName}")
-    false
+): Boolean {
+    val failures = mutableListOf<String>()
+    for (name in REFRESH_RATE_SETTERS) {
+        try {
+            val m = builderClass.getDeclaredMethod(name, java.lang.Float.TYPE)
+            m.isAccessible = true
+            m.invoke(builder, rate)
+            log("refresh rate setter: $name")
+            return true
+        } catch (e: Exception) {
+            failures += "$name=${e.javaClass.simpleName}"
+        }
+    }
+    log("setRequestedRefreshRate/setRefreshRate unavailable: ${failures.joinToString(", ")}")
+    return false
 }
+
+/**
+ * `VirtualDisplayConfig.Builder` 上刷新率 setter 的候选方法名，按优先级排列。
+ *
+ * `setRequestedRefreshRate` 是 AOSP 正式名（API 33+）；`setRefreshRate` 保留给
+ * 少数改了名的 ROM —— 历史上这里只写后者，等于从来没生效过（issue #203）。
+ */
+private val REFRESH_RATE_SETTERS = listOf("setRequestedRefreshRate", "setRefreshRate")
+
+/**
+ * 在某个 `Surface` 上设置期望帧率的接缝（issue #203）。
+ *
+ * 抽成 fun interface 而不是 `(Float) -> Unit`：单测要验证「被调用/未被调用」，
+ * 直接传 lambda 会和其他 `(Float) -> Unit` 参数撞类型；同时避免单测里真的造
+ * 一个 `Surface`（JVM 单测里 `android.view.Surface` 是空壳）。
+ */
+internal fun interface FrameRateSetter {
+    fun set(rate: Float)
+}
+
+/** `Surface.setFrameRate` 的最低 API（Android 11 / R）。 */
+internal const val SURFACE_FRAME_RATE_API = 30
+
+/**
+ * 在 VD 输出 `Surface` 上请求目标帧率（issue #203）。
+ *
+ * 只用于 [VirtualDisplayCreator] 的 `DisplayManager.createVirtualDisplay` 兜底分支：
+ * 那条公开 API 没有刷新率形参，VD 的显示模式无法在建屏时指定，只能在输出
+ * Surface 上打一个期望帧率提示。
+ *
+ * **返回值只代表「请求已发出」，不代表「已生效」** —— `Surface.setFrameRate`
+ * 返回 void。真实生效值由 `GlPipeline` 的 effFps/newFps 观测（issue #203 的要求）。
+ *
+ * @param sdkInt 由调用方注入（生产传 `Build.VERSION.SDK_INT`），便于纯 JVM 单测
+ *   覆盖 API 29（无此方法）与 API 30+ 两条分支。
+ */
+internal fun applySurfaceFrameRate(
+    rate: Float,
+    sdkInt: Int,
+    setter: FrameRateSetter,
+    log: (String) -> Unit = {},
+): Boolean {
+    if (rate <= 0f) return false
+    if (sdkInt < SURFACE_FRAME_RATE_API) {
+        log("Surface.setFrameRate unavailable: API $sdkInt < $SURFACE_FRAME_RATE_API")
+        return false
+    }
+    return try {
+        setter.set(rate)
+        true
+    } catch (e: Exception) {
+        // 已释放/无效的 Surface 会抛 IllegalArgumentException —— 只能降级，不能带崩建屏。
+        log("Surface.setFrameRate failed: ${e.javaClass.simpleName} ${e.message}")
+        false
+    }
+}
+

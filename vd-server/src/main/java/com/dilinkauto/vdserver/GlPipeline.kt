@@ -178,6 +178,8 @@ internal class GlPipeline(
         )
         var texUpdates = 0L; var swapFails = 0L
         var sendDrops = 0L; var lastWriteMs = 0L
+        // issue #203：连续「有内容但仍未达目标帧率」的窗口数（到 FPS_MISS_WARN_WINDOWS 打一条 W）。
+        var fpsMissWindows = 0L
         // issue #153-PA：静止画面短路的状态与计数。lastComposeNanos=0 表示本会话
         // 尚未合成过，由 ComposeDecision 兜底一次 KEEP_ALIVE，避免启动期零帧。
         var lastComposeNanos = 0L
@@ -291,6 +293,7 @@ internal class GlPipeline(
 
                 if (tickCount - lastLogTick >= 120) {
                     lastLogTick = tickCount
+                    // issue #206：窗口增量与墙钟基线统一由 PipelineWindowTracker 维护。
                     val callbacksNow = frameCbCount.get()
                     val win = windowTracker.snapshot(
                         PipelineCounters(
@@ -302,6 +305,8 @@ internal class GlPipeline(
                             callbacks = callbacksNow,
                         )
                     )
+                    // issue #203：实际生效帧率（effFps / newFps）由 pipelineStatLine 按
+                    // 「本窗口帧增量 × 1000 / winMs」打印，与 #206 的 mpixPerSec 同一时间口径。
                     PipeLog.log(
                         pipelineStatLine(
                             totals = PipelineSnapshot(
@@ -325,6 +330,23 @@ internal class GlPipeline(
                             height = displayHeight,
                         )
                     )
+                    // issue #203：目标帧率是否兑现按本窗口实测**新帧率**判断，连续若干窗口
+                    // 不达标才留一条 W —— 不在此处禁用任何档位，是否可达由实车回签判定。
+                    // 静止画面里多数拍被 idleSkip 短路（没有内容可发），不算不达标。
+                    val newFps = pipelineFps(win.texUpdates, win.windowMs)
+                    val activeEnough = win.ticks > 0L && win.idleSkips * 2L <= win.ticks
+                    if (activeEnough && !FrameRateBudget.isTargetReached(fps, newFps)) {
+                        fpsMissWindows++
+                        if (fpsMissWindows == FPS_MISS_WARN_WINDOWS) {
+                            PipeLog.log(
+                                "W [Fps] target $fps not reached: newFps=${pipelineFpsText(newFps)} " +
+                                    "for $fpsMissWindows windows " +
+                                    "(winMs=${win.windowMs} winFrames=${win.frames} winTicks=${win.ticks})"
+                            )
+                        }
+                    } else if (activeEnough) {
+                        fpsMissWindows = 0L
+                    }
                 }
             }
         } finally {
@@ -479,5 +501,14 @@ internal class GlPipeline(
 
         internal fun computeFramePtsNanos(hasNewFrame: Boolean, surfaceTextureTimestamp: Long, nowNanos: Long): Long =
             if (hasNewFrame && surfaceTextureTimestamp > 0L) surfaceTextureTimestamp else nowNanos
+
+        /**
+         * 连续多少个「有内容却未达目标帧率」的窗口后打一条 W（issue #203）。
+         *
+         * 一个周期窗口是 120 拍：20fps 下 6s、30fps 下 4s。取 3 ≈ 12–18s，
+         * 足够排除启动抖动，又不至于让一次 30s 的验证抓不到证据。
+         */
+        internal const val FPS_MISS_WARN_WINDOWS = 3L
     }
 }
+

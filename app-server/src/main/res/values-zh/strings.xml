@@ -58,6 +58,7 @@
     <string name="video_fps_title">目标帧率</string>
     <string name="video_fps_desc">发送给解码器的帧率。降低帧率可减少 CPU/GPU 负载</string>
     <string name="video_fps_hint">24 FPS 相比 30 FPS 可节省约 20% 的 CPU/GPU 与 Wi-Fi 负载</string>
+    <string name="video_fps_hint_measured">当前实测 %1$s fps（目标 %2$d fps）。30/60 档仍待实车验证，请以这个实测值为准</string>
 
     <!-- VD 合成面积档位（issue #153 PB） -->
     <string name="vd_area_tier_title">VD 合成面积档位</string>

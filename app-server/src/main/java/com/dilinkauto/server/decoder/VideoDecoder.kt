@@ -34,6 +34,23 @@ class VideoDecoder {
     @Volatile
     var debugFrameStats = false
 
+    /**
+     * 实测入帧帧率（issue #203），**始终开启**：每喂满 30 帧按墙钟差折算一次。
+     *
+     * 只做统计，不参与任何调度判定。设置页用它显示「设了 30 fps 实际拿到多少」，
+     * 与手机端 `Pipeline:` 行的 `newFps=` 相互印证 —— 两端都不再加协议字段。
+     * 0 = 本会话还没有满一个 30 帧窗口。
+     */
+    @Volatile
+    var measuredFps: Double = 0.0
+        private set
+
+    /** 实测帧率窗口满 30 帧后回调一次（喂帧线程），用于把值推给 UI 层。 */
+    var onMeasuredFps: ((Double) -> Unit)? = null
+
+    /** 上一个实测窗口的起点（`elapsedRealtime`）；0 = 还没开始计时。 */
+    private var fpsWindowStartMs = 0L
+
     // logSink routes through carLogSend, which already calls Log.i (single logcat path).
     // Avoid double-logging here — the carLogSend side is the one source of truth for logcat.
     private fun log(msg: String) {
@@ -400,6 +417,9 @@ class VideoDecoder {
             renderCount = 0
             dropCount = 0
             inputFailCount = 0
+            // issue #203：新解码器实例重新起算实测帧率窗口。
+            fpsWindowStartMs = 0L
+            measuredFps = 0.0
             var configFed = false
 
             feedThread = Thread({
@@ -479,12 +499,24 @@ class VideoDecoder {
                             dropCount++
                         }
                         if (frameCount % 30 == 0L) {
+                            // issue #203：实测入帧帧率（墙钟口径，始终开启），与手机端
+                            // `Pipeline:` 行的 newFps= 相互印证；不进协议、只进日志与设置页。
+                            val nowMs = SystemClock.elapsedRealtime()
+                            if (fpsWindowStartMs > 0L) {
+                                val elapsedMs = nowMs - fpsWindowStartMs
+                                if (elapsedMs > 0L) {
+                                    measuredFps = 30_000.0 / elapsedMs
+                                    onMeasuredFps?.invoke(measuredFps)
+                                }
+                            }
+                            fpsWindowStartMs = nowMs
+                            val fpsText = " fps=%.1f".format(measuredFps)
                             if (debugFrameStats) {
                                 val decodeMs = windowDecodeNanos / 1_000_000.0
-                                log("Fed $frameCount rendered=$renderCount drops=$dropCount inputFails=$inputFailCount keys_recv=$keyFramesReceived keys_fed=$keyFramesFed keys_drop=$keyFramesDropped queue=${frameQueue.size} skips=$skipCount resync=${resync.awaitingIdr} decodeMs=${"%.1f".format(decodeMs)}")
+                                log("Fed $frameCount rendered=$renderCount drops=$dropCount inputFails=$inputFailCount keys_recv=$keyFramesReceived keys_fed=$keyFramesFed keys_drop=$keyFramesDropped queue=${frameQueue.size} skips=$skipCount resync=${resync.awaitingIdr} decodeMs=${"%.1f".format(decodeMs)}$fpsText")
                                 windowDecodeNanos = 0L
                             } else {
-                                log("Fed $frameCount rendered=$renderCount drops=$dropCount inputFails=$inputFailCount keys_recv=$keyFramesReceived keys_fed=$keyFramesFed keys_drop=$keyFramesDropped queue=${frameQueue.size} skips=$skipCount resync=${resync.awaitingIdr}")
+                                log("Fed $frameCount rendered=$renderCount drops=$dropCount inputFails=$inputFailCount keys_recv=$keyFramesReceived keys_fed=$keyFramesFed keys_drop=$keyFramesDropped queue=${frameQueue.size} skips=$skipCount resync=${resync.awaitingIdr}$fpsText")
                             }
                         }
                     }

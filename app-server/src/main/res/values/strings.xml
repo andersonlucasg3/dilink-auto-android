@@ -58,6 +58,7 @@
     <string name="video_fps_title">Target FPS</string>
     <string name="video_fps_desc">Frame rate sent to decoder. Lower FPS reduces CPU/GPU load</string>
     <string name="video_fps_hint">24 FPS cuts 20% CPU/GPU and Wi-Fi load vs 30 FPS</string>
+    <string name="video_fps_hint_measured">Measured %1$s fps on the current stream (target %2$d fps). 30/60 FPS is still pending an on-vehicle check — read this number before keeping it</string>
 
     <!-- VD composite area tier (issue #153 PB) -->
     <string name="vd_area_tier_title">VD composite area tier</string>
