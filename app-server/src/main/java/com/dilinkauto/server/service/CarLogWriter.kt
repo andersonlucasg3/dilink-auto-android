@@ -70,19 +70,21 @@ internal class CarLogWriter(
      * next one wastes memory on a 4GB device and flushes stale context on
      * reconnect (audit S-L4). Called by [CarConnectionService.startConnection].
      *
-     * [keepMarker] 命中的行跨会话保留（issue #188）：探针的 `skipped` / `crashed` 恰好
-     * 产生在断线瞬间 —— 此时控制链路已断，行只能进 buffer，而下个会话的 [beginSession]
-     * 会把它清掉，于是「探针根本没跑」这条最需要看见的结论永远到不了手机。
+     * [keepMarkers] 命中的行跨会话保留：这些行恰好产生在断线瞬间 —— 此时控制链路已断，
+     * 只能进 buffer，而下个会话的 [beginSession] 会把它清掉，于是最需要看见的结论永远
+     * 到不了手机。
+     *  - `BydVehicleProbe.TAG`：探针的 `skipped` / `crashed`（issue #188）；
+     *  - `[Connect]`：用户断开后哪些自动入口被挡下来、下一次连接由谁发起（issue #201）。
      *
      * Deliberately does NOT clear [logQueue]: lines still queued there belong
      * to the teardown that just finished and are worth shipping.
      */
-    fun beginSession(keepMarker: String? = null) {
+    fun beginSession(vararg keepMarkers: String) {
         val kept = ArrayList<String>()
         while (true) {
             val line = buffer.poll() ?: break
             bufferCount.decrementAndGet()
-            if (keepMarker != null && line.contains(keepMarker)) kept.add(line)
+            if (keepMarkers.any { line.contains(it) }) kept.add(line)
         }
         for (line in kept) {
             // 重放路径同样受 [MAX_BUFFER_LINES] 约束，避免多次「连不上→重连」把保留行堆上去。

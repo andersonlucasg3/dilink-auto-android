@@ -67,6 +67,8 @@ class CarAdbTrackerDetachTest {
             deployVdServerDirect = {},
             onAdbReady = {},
             onUsbDetachedMidSession = onUsbDetachedMidSession,
+            // 本用例只测 detach 身份校验，与自动重连闸门无关（issue #201 起该参数必填）。
+            autoReconnectAllowed = { true },
         )
     }
 

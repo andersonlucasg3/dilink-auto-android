@@ -91,7 +91,10 @@
 
     <!-- Connection Status -->
     <string name="status_ready_to_connect">就绪，等待连接</string>
+    <!-- issue #201：用户主动断开是持久化状态，重启 App 也不会自动连，必须明确提示。 -->
+    <string name="status_disconnected_by_user">已按上次操作断开，点「重新连接」才会连上</string>
     <string name="reconnect_button">重新连接</string>
+    <string name="reconnect_button_after_disconnect">立即重新连接</string>
     <string name="status_connecting">正在连接…</string>
     <string name="status_connected">已连接</string>
     <string name="status_streaming">正在投屏</string>

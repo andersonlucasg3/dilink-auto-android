@@ -70,7 +70,9 @@ class CarConnectionService : Service() {
             deployVdServerDirect = { vdDeployer.deployDirect(it) },
             onAdbReady = {
                 if (sessionCoordinator.state.value == State.IDLE) {
-                    sessionCoordinator.startConnection()
+                    // issue #201：ADB 就绪是自动入口，交给 startConnection 的单一闸门判定；
+                    // 用户断开后这里会被挡下并打 `[Connect] auto-reconnect suppressed`。
+                    sessionCoordinator.startConnection(ConnectTrigger.AUTO_ADB_READY)
                 } else {
                     sessionCoordinator.checkAndAdvance()
                 }
@@ -81,6 +83,8 @@ class CarConnectionService : Service() {
                     scope.launch { sessionCoordinator.handleDisconnect() }
                 }
             },
+            // issue #201：USB attach / 权限回调 / TCP ADB 重拨统一问同一个闸门。
+            autoReconnectAllowed = { trigger -> sessionCoordinator.allowReconnect(trigger) },
         )
     }
 
@@ -294,6 +298,9 @@ class CarConnectionService : Service() {
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 carLogSend("WiFi network available — retrying WiFi track if needed")
+                // issue #201：网络恢复同样是自动入口，先过闸门（用户断开后不再重开探测）。
+                // TODO(#204)：available 不恢复是另一条独立缺陷，这里只加抑制，不改恢复语义。
+                if (!sessionCoordinator.allowReconnect(ConnectTrigger.AUTO_NETWORK_AVAILABLE)) return
                 if (sessionCoordinator.state.value == State.CONNECTING && !sessionCoordinator.wifiReady) {
                     sessionCoordinator.startWifiTrack()
                 }
@@ -307,7 +314,9 @@ class CarConnectionService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, buildNotification(R.string.notification_searching))
-                sessionCoordinator.startConnection()
+                // issue #201：MainActivity.onCreate 每次重建都会发 ACTION_START，属于自动入口；
+                // 用户断开后如果这里还无条件 startConnection，系统重建 Activity 就等于自动重连。
+                sessionCoordinator.startConnection(ConnectTrigger.AUTO_SERVICE_START)
             }
             ACTION_CONNECT -> {
                 startForeground(NOTIFICATION_ID, buildNotification(R.string.notification_searching))
@@ -323,8 +332,9 @@ class CarConnectionService : Service() {
                     sessionCoordinator.setStatusMessage(R.string.status_bad_port)
                     return START_STICKY
                 }
-                carPrefs.userDisconnected = false
-                sessionCoordinator.beginConnect(host, port)
+                // 显式携带 host 的 CONNECT 属于用户操作（clearUserDisconnected = true 由
+                // ConnectTrigger.USER_EXPLICIT_CONNECT 决定，不再在这里裸写标志）。
+                sessionCoordinator.beginConnect(host, port, ConnectTrigger.USER_EXPLICIT_CONNECT)
             }
             ACTION_STOP -> {
                 shutdown()
