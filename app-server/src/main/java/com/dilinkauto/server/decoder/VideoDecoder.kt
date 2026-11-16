@@ -387,17 +387,18 @@ class VideoDecoder {
             stallEscalation.reset()
             resyncSkippedFrames = 0L
 
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-                setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                setInteger(MediaFormat.KEY_PRIORITY, 0)
-                setInteger(MediaFormat.KEY_OPERATING_RATE, effectiveFps)
-            }
-
             // Re-check `running` AFTER creating the codec (audit S-08): a
             // concurrent stop() that interleaved before the lock was taken
             // (or a cancelled executor task) must not leave a live codec nobody
             // feeds. Release it right here instead.
             val newCodec: MediaCodec = try {
+                // issue #205：格式构造也可能抛（非法尺寸 → IAE），和 configure/start 一起纳入
+                // 失败回退，别让调用线程（解码器执行器 / 重建入口）被异常打断。
+                val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+                    setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                    setInteger(MediaFormat.KEY_PRIORITY, 0)
+                    setInteger(MediaFormat.KEY_OPERATING_RATE, effectiveFps)
+                }
                 MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
                     configure(format, surface, null, 0)
                     start()
@@ -965,7 +966,8 @@ class VideoDecoder {
     }
 
     /**
-     * 重建解码器的**唯一**入口（issue #205）：`stop()` + `start()`，generation 随之递增。
+     * 重建解码器的**唯一**入口（issue #205）：`stop()` + `start()`，generation 随之递增；
+     * 重建成功后在这里补请求一次 IDR（issue #207 欠账）。
      *
      * 所有「Surface 换了 / 重绑失败要重来」的分支都走这里，保证旧 codec 一定先被释放、
      * 新 codec 一定拿到新代号，日志里 created/released 可以严格配对。目前调用方是
@@ -976,6 +978,23 @@ class VideoDecoder {
         logW("Recreating decoder: reason=$reason")
         stop()
         start(surface, width, height, fps)
+        // issue #207 欠账：`stop()` 已经清掉 cachedKeyFrame，新 codec 没有参考帧，不补一拍
+        // IDR 就要等下一个自然 GOP（最多 ~1.2s 黑屏）。请求只走 onNeedsSyncFrame →
+        // `CarSessionCoordinator.requestSyncFrame` → `SyncRequestGate`（#75/#163 限流），
+        // 视频层不自己发协议帧，也不绕过限流。
+        requestSyncAfterRebuild(rebuilt = running.get(), reason = reason)
+    }
+
+    /**
+     * 重建成功后的 IDR 补偿（单个调用点，保证「一次重建只发一次请求」）。
+     *
+     * 重建失败（`start()` 没把 running 置回来）时不请求：此时没有 codec 可解，请求 IDR
+     * 只会白占 `SyncRequestGate` 的窗口。`internal` 供单测用假 gate 计数。
+     */
+    internal fun requestSyncAfterRebuild(rebuilt: Boolean, reason: String) {
+        if (!rebuilt) return
+        log("requesting IDR (reason=$reason)")
+        onNeedsSyncFrame?.invoke()
     }
 
     /**

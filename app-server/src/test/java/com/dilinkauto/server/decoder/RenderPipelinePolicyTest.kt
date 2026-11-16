@@ -237,15 +237,24 @@ class RenderPipelinePolicyTest {
     /**
      * issue #198 评审：重绑失败回退重建后 cachedKeyFrame 通常已被 stop() 清空，
      * 必须补一拍 IDR，且要走 #75 / #163 的同一个滑动窗口闸门。
+     *
+     * issue #207 收口后，请求点从协调器搬进了 `VideoDecoder.recreateDecoder()`（唯一重建入口），
+     * 协调器只保留 `requestSyncFrame()` 这一个闸门入口；一次重建仍然只请求一次。
      */
     @Test
     fun `decoder rebuild after a failed rebind requests an IDR through the shared gate`() {
         val coordinator = sourceOf(COORDINATOR_PATH)
+        val decoder = sourceOf(DECODER_PATH)
         val service = sourceOf(SERVICE_PATH)
 
         assertTrue(
-            "重建分支必须请求 IDR",
-            coordinator.contains("requestSyncFrame(\"decoder rebuilt after surface rebind failure\")"),
+            "重建成功后必须在唯一重建入口里请求 IDR",
+            decoder.contains("requestSyncAfterRebuild(rebuilt = running.get(), reason = reason)") &&
+                decoder.contains("onNeedsSyncFrame?.invoke()"),
+        )
+        assertTrue(
+            "重建分支必须走唯一的 recreateDecoder()",
+            coordinator.contains("videoDecoder.recreateDecoder("),
         )
         assertTrue(
             "IDR 请求必须走共享闸门入口 requestSyncFrame",
