@@ -135,6 +135,18 @@ internal class CarSessionCoordinator(
     private val _measuredFps = MutableStateFlow(0.0)
     val measuredFps: StateFlow<Double> = _measuredFps.asStateFlow()
 
+    /**
+     * 手机端回传的**实际生效** VD 密度与它对应的视口上限（issue #202 评审第 2 条）。
+     *
+     * 只读现有握手响应（`HandshakeResponse.vdDpi` + displayWidth/displayHeight），
+     * 不新增协议字段。设置页用它提示"填的 480 实际按多少生效"，否则用户会以为
+     * 越界回落没生效。0 = 还没握手成功（UI 退化为静态提示）。
+     */
+    private val _effectiveVdDpi = MutableStateFlow(0)
+    val effectiveVdDpi: StateFlow<Int> = _effectiveVdDpi.asStateFlow()
+    private val _effectiveVdSafeMaxDpi = MutableStateFlow(0)
+    val effectiveVdSafeMaxDpi: StateFlow<Int> = _effectiveVdSafeMaxDpi.asStateFlow()
+
     /** [VideoDecoder.onMeasuredFps] 的投递口（喂帧线程调用，只写 StateFlow）。 */
     fun onMeasuredFps(fps: Double) {
         _measuredFps.value = fps
@@ -647,6 +659,10 @@ internal class CarSessionCoordinator(
                 vdWidth = sanitizePeerDimension(response.displayWidth, vdWidth)
                 vdHeight = sanitizePeerDimension(response.displayHeight, vdHeight)
                 handshakeVdDpi = response.vdDpi
+                // issue #202 评审第 2 条：设置页要显示"实际生效值 / 视口上限"，
+                // 两者都从这次握手响应里取（不新增协议）。
+                _effectiveVdDpi.value = response.vdDpi
+                _effectiveVdSafeMaxDpi.value = VideoConfig.maxSafeDpi(vdWidth, vdHeight)
                 if (response.vdServerJarPath.isNotEmpty()) {
                     vdServerJarPath = response.vdServerJarPath
                 }

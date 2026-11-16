@@ -66,6 +66,10 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
     // Observed, not shadowed — CarPrefs owns the persisted values (SRP-06).
     val devMode by service.carPrefs.devModeFlow.collectAsState()
     val startupDpi by service.carPrefs.startupDpiFlow.collectAsState()
+    // issue #202 评审第 2 条：DPI 输入框下方要显示"实际生效值 / 视口上限"，
+    // 两个数都来自现有握手响应（0 = 还没握手，退化为静态提示）。
+    val effectiveVdDpi by service.effectiveVdDpi.collectAsState()
+    val effectiveVdSafeMaxDpi by service.effectiveVdSafeMaxDpi.collectAsState()
     val startupFps by service.carPrefs.startupFpsFlow.collectAsState()
     // issue #203：解码器实测入帧帧率（0 = 还没有样本），只用于在设置页展示实际值。
     val measuredFps by service.measuredFps.collectAsState()
@@ -96,6 +100,7 @@ fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = e
             onAudioEnabledChange = { service.carPrefs.audioEnabled = it },
             startupDpi = startupDpi,
             onStartupDpiChange = { service.carPrefs.startupDpi = it },
+            dpiNote = VdDpiHintText.text(startupDpi, effectiveVdDpi, effectiveVdSafeMaxDpi),
             startupFps = startupFps,
             onStartupFpsChange = { service.setStartupFps(it) },
             measuredFps = measuredFps,
@@ -257,6 +262,8 @@ private fun ConnectionStatusCard(
     onAudioEnabledChange: (Boolean) -> Unit,
     startupDpi: Int,
     onStartupDpiChange: (Int) -> Unit,
+    /** issue #202：DPI 输入框下方的"实际生效值 / 视口上限"提示（[VdDpiHintText]）。 */
+    dpiNote: String,
     startupFps: Int,
     onStartupFpsChange: (Int) -> Unit,
     /** 解码器实测入帧帧率（issue #203），0 = 无样本。 */
@@ -455,7 +462,8 @@ private fun ConnectionStatusCard(
                     onValueChange = onStartupDpiChange,
                     coerceManualValue = { text ->
                         SettingsFormat.coerceDpi(text.toIntOrNull() ?: SettingsFormat.DPI_AUTO)
-                    }
+                    },
+                    note = dpiNote
                 )
 
                 Spacer(Modifier.height(16.dp))

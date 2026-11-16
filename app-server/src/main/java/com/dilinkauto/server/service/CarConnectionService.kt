@@ -134,6 +134,9 @@ class CarConnectionService : Service() {
     val videoReady: StateFlow<Boolean> get() = sessionCoordinator.videoReady
     /** issue #203：解码器实测入帧帧率（0 = 无样本），设置页展示用。 */
     val measuredFps: StateFlow<Double> get() = sessionCoordinator.measuredFps
+    /** issue #202：手机端回传的实际生效 VD 密度 / 对应视口上限（0 = 尚未握手）。 */
+    val effectiveVdDpi: StateFlow<Int> get() = sessionCoordinator.effectiveVdDpi
+    val effectiveVdSafeMaxDpi: StateFlow<Int> get() = sessionCoordinator.effectiveVdSafeMaxDpi
     val statusMessage: StateFlow<String> get() = sessionCoordinator.statusMessage
     val appInfoData: StateFlow<AppInfoDataMessage?> get() = appListReceiver.appInfoData
 

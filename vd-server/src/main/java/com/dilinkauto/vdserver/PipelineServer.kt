@@ -460,33 +460,9 @@ class PipelineServer(
 
     private fun createVirtualDisplay(): Boolean {
         val vdSurf = vdInputSurface ?: return false
-        // issue #202 B：先问一句"能不能复用"——旧 VD 的 display 仍存活、surface 有效且
-        // 尺寸/DPI 与本次目标一致时，不重建、也不碰它上面的任务（ensureContent 会看到
-        // 可见窗口直接返回）。这样避免"建屏 → 搬回 display 0 → 再搬回来"的抖动。
-        //
-        // 说明：跨**进程**复用不可能（VD 的生命周期绑定创建它的进程，surface 也随进程
-        // 失效），所以这条路径的服务对象是本进程内的重复建屏/交接；跨会话复用需要引擎
-        // 常驻，属于另一个 issue 的范围（见 #202 的 plan 追评）。
-        val existing = virtualDisplay?.let { vd ->
-            VdSnapshot(
-                displayId = displayId,
-                width = displayWidth,
-                height = displayHeight,
-                dpi = dpi,
-                // 不能只看对象非空：release() 之后引用还在，但 display 已销毁。
-                alive = try { vd.display != null && vd.display.isValid } catch (_: Exception) { false }
-            )
-        }
-        val decision = VdReusePolicy.decide(
-            current = existing,
-            target = VdSnapshot(displayId, displayWidth, displayHeight, dpi, alive = true),
-            surfaceValid = try { vdSurf.isValid } catch (_: Exception) { false }
-        )
-        if (decision.reuse) {
-            log("VD reuse: ${decision.reason} — 不重建、不搬任务")
-            return true
-        }
-        log("VD create: ${decision.reason}")
+        // issue #202 结论：跨进程复用 VD 不可行 —— 一个会话一个 app_process，
+        // `createVirtualDisplay()` 全仓只有启动序列一个调用点，且 `virtualDisplay`
+        // 是建屏之后才赋值，所以这里不存在"本进程已有 VD"的分支（评审阻塞项 1）。
         // Snapshot the system state we are about to change — BEFORE changing it.
         // This used to run after VirtualDisplayCreator.create(), which itself
         // wrote screen_off_timeout=SessionScreenTimeout.SESSION_TIMEOUT_SENTINEL /
