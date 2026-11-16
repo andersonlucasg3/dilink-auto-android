@@ -121,6 +121,8 @@ class PipelineServer(
     @Volatile private var teardownProgress: String = ""
     /** issue #199：还没搬回物理屏的 task id（`[a, b]`），供超时现场与补偿标记使用。 */
     @Volatile private var teardownPendingTasks: String = ""
+    /** PR #208 评审：最近一次被放弃（超时/失败/跳过）的收尾步骤，供后续步骤做保护。 */
+    @Volatile private var abandonedStep: TeardownStep? = null
     private var displayId = -1
     private var virtualDisplay: VirtualDisplay? = null
     private var encoder: MediaCodec? = null
@@ -254,14 +256,6 @@ class PipelineServer(
          */
         private const val I_FRAME_INTERVAL = 3
         private const val WATCHDOG_GRACE_MS = ProcessWatchdog.WATCHDOG_GRACE_MS
-        /**
-         * issue #199：`apps-moved` 这一步的独立预算。
-         *
-         * 一步里做两件事（[CarCommandRouter.moveTopApp] 只搬顶层、[CarCommandRouter.moveAllTasksToDisplay]
-         * 批量搬残留）：批量后实测 ≈1s（2 次 dumpsys + 1 个 300ms 沉降窗口 + N 次 resize），
-         * 取 1800ms 给慢机留余量。超时只放弃这一步（`TeardownRunner` 会打出还没搬回的 task）。
-         */
-        private const val APPS_MOVED_BUDGET_MS = 1_800L
         private const val SOCKET_BUF_BYTES = Connection.SOCKET_BUF_BYTES // single source: protocol-core
 
         /** S-M9：主线程等 EGL/GL 初始化的上限。超时即致命，绝不久久挂起。 */
@@ -924,17 +918,19 @@ class PipelineServer(
      * shell-drained ≤193ms、audio-close ≤5ms、pipeline-join ≤3ms、apps-moved 861~3079ms。
      */
     private fun buildTeardownPlan(): List<TeardownStepPlan> = listOf(
-        TeardownStepPlan(TeardownStep.BEGIN, 100L) {},
+        TeardownStepPlan(TeardownStep.BEGIN, TEARDOWN_BUDGET_BEGIN_MS) {},
         // issue #64：先停窗口采样线程，后面的 shell 恢复命令与 close 才不会被 dumpsys 插队。
-        TeardownStepPlan(TeardownStep.WINDOW_MONITOR_STOPPED, 800L) { windowMonitor.stop() },
+        TeardownStepPlan(TeardownStep.WINDOW_MONITOR_STOPPED, TEARDOWN_BUDGET_WINDOW_MONITOR_MS) {
+            windowMonitor.stop()
+        },
         // 1. Global state first — these outlive this process if we die.
         // issue #48：letterbox 残留会被用户描述成「显示尺寸/比例不对」；带读回校验 + 一次重试。
-        TeardownStepPlan(TeardownStep.LETTERBOX_RESET, 1_200L) {
+        TeardownStepPlan(TeardownStep.LETTERBOX_RESET, TEARDOWN_BUDGET_LETTERBOX_MS) {
             try { resetLetterboxStyle() } catch (e: Exception) {
                 err("[teardown-display] reset-letterbox-style failed: ${e.message}")
             }
         },
-        TeardownStepPlan(TeardownStep.ROTATION_FREE, 500L) {
+        TeardownStepPlan(TeardownStep.ROTATION_FREE, TEARDOWN_BUDGET_ROTATION_MS) {
             if (displayId >= 0) {
                 try { shell.exec("wm user-rotation -d $displayId free") } catch (_: Exception) {}
             }
@@ -942,7 +938,7 @@ class PipelineServer(
         // 2. 先把前台 app 搬回，再把 VD 上**所有**残留 task 搬回并 resize（issue #48）；
         //    只搬顶层会让 quickSwitch 历史任务带着 VD 的 density/bounds 留在物理屏。
         //    issue #199 A：批量迁移 —— 两层合起来只读 2 次 dumpsys、只等 1 个沉降窗口。
-        TeardownStepPlan(TeardownStep.APPS_MOVED, APPS_MOVED_BUDGET_MS) {
+        TeardownStepPlan(TeardownStep.APPS_MOVED, TEARDOWN_BUDGET_APPS_MOVED_MS) {
             carCommands.moveTopApp(displayId, 0, probe = false)
             carCommands.moveAllTasksToDisplay(displayId, 0) { remaining ->
                 teardownPendingTasks = remaining.joinToString(prefix = "[", postfix = "]")
@@ -956,7 +952,10 @@ class PipelineServer(
         TeardownStepPlan(TeardownStep.IME_RESTORED, 1_000L) { displayController.restoreIme() },
         // 3b. issue #48 取证：面板/IME 已恢复后再读快照，避免 dumpsys 拖慢恢复顺序。
         // 只读：显示 display#0 的 init/cur 与仍留在 VD 上的 task id，不改任何状态。
-        TeardownStepPlan(TeardownStep.DISPLAY_SNAPSHOT, 1_200L) {
+        //
+        // PR #208 评审：这一步**依赖** apps-moved。搬迁超时后快照读到的是竞态数据，
+        // 而且被放弃的搬迁线程还在用 shell/dumpsys，再插一次 dumpsys 只会互相拖慢。
+        TeardownStepPlan(TeardownStep.DISPLAY_SNAPSHOT, 1_200L, dependsOn = TeardownStep.APPS_MOVED) {
             carCommands.logTeardownDisplaySnapshot(displayId)
         },
         // 4. Stop the LifeWriter thread before killing the shell — it may be mid-write.
@@ -1011,6 +1010,15 @@ class PipelineServer(
         // signalPipelineStop above is how this thread asks for it.
         TeardownStepPlan(TeardownStep.GL_RELEASED, 1_000L) { releaseGlResources() },
         TeardownStepPlan(TeardownStep.VIRTUAL_DISPLAY_RELEASED, 1_000L) {
+            // PR #208 评审：这一步**故意不挂** apps-moved 依赖 —— 泄漏 VD 的代价高于与
+            // 残留搬迁线程竞争（它只会多发几条 `am display move-stack`，失败已由 shell 层
+            // 兜住）。但必须让日志说清楚"现在是在有残留线程的情况下释放的"。
+            if (abandonedStep == TeardownStep.APPS_MOVED) {
+                err(
+                    "[teardown-step] virtual-display-released runs while the abandoned apps-moved " +
+                        "thread may still be moving tasks (${teardownPendingTasks.ifBlank { "[]" }})"
+                )
+            }
             virtualDisplay?.let { try { it.release() } catch (_: Exception) {} }
         },
         // issue #180：撤掉本会话发布在共享存储上的 pid / token，避免"上一轮标识"被下一轮
@@ -1033,7 +1041,13 @@ class PipelineServer(
                 pendingDetail = {
                     teardownPendingTasks.takeIf { it.isNotBlank() }?.let { "remainingTasks=$it" } ?: ""
                 },
-                onStepStart = { number, total, step -> teardownProgress = "$number/$total ${step.label}" }
+                onStepStart = { number, total, step -> teardownProgress = "$number/$total ${step.label}" },
+                // PR #208 评审：让后续步骤知道"前序步被放弃了"。目前只有一条硬编码依赖
+                // （DISPLAY_SNAPSHOT -> APPS_MOVED），这里记录最近一次被放弃的步骤，供
+                // VD 释放时告警。
+                onStepFinished = { step, outcome ->
+                    if (outcome != TeardownOutcome.COMPLETED) abandonedStep = step
+                }
             ).run()
             if (report.incomplete) {
                 // issue #199 C：明确标记"这次收尾没走完"，下一次启动据此做补偿清理。
@@ -1100,7 +1114,9 @@ class PipelineServer(
      * 被 watchdog `Runtime.halt(1)` 强杀的会话会留下 `cleanup-incomplete`；标记里记着停在
      * 哪一步、哪些 task 还没搬回。这里只做两件事：把线索打进本会话日志（回签/现场第一眼
      * 就能看到上一轮欠了什么），以及 best-effort 把仍挂在旧 VD 上的 task 搬回物理屏。
-     * 标记跑完才删，失败下轮重试。
+     *
+     * 标记**只有搬迁返回 true 时才删**（PR #208 评审）：搬迁失败/预算不够时留着，下一轮
+     * 启动再试 —— 否则"补偿"两个字就只是日志，任务照样滞留在已销毁的 display 上。
      */
     private fun compensateIncompleteCleanup() {
         val f = File(VdDeploy.CLEANUP_INCOMPLETE_PATH)
@@ -1108,7 +1124,15 @@ class PipelineServer(
         val detail = runCatching { f.readText().trim() }.getOrNull().orEmpty()
         err("[teardown-recover] previous cleanup incomplete: ${detail.ifBlank { "<empty>" }}")
         val stale = Regex("display=(-?\\d+)").find(detail)?.groupValues?.get(1)?.toIntOrNull() ?: -1
-        if (stale >= 0) carCommands.moveAllTasksToDisplay(stale, 0)
+        // 标记里没有合法 display id 时没有可补偿的动作，直接清掉。
+        val moved = if (stale >= 0) carCommands.moveAllTasksToDisplay(stale, 0) else true
+        if (!moved) {
+            err(
+                "[teardown-recover] W: compensation failed (staleDisplay=$stale, " +
+                    "moveAllTasksToDisplay=false：搬迁未完成或被预算截断) — marker kept for next session"
+            )
+            return
+        }
         val removed = runCatching { f.delete() }.getOrDefault(false)
         err("[teardown-recover] compensation done (staleDisplay=$stale, markerDeleted=$removed)")
     }
