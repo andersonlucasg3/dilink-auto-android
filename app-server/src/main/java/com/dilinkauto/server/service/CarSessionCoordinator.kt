@@ -178,8 +178,52 @@ internal class CarSessionCoordinator(
 
     // ─── Connection Orchestration ───
 
-    fun startConnection() {
+    /**
+     * 用户最近一次主动断开的时刻（`elapsedRealtime`，0 = 本进程内没有断开记录）。
+     *
+     * 只用于冷却期兜底（见 [AutoReconnectPolicy.USER_DISCONNECT_COOLDOWN_MS]）：真正的
+     * 抑制依据是持久化的 [CarPrefs.userDisconnected]，进程重启后仍有效。
+     */
+    @Volatile private var lastUserDisconnectAtMs = 0L
+
+    private fun inUserDisconnectCooldown(): Boolean {
+        val at = lastUserDisconnectAtMs
+        if (at <= 0L) return false
+        return SystemClock.elapsedRealtime() - at < AutoReconnectPolicy.USER_DISCONNECT_COOLDOWN_MS
+    }
+
+    /**
+     * 发起连接的**唯一**闸门（issue #201）：所有入口（服务 START / ADB 就绪 / 重试回环 /
+     * 网络恢复 / WiFi 探测 / 用户点重连）都必须先过这里。
+     *
+     * 命中抑制时用 [CarLogWriter.sendUnconditional] 打一行 —— 此刻控制链路已断，普通
+     * `send()` 会被 `enabled` 与离线缓冲两道门丢掉，正是线上「谁把会话拉起来」查不清的原因。
+     */
+    fun allowReconnect(trigger: ConnectTrigger): Boolean {
+        val decision = AutoReconnectPolicy.decide(
+            trigger = trigger,
+            userDisconnected = carPrefs.userDisconnected,
+            inCooldown = inUserDisconnectCooldown(),
+        )
+        val suppressed = decision.suppressed
+        if (!decision.allowed && suppressed != null) {
+            logWriter.sendUnconditional(
+                "${AutoReconnectPolicy.LOG_MARKER} auto-reconnect suppressed " +
+                    "(${suppressed.logText}, trigger=${trigger.label})"
+            )
+            return false
+        }
+        if (decision.clearUserDisconnected) {
+            carPrefs.userDisconnected = false
+            lastUserDisconnectAtMs = 0L
+        }
+        return true
+    }
+
+    fun startConnection(trigger: ConnectTrigger) {
         if (_state.value == CarConnectionService.State.STREAMING || _state.value == CarConnectionService.State.CONNECTED) return
+        // issue #201：用户断开后，任何自动入口都必须在这里早退（标志不清除、状态不动）。
+        if (!allowReconnect(trigger)) return
 
         connectionScope?.cancel()
         connectJob?.cancel()
@@ -201,8 +245,11 @@ internal class CarSessionCoordinator(
         adbTracker.resetAdbReadiness()
 
         logWriter.setEnabled(com.dilinkauto.server.BuildConfig.DEBUG)
-        logWriter.beginSession(BydVehicleProbe.TAG)
-        carPrefs.userDisconnected = false
+        // `[Connect]` 行跨会话保留（issue #201）：抑制发生在断线瞬间，只进得到离线缓冲，
+        // 下个会话的 beginSession 若清掉它，手机侧就永远看不到「谁被挡下来了」。
+        logWriter.beginSession(BydVehicleProbe.TAG, AutoReconnectPolicy.LOG_MARKER)
+        // 放在 beginSession 之后：这行要随新会话一起送到手机，用来回答「谁发起的重连」。
+        logWriter.sendUnconditional("${AutoReconnectPolicy.LOG_MARKER} start (trigger=${trigger.label})")
         _state.value = CarConnectionService.State.CONNECTING
         _statusMessage.value = context.getString(R.string.status_connecting)
         updateNotification(R.string.notification_searching)
@@ -260,7 +307,8 @@ internal class CarSessionCoordinator(
     /** 探针专用上报：不受 `LOG_TOGGLE` 影响，否则手机上关着诊断日志时探针等于没跑。 */
     private fun probeLog(msg: String, level: String = "I") = logWriter.sendUnconditional(msg, level)
 
-    fun beginConnect(host: String, port: Int) {
+    fun beginConnect(host: String, port: Int, trigger: ConnectTrigger) {
+        if (!allowReconnect(trigger)) return
         connectionScope?.cancel()
         val parent = Job()
         connectionScope = parent
@@ -268,13 +316,13 @@ internal class CarSessionCoordinator(
             adbTracker.startUsbTrack(trackScope())
         }
         armBydVehicleProbe(parent)
+        logWriter.sendUnconditional("${AutoReconnectPolicy.LOG_MARKER} start (trigger=${trigger.label}, host=$host)")
         connectToPhone(host, port)
     }
 
     fun connectManual(host: String, port: Int = Ports.DEFAULT_PORT) {
-        carPrefs.userDisconnected = false
         _state.value = CarConnectionService.State.CONNECTING
-        beginConnect(host, port)
+        beginConnect(host, port, ConnectTrigger.USER_MANUAL_IP)
     }
 
     fun trackScope(): CoroutineScope =
@@ -316,6 +364,9 @@ internal class CarSessionCoordinator(
     }
 
     fun startWifiTrack() {
+        // issue #201：网络恢复回调也走自动闸门，用户断开后不再重开探测循环。
+        // TODO(#204)：available 不恢复是另一条独立缺陷，这里只加抑制，不改恢复语义。
+        if (!allowReconnect(ConnectTrigger.AUTO_DISCOVERY)) return
         trackScope().launch(Dispatchers.IO) {
             delay(500)
             while (isActive && !wifiReady && !handshakeDone && _state.value == CarConnectionService.State.CONNECTING) {
@@ -821,8 +872,9 @@ internal class CarSessionCoordinator(
             val backoffMs = CarConnectionService.reconnectBackoffMs(consecutiveFailures)
             carLogSend("Reconnect backoff: ${backoffMs}ms (failures=$consecutiveFailures)")
             delay(backoffMs)
-            if (_state.value == CarConnectionService.State.IDLE && !carPrefs.userDisconnected) {
-                startConnection()
+            // 抑制判定收敛到 startConnection 的单一闸门（issue #201），这里不再重复读标志。
+            if (_state.value == CarConnectionService.State.IDLE) {
+                startConnection(ConnectTrigger.AUTO_RETRY)
             }
         }
     }
@@ -830,6 +882,8 @@ internal class CarSessionCoordinator(
     fun disconnectFromPhone() {
         carLogSend("User disconnect — will not auto-reconnect")
         carPrefs.userDisconnected = true
+        // issue #201：记下断开时刻，作为自动重连的冷却起点（用户点重连时清零）。
+        lastUserDisconnectAtMs = SystemClock.elapsedRealtime()
         scope.launch(Dispatchers.IO) {
             try { controlConnection?.sendControl(ControlMsg.DISCONNECT) } catch (_: Exception) {}
             // issue #183：显式走统一拆除路径，不再依赖 Connection.performTeardown 的
@@ -848,13 +902,17 @@ internal class CarSessionCoordinator(
 
     /**
      * 用户点「重新连接」（issue #183）：复用 [startConnection] 的完整启动流程 ——
-     * 它会取消旧 Job、重置 teardownGuard、把 userDisconnected 清回 false 并置
+     * 它会取消旧 Job、重置 teardownGuard、清除 userDisconnected 与冷却并置
      * CONNECTING。仅在 IDLE 等非会话态可用（STREAMING/CONNECTED 时 [startConnection]
      * 自身会直接返回）。
+     *
+     * issue #201：`USER_RECONNECT` 是**唯一**被允许清除 `userDisconnected` 的自动态之外
+     * 的入口之一（另两个是手填 IP 与显式 CONNECT intent），因此这里绝不能把 trigger
+     * 误写成 AUTO_*，否则按钮会看起来「按了没反应」。
      */
     fun reconnect() {
         carLogSend("User requested reconnect")
-        startConnection()
+        startConnection(ConnectTrigger.USER_RECONNECT)
     }
 
     /**

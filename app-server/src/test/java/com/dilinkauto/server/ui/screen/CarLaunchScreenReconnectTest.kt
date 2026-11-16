@@ -41,12 +41,14 @@ class CarLaunchScreenReconnectTest {
         )
         // 只断言「文件里出现过 startConnection()」太宽（它本来就在 startConnection 自己的
         // 定义与 handleDisconnect 的重连分支里出现），这里把范围收窄到 reconnect() 函数体。
+        // issue #201：重连按钮必须自报 USER_RECONNECT，否则会被自动闸门当成自动入口挡掉。
         val reconnectBody = coordinatorSrc
             .substringAfter("fun reconnect()")
             .substringBefore("fun sendCommandToVd")
         assertTrue(
-            "sessionCoordinator.reconnect() 的函数体必须调用 startConnection()，复用完整启动流程",
-            reconnectBody.contains("startConnection()"),
+            "sessionCoordinator.reconnect() 的函数体必须调用 startConnection(USER_RECONNECT)，" +
+                "复用完整启动流程并清除断开标志",
+            reconnectBody.contains("startConnection(ConnectTrigger.USER_RECONNECT)"),
         )
     }
 

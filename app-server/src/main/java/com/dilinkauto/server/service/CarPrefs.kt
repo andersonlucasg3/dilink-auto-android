@@ -31,7 +31,13 @@ internal class CarPrefs(context: Context) {
 
     private val prefs = context.getSharedPreferences(AppPrefs.FILE_NAME, Context.MODE_PRIVATE)
 
-    /** Set when the user explicitly disconnected; suppresses auto-reconnect until re-plug / START. */
+    /**
+     * Set when the user explicitly disconnected.
+     *
+     * issue #201：它只由用户显式操作清除（重连按钮 / 手填 IP / 携带 host 的 CONNECT
+     * intent）—— USB 重新枚举、ADB 就绪、服务 START、网络恢复都不许再改写它，
+     * 判定见 [AutoReconnectPolicy]。
+     */
     var userDisconnected: Boolean
         get() = prefs.getBoolean(AppPrefs.USER_DISCONNECTED, false)
         set(value) = prefs.edit().putBoolean(AppPrefs.USER_DISCONNECTED, value).apply()

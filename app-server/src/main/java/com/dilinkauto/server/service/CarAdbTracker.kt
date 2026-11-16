@@ -33,6 +33,15 @@ internal class CarAdbTracker(
     private val deployVdServerDirect: suspend (RemoteAdbController) -> Unit,
     private val onAdbReady: () -> Unit,
     private val onUsbDetachedMidSession: () -> Unit,
+    /**
+     * 自动重连闸门（issue #201）。
+     *
+     * USB 重新枚举、权限回调、TCP ADB 重拨都是**自动**入口：它们的共同后果是
+     * `usbReady = true` → [onAdbReady] → `startConnection()`。用户点过「断开」之后
+     * 这些入口必须先问一句；判定与抑制日志统一由 [CarSessionCoordinator.allowReconnect]
+     * 持有，这里只负责不越过它。
+     */
+    private val autoReconnectAllowed: (ConnectTrigger) -> Boolean = { true },
 ) {
     @Volatile var usbReady: Boolean = false
         internal set
@@ -128,6 +137,8 @@ internal class CarAdbTracker(
 
     fun startUsbTrack(trackScope: CoroutineScope) {
         if (usbReady) return
+        // issue #201：用户断开后不再扫设备、也不再重开 TCP ADB 探测（候选 B 的冷却落点）。
+        if (!autoReconnectAllowed(ConnectTrigger.AUTO_ADB_READY)) return
         if (carPrefs.devMode) {
             log("Development mode active — using TCP ADB instead of USB", "I")
             startTcpAdbTrack(trackScope)
@@ -148,6 +159,9 @@ internal class CarAdbTracker(
 
     fun startTcpAdbTrack(trackScope: CoroutineScope) {
         if (tcpAdbConnecting) return
+        // issue #201：dev 模式下 TCP ADB 仍连着时，这条「恢复 usbReady」快路径会直接
+        // 触发 onAdbReady → startConnection，用户断开后必须挡住。
+        if (!autoReconnectAllowed(ConnectTrigger.AUTO_ADB_READY)) return
         val phoneHost = getPhoneHost()
         if (adbController?.isConnected == true && lastAdbHost == phoneHost) {
             if (!usbReady) {
@@ -191,6 +205,8 @@ internal class CarAdbTracker(
 
     suspend fun connectTcpAdb(host: String) {
         if (usbReady) return
+        // issue #201：重拨会顺便 `am start` 拉起手机 App，用户断开后不许发生。
+        if (!autoReconnectAllowed(ConnectTrigger.AUTO_ADB_READY)) return
         if (adbController?.isConnected == true) {
             log("Dev mode: TCP ADB already connected, skipping duplicate", "I")
             return
@@ -230,7 +246,11 @@ internal class CarAdbTracker(
 
     fun onUsbDeviceAttached(device: UsbDevice) {
         if (UsbAdbConnection.findAdbInterface(device) == null) return
-        carPrefs.userDisconnected = false
+        // issue #201：这里原先无条件把 userDisconnected 裸写回 false —— USB 重新枚举
+        // （机身充电口插拔、手机 adbd/UI 重启都会触发）等于把用户的「不重连」抹掉，
+        // 随后 connectUsbAdb → onAdbReady → startConnection 就会在 3~13s 后重建整条链路。
+        // 重新枚举 != 用户重新连接：只放行闸门，绝不改写标志。
+        if (!autoReconnectAllowed(ConnectTrigger.AUTO_ADB_READY)) return
 
         val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
         if (usbManager.hasPermission(device)) {
@@ -255,6 +275,8 @@ internal class CarAdbTracker(
             log("USB ADB already ${if (usbReady) "connected" else "connecting"} — skipping", "I")
             return
         }
+        // issue #201：USB 权限授权的广播回调也走这里，同样受自动闸门约束。
+        if (!autoReconnectAllowed(ConnectTrigger.AUTO_ADB_READY)) return
         usbConnecting = true
         scope.launch(Dispatchers.IO) {
             setStatusMessage(R.string.status_connecting_usb, emptyArray())
