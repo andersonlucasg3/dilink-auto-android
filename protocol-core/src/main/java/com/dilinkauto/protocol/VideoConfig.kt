@@ -139,11 +139,7 @@ object VideoConfig {
         if (width <= 0 || height <= 0) return DEFAULT_FALLBACK_DPI
 
         val isLandscape = width >= height
-        val maxSafeDpi = if (isLandscape) {
-            ((height * 80f) / 360f).toInt()
-        } else {
-            ((width * 160f) / 380f).toInt()
-        }
+        val safeMax = maxSafeDpi(width, height)
 
         val goldenDpi = if (isLandscape) {
             ((height * 0.52f * 160f) / 385f).toInt()
@@ -152,11 +148,31 @@ object VideoConfig {
         }
 
         val baseDpi = if (carReportedDpi in 120..320) {
-            minOf(carReportedDpi, maxSafeDpi)
+            minOf(carReportedDpi, safeMax)
         } else {
             goldenDpi
         }
 
-        return baseDpi.coerceIn(120, maxOf(120, maxSafeDpi))
+        return baseDpi.coerceIn(120, maxOf(120, safeMax))
+    }
+
+    /**
+     * 本视口下 VD 密度的安全上限（issue #202）。
+     *
+     * 与 [calculateOptimalDpi] 里 `maxSafeDpi` 的算式**同一份**：横屏按高度
+     * `H*80/360`（≈ H/4.5），竖屏按宽度 `W*160/380`。超过它，竖屏应用在横屏 VD 里
+     * 只剩 ~140dp 逻辑宽，图标/按钮互相重叠到不可点（见 [calculateOptimalDpi] 的推导）。
+     *
+     * 抽成公开函数是为了让 [VdDpiResolver] 能对「用户 override」做同一道校验，
+     * 而不是像 issue #202 现场那样让 `override=480` 无条件绕过上限。
+     */
+    fun maxSafeDpi(width: Int, height: Int): Int {
+        if (width <= 0 || height <= 0) return DEFAULT_FALLBACK_DPI
+        val maxSafe = if (width >= height) {
+            ((height * 80f) / 360f).toInt()
+        } else {
+            ((width * 160f) / 380f).toInt()
+        }
+        return maxSafe.coerceAtLeast(120)
     }
 }

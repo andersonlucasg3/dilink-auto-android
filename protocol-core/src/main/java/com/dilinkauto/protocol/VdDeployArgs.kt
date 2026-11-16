@@ -28,6 +28,8 @@ package com.dilinkauto.protocol
  *   - SESSION   — issue #180 第三版: 本次会话的 token（`[A-Za-z0-9_-]{1,64}`），
  *                 `-` = 未传。引擎只监听自己的 `stop-request-<token>` 哨兵，
  *                 没有 token 时回退同目录下的固定名 `stop-request` + mtime 判定。
+ *   - DPI_SRC   — issue #202 A: DPI 来源令牌（`auto` / `user-240` / `fallback-480-234`），
+ *                 `-` = 旧部署端未上报。只用于引擎启动行打印"生效值是谁定的"，不参与建屏。
  */
 object VdDeployArgs {
     const val MAX_ENCODE_WIDTH = 1920
@@ -60,7 +62,12 @@ object VdDeployArgs {
         bitrate: Int = VideoConfig.DEFAULT_BITRATE,
         carHost: String = CAR_HOST_ANY,
         allowedPackages: Collection<String> = emptyList(),
-        sessionToken: String? = null
+        sessionToken: String? = null,
+        /**
+         * issue #202 A：DPI 来源令牌（[VdDpiResolver.sanitizeToken] 的输出）。
+         * 只用于引擎 `Starting:` 行打印"最终生效值是谁定的"；`-` = 旧部署端未上报。
+         */
+        dpiSource: String = VdDpiResolver.SOURCE_UNKNOWN
     ): String {
         // 等比缩放到编码上限内：此前宽高分开 clamp 会把竖屏 1080x2152 压成方形
         // 1080x1080，导致车机端画面比例失真；等比缩放保持车机 viewport 原始宽高比。
@@ -74,7 +81,8 @@ object VdDeployArgs {
         } else VideoConfig.DEFAULT_BITRATE
         val safeCarHost = sanitizeCarHost(carHost)
         return "$vdWidth $vdHeight $dpi $phoneHost $ew $eh $fps $br $safeCarHost " +
-            "${formatAllowedPackages(allowedPackages)} ${sanitizeSessionToken(sessionToken)}"
+            "${formatAllowedPackages(allowedPackages)} ${sanitizeSessionToken(sessionToken)} " +
+            VdDpiResolver.sanitizeToken(dpiSource)
     }
 
     /**

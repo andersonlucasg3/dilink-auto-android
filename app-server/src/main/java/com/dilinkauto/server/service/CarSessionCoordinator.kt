@@ -451,13 +451,27 @@ internal class CarSessionCoordinator(
     }
 
     private fun sendHandshake(ctrl: Connection, widthPx: Int, heightPx: Int, dpi: Int) {
+        // issue #202 A：行车端只负责把「用户设置」原样下发；越界/非法值在这里就拒绝，
+        // 不要交给 coerceDpiOverride 夹到边界 —— 那正是 issue #202 现场 `@480dpi` 的来源
+        // （手滑输入 560 → UI 夹成 480 → 每次重连都按 480 建屏）。
+        val storedDpi = carPrefs.startupDpi
+        val dpiOverride = storedDpi.takeIf {
+            it == SettingsFormat.DPI_AUTO ||
+                it in VdDeployArgs.DPI_OVERRIDE_MIN..VdDeployArgs.DPI_OVERRIDE_MAX
+        } ?: SettingsFormat.DPI_AUTO
+        if (dpiOverride != storedDpi) {
+            carLogSend(
+                "W: startupDpi=$storedDpi 非法（只接受 0 或 " +
+                    "${VdDeployArgs.DPI_OVERRIDE_MIN}..${VdDeployArgs.DPI_OVERRIDE_MAX}），本次按 Auto 下发"
+            )
+        }
         val handshake = buildHandshakeRequest(
             context = context,
             screenWidth = widthPx,
             screenHeight = heightPx,
             screenDpi = dpi,
             targetFps = targetFps,
-            dpiOverride = carPrefs.startupDpi,
+            dpiOverride = dpiOverride,
             bitrate = carPrefs.startupBitrate,
             audioEnabled = carPrefs.audioEnabled,
             // issue #153 PB：与 startupDpi 同范式，握手构造时读取，切档在下一次
