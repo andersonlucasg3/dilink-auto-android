@@ -680,6 +680,10 @@ class ConnectionService : Service() {
             try {
                 conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
                 FileLog.i(TAG, "Handshake response sent")
+                // issue #204：握手成功是「链路真的通」的最硬证据。系统回调可能再也不来
+                // （现场 16:36:37 lost 之后再无 available，而 16:36:42 会话照常建立），
+                // 这里用真实流量把监控状态拉回 available，只改状态与日志，不触发重建。
+                networkMonitor?.onTrafficConfirmed()
             } catch (e: Exception) {
                 FileLog.e(TAG, "Failed to send handshake response", e)
                 return@launch
