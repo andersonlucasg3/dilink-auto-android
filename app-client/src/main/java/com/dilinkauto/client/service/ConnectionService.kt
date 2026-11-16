@@ -52,6 +52,9 @@ class ConnectionService : Service() {
     private var serviceRegistration: Discovery.ServiceRegistration? = null
     private var connectionLoopJob: Job? = null
     private var networkMonitor: ClientNetworkMonitor? = null
+
+    /** 网络事件 → 是否重建投屏通道的判据（issue #200，见 [NetworkRebuildPolicy]）。 */
+    private val networkRebuildPolicy = NetworkRebuildPolicy()
     private lateinit var appListBuilder: AppListBuilder
     private lateinit var displayRestorer: PhoneDisplayRestorer
 
@@ -299,6 +302,24 @@ class ConnectionService : Service() {
                         cleanupSession()
                         connectionLoopJob?.cancel()
                         startConnectionLoop()
+                        return
+                    }
+                    if (state != State.CONNECTED && state != State.STREAMING) return
+                    // issue #200：Wi-Fi 重关联时 onAvailable 可能先于链路真正可用到达（现场
+                    // 16:36:09.248 之后视频仍静默了 5.98s），所以不能无条件重建 —— 全量重建
+                    // 实测 3.7~4.9s，断链期间连握手都完不成，只会把 6s 冻屏拉长。
+                    // 只有「链路已恢复、控制通道却还在静默」（socket 半死）才重建。
+                    val silence = controlConnection?.msSinceLastFrameReceived() ?: -1L
+                    val action = networkRebuildPolicy.onNetworkAvailable(
+                        nowMs = System.currentTimeMillis(),
+                        streaming = true,
+                        controlSilenceMs = silence,
+                    )
+                    if (action == NetworkRebuildPolicy.Action.REBUILD) {
+                        FileLog.w(TAG, "Network available while $state, control silent ${silence}ms — proactive rebuild (issue #200)")
+                        resetConnectionForNetworkChange()
+                    } else {
+                        FileLog.i(TAG, "Network available while $state — control silent ${silence}ms, keep session (issue #200)")
                     }
                 }
 
@@ -900,6 +921,9 @@ class ConnectionService : Service() {
         // even if a network callback already cleaned up this session.
         resetCleanupGuard()
         cleanupSession()
+        // issue #200：用户主动停止/重开是一条全新的生命周期，不能被上一轮的
+        // 重建冷却窗口挡住。
+        networkRebuildPolicy.reset()
         appListBuilder.resetIconHashes()
         serviceRegistration?.unregister()
         serviceRegistration = null

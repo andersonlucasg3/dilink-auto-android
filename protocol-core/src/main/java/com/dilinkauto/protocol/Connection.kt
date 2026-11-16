@@ -106,6 +106,16 @@ class Connection(
 
     val isConnected: Boolean get() = connected.get() && channel.isOpen
 
+    /**
+     * 距离上一次读到任意帧（含心跳）已过去的毫秒数（issue #200）。
+     *
+     * 只读诊断量，不参与任何超时判定（看门狗仍走 [ConnectionKeepAlive]）。车机端用它
+     * 区分「链路断」（控制帧一起停）与「编码停」（控制帧照常、只有视频不动）；
+     * 手机端用它判断重关联后 socket 是否已经半死。
+     */
+    fun msSinceLastFrameReceived(): Long =
+        (System.currentTimeMillis() - lastFrameReceivedAt).coerceAtLeast(0L)
+
     /** Remote peer's IP address (e.g. for ADB connection to the car) */
     val remoteAddress: String? get() = try {
         (channel.remoteAddress as? InetSocketAddress)?.address?.hostAddress

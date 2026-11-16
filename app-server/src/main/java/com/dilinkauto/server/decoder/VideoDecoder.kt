@@ -118,6 +118,24 @@ class VideoDecoder {
     /** 渲染停顿诊断（issue #58）：喂帧线程每轮 tick 一次，停顿超阈值时打一行 STALL 汇总。 */
     private val renderStall = RenderStallDetector()
 
+    /**
+     * 停顿分级（issue #200）：链路静默 1.5s 先打 `LINK GAP` 并预置重同步，3s 升级 `STALLED`。
+     *
+     * [RenderStallDetector] 只在**渲染推进**时出报告，所以现场那 5983ms 空档直到恢复才被
+     * 看见；分级策略按「时间流逝」观察，让停顿在发生时就可见、可动作。
+     */
+    private val stallEscalation = StallEscalationPolicy()
+
+    /**
+     * 距离最近一次收到控制帧的毫秒数（issue #200）。由 `CarConnectionService` 注入；
+     * 未接线时返回 -1（日志打 `n/a`）。
+     *
+     * GAP / STALLED 行带上它就能区分两种完全不同的故障：链路断时控制帧一起停，
+     * 编码停（手机端不产帧）时控制帧照常。
+     */
+    @Volatile
+    var msSinceControlFrame: (() -> Long)? = null
+
     private var frameCount = 0L
 
     /**
@@ -138,6 +156,14 @@ class VideoDecoder {
     private var keyFramesReceived = 0L
     private var keyFramesFed = 0L
     private var keyFramesDropped = 0L
+
+    /**
+     * 重同步期间在**接收入口**被丢掉的 P 帧数（issue #200），与 [dropCount] 分开计数。
+     *
+     * [dropCount] 保留「参考链因积压/超时产生的洞」的原口径；这里的帧根本没进队列，
+     * 不会占满 8 槽、也不会挤掉关键帧。
+     */
+    private var resyncSkippedFrames = 0L
 
     /**
      * 黑屏自愈的升级闸门（issue #11）。
@@ -253,6 +279,17 @@ class VideoDecoder {
         onNeedsSyncFrame?.invoke()
     }
 
+    /**
+     * GAP / STALLED 行里的控制通道静默时长文本（issue #200）。
+     *
+     * `n/a` = 没有控制连接或未接线，不代表链路正常；有数字且远大于心跳间隔（3s）
+     * 才说明是链路断而不是编码停。
+     */
+    private fun controlSilenceText(): String {
+        val ms = msSinceControlFrame?.invoke() ?: -1L
+        return if (ms >= 0) "${ms}ms" else "n/a"
+    }
+
     // Accumulated decode time for the current 30-frame window (Phase L1 / perf 9.3).
     // Reset at each per-30-frame log so the reported value is per-window, not lifetime.
     private var windowDecodeNanos = 0L
@@ -299,6 +336,9 @@ class VideoDecoder {
             resync.reset()
             // 停顿诊断同样重新起算，避免把上一个会话的空档算进这一次（issue #58）。
             renderStall.reset()
+            // 停顿分级同样重新起算（issue #200）。
+            stallEscalation.reset()
+            resyncSkippedFrames = 0L
 
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
                 setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
@@ -438,8 +478,9 @@ class VideoDecoder {
                         }
                         // issue #58：记录「两次渲染推进之间的间隔」，停顿超阈值时留一条 STALL
                         // 汇总行。卡顿是「停顿后恢复」，恢复必经这里，所以不会漏报。
+                        val tickNowMs = SystemClock.elapsedRealtime()
                         renderStall.onTick(
-                            nowMs = SystemClock.elapsedRealtime(),
+                            nowMs = tickNowMs,
                             snap = RenderStallDetector.Snapshot(
                                 renders = renderCount,
                                 receive = receiveCount,
@@ -453,6 +494,21 @@ class VideoDecoder {
                             ),
                         )?.let { r ->
                             logW("STALL ${r.gapMs}ms renders=${r.fromRenders}->${r.toRenders} recv+=${r.receiveDelta} fed+=${r.fedDelta} drops+=${r.dropDelta} inputFails+=${r.inputFailDelta} keys_drop+=${r.keyDropDelta} queue=${r.queueSize} resync=${r.awaitingIdr} skips=${r.skips}")
+                        }
+                        // issue #200：停顿分级按「时间流逝」观察，不必等到恢复才可见。
+                        // GAP 级先把重同步预置好（noteGap 只在首次缺口返回 true，IDR 请求
+                        // 仍走 onNeedsSyncFrame → SyncRequestGate 限流，不绕过 #75/#163），
+                        // 这样链路恢复后的积压洪峰一到就直接跳到 IDR，而不是先白喂一段。
+                        stallEscalation.onTick(nowMs = tickNowMs, renders = renderCount)?.let { r ->
+                            val ctrlSilent = controlSilenceText()
+                            when (r.level) {
+                                StallEscalationPolicy.Level.GAP -> {
+                                    logW("LINK GAP ${r.gapMs}ms — no render advance (renders=$renderCount recv=$receiveCount fed=$frameCount drops=$dropCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent) — pre-arming resync + one IDR request")
+                                    noteGap()
+                                }
+                                StallEscalationPolicy.Level.STALLED ->
+                                    logW("STALLED ${r.gapMs}ms — still no render advance (renders=$renderCount recv=$receiveCount fed=$frameCount drops=$dropCount inputFails=$inputFailCount queue=${frameQueue.size} ctrlSilent=$ctrlSilent resync=${resync.awaitingIdr})")
+                            }
                         }
 
                         // 空闲时仍按帧间隔阻塞等待，避免忙等；一旦有帧就立刻进入排空循环。
@@ -639,6 +695,18 @@ class VideoDecoder {
         if (!running.get() && !isConfig) {
             if (isKey) {
                 cachedKeyFrame = data
+            }
+            return
+        }
+        // issue #200：等待 IDR 期间到达的 P 帧对解码毫无用处（喂帧循环里的
+        // ResyncPolicy.shouldFeed 也会跳过），但它们会占满 8 槽队列、把关键帧挤到
+        // 待驱逐的边缘。现场链路恢复后 150ms 内涌入 ~117 帧，正是这批注定作废的
+        // 积压造成了 88 次 drops 与第二次「参考链断裂」。在接收入口直接丢掉，
+        // 只留关键帧/CONFIG 参与排队。
+        if (!isConfig && !isKey && resync.awaitingIdr) {
+            resyncSkippedFrames++
+            if (resyncSkippedFrames <= 5 || resyncSkippedFrames % 60 == 0L) {
+                logW("Resync: dropped P-frame at receive #$resyncSkippedFrames until next IDR (receive=$receiveCount queue=${frameQueue.size})")
             }
             return
         }

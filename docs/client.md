@@ -67,7 +67,7 @@ State flow: `IDLE → WAITING → CONNECTED → STREAMING`, exposed via `service
 To preserve single responsibility and maintainability, `ConnectionService` delegates domain-specific logic to extracted collaborators:
 - **`ShizukuVdDeployer`**: Manages the Shizuku-based execution of `vdRunDeploySequence`, including graceful stopping, liveness probing, and background `app_process` launching.
 - **`ShizukuNav`**: Coordinates system navigation actions (back, home, recents) through Shizuku shell when available.
-- **`ClientNetworkMonitor`**: Observes network connectivity transitions, decoupling Wi-Fi state listener logic from core session lifecycle.
+- **`ClientNetworkMonitor`**: Observes network connectivity transitions, decoupling Wi-Fi state listener logic from core session lifecycle. `onAvailable` is not treated as "the link is usable": a Wi-Fi re-association can report the new network several seconds before traffic flows again, so `ConnectionService` only rebuilds when [`NetworkRebuildPolicy`] sees the control channel silent for ≥6 s (two missed 3 s heartbeats) — the dead-socket case that would otherwise wait for the 10 s keep-alive watchdog (issue #200).
 - **`CarAppInstallHost`**: Hosts the car-app APK installation flow, managing asynchronous install states without bloating the connection service.
 - **`AllowlistRepository`**: Encapsulates persistence and retrieval of permitted launcher applications.
 - **`InputInjectionService` (@Deprecated)**: Previously held virtual-display bindings for accessibility gesture injection. With direct touch injection on port 9639 handled by `vd-server`, its invocation path has been completely severed.
