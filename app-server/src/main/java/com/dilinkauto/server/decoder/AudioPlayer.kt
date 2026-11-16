@@ -562,11 +562,17 @@ class AudioPlayer(
         } else {
             // 打出实际分配值：ROM 的 minBufferSize / 混音周期会把请求值向上取整，
             // 归因 underrun 时要按实际容量算，别拿请求值当真相（issue #164）。
-            val frames = t.bufferSizeInFrames
-            val actualMs = frames * PCM_SAMPLES_PER_FRAME.toLong() * 1000L / config.sampleRate
+            // 换算在 [audioTrackBufferLine]（issue #206）：`bufferSizeInFrames` 已是
+            // AudioTrack 帧，不能再乘 AAC 的 1024 samples/块。
             log(
-                "AudioTrack buffer: ${frames} frames ≈ ${actualMs}ms " +
-                    "(${frames * frameBytes}B; requested=${bufferBytes}B/${bufferBytes / frameBytes} frames, min=$minBytes)"
+                audioTrackBufferLine(
+                    frames = t.bufferSizeInFrames,
+                    sampleRate = config.sampleRate,
+                    channelCount = config.channelCount,
+                    requestedBytes = bufferBytes,
+                    requestedFrames = bufferBytes / frameBytes,
+                    minBytes = minBytes,
+                )
             )
             t
         }

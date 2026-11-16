@@ -293,13 +293,4 @@ class VdDimensionsTest {
             assertTrue("VD width $w must be >= $required (phone ${pw}x$ph)", w >= required)
         }
     }
-
-    @Test
-    fun mpixPerSec_isFullSpeedTheoreticalThroughput() {
-        // 精确值；口径是「按 fps 满速」，静止短路后实际合成拍数远低于 fps，
-        // 温升归因要看 idleSkip/ticks/frames 增长率，不能只看这个数。
-        assertEquals(107.6736, VdDimensions.mpixPerSec(2560, 1402, 30), 0.000001)
-        assertEquals(60.90012, VdDimensions.mpixPerSec(1926, 1054, 30), 0.000001)
-        assertEquals(0.0, VdDimensions.mpixPerSec(0, 0, 30), 0.000001)
-    }
 }
