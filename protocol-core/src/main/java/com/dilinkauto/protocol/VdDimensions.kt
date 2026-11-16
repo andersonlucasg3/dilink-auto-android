@@ -83,18 +83,6 @@ object VdDimensions {
     }
 
     /**
-     * 满速理论合成吞吐（MPix/s），供 `vd-server` 周期日志的 `mpixPerSec=` 字段使用。
-     *
-     * **口径（重要）**：这是循环外的常量，按目标 fps 算「假如每拍都合成」的理论值，
-     * **不区分静止与活动**。issue #153 分节 PA 的静止短路会让实际合成拍数远低于 fps，
-     * 因此温升归因不能只看这个值，要看同一条日志里 `idleSkip` / `ticks` / `frames`
-     * 的增长率。分母用 VD 尺寸而非 encode 尺寸：面积成本发生在 SurfaceFlinger
-     * 合成那一步，不是 GL quad 缩放重绘那一步。
-     */
-    fun mpixPerSec(width: Int, height: Int, fps: Int): Double =
-        width.toLong() * height * fps / 1_000_000.0
-
-    /**
      * @param phoneRealWidth  real physical pixel width of the phone's default
      *   display (compat-scaling must be bypassed by the caller — see class
      *   KDoc).

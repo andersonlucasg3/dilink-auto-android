@@ -28,9 +28,11 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 internal class CarLogWriter(
     private val tag: String,
-    private val controlConnectionProvider: () -> Connection?
+    /** 单调时钟（毫秒），供积压延迟统计使用；单测可注入假时钟。 */
+    private val nowMs: () -> Long = { android.os.SystemClock.elapsedRealtime() },
+    private val controlConnectionProvider: () -> Connection?,
 ) {
-    private data class LogEntry(val msg: String, val level: String)
+    private data class LogEntry(val msg: String, val level: String, val enqueuedMs: Long)
 
     /** Off-thread log queue: callers do a non-blocking offer; bounded at 1024. */
     private val logQueue = AsyncLogQueue<LogEntry>(1024)
@@ -45,6 +47,9 @@ internal class CarLogWriter(
     private val bufferCount = AtomicInteger(0)
 
     private val tsFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+
+    /** issue #206：回传积压的限流上报（每 5s 最多一行）。 */
+    private val backlogReporter = CarLogBacklogReporter(nowMs)
 
     private companion object {
         /** 离线缓冲上限（行）：车机内存有限，断线期间只留最近的上下文。 */
@@ -95,6 +100,8 @@ internal class CarLogWriter(
             try {
                 logQueue.consume { entry ->
                     try {
+                        // issue #206：先量「产生 → 写出」的延迟，再真正写出。
+                        reportBacklogIfAny(entry)
                         val ts = LocalTime.now().format(tsFormatter)
                         val line = com.dilinkauto.protocol.LogLine.bracketed(ts, entry.level, entry.msg)
                         val conn = controlConnectionProvider()
@@ -146,7 +153,37 @@ internal class CarLogWriter(
             "E" -> Log.e(tag, msg)
             else -> Log.i(tag, msg)
         }
-        logQueue.offer(LogEntry(msg, level))
+        logQueue.offer(LogEntry(msg, level, nowMs()))
+    }
+
+    /**
+     * 回传积压的可见化（issue #206）。
+     *
+     * 延迟用**车机本机的单调时钟**度量（入队时刻 → 出队时刻），不用墙上时钟：
+     * 手机与车机存在约 0.8s 的时钟偏差（实车 `client.log:108` 外层 `16:35:05.418`
+     * 比内嵌 `16:35:06.133` 早 0.7s），跨端直接相减会把偏差算成延迟。
+     *
+     * 告警行**绕开 [logQueue] 直发控制链路**：它本身就是「队列里有积压」的证据，
+     * 再走队列会把自己排到积压后面，等它送达时早已不是当时的现场。
+     * 不因此丢弃任何行 —— teardown / cleanup 关键行照旧全量写出。
+     */
+    private fun reportBacklogIfAny(entry: LogEntry) {
+        val line = backlogReporter.onDrained(
+            delayMs = nowMs() - entry.enqueuedMs,
+            backlog = logQueue.pendingCount + bufferCount.get(),
+        ) ?: return
+        Log.w(tag, line)
+        val conn = controlConnectionProvider() ?: return
+        if (!conn.isConnected) return
+        try {
+            val ts = LocalTime.now().format(tsFormatter)
+            conn.sendData(
+                DataMsg.CAR_LOG,
+                com.dilinkauto.protocol.LogLine.bracketed(ts, "W", line).toByteArray(Charsets.UTF_8),
+            )
+        } catch (_: Exception) {
+            // 诊断行发不出去不影响正常日志路径
+        }
     }
 
     /**

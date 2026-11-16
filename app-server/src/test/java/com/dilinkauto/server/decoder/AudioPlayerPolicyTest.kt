@@ -202,4 +202,54 @@ class AudioPlayerPolicyTest {
         )
         assertTrue(line.startsWith("AudioDiag rx "))
     }
+
+    // ── issue #206：AudioTrack 缓冲换算 ──
+
+    @Test
+    fun `audioTrack buffer stats convert frames to duration and bytes`() {
+        // 实车 client.log:108 的实际分配：12288 帧 @48k/2ch = 256ms / 49152B。
+        // 旧代码把 1024（AAC 每个 PCM 块的样本数）再乘一次，报成 262144ms / 50331648B。
+        val stats = audioTrackBufferStats(frames = 12288, sampleRate = 48000, channelCount = 2)
+        assertEquals(12288, stats.frames)
+        assertEquals(256L, stats.durationMs)
+        assertEquals(49152L, stats.bytes)
+    }
+
+    @Test
+    fun `audioTrack buffer stats apply channel count but not the 1024-sample block`() {
+        // 单声道同帧数：时长不变，字节数减半（再乘 1024 会得到 262144ms / 50331648B）
+        val stats = audioTrackBufferStats(frames = 12288, sampleRate = 48000, channelCount = 1)
+        assertEquals(256L, stats.durationMs)
+        assertEquals(24576L, stats.bytes)
+    }
+
+    @Test
+    fun `audioTrack buffer line is the frozen log contract`() {
+        assertEquals(
+            "AudioTrack buffer: 12288 frames ≈ 256ms " +
+                "(49152B; requested=49152B/12288 frames, min=8224)",
+            audioTrackBufferLine(
+                frames = 12288, sampleRate = 48000, channelCount = 2,
+                requestedBytes = 49152, minBytes = 8224,
+            ),
+        )
+    }
+
+    @Test
+    fun `requested frames use the AudioTrack frame unit not PCM blocks`() {
+        // 实车请求 12 个 PCM 块 = 49152B，换算成 AudioTrack 帧（2ch × 2B）就是 12288 帧，
+        // 与 `bufferSizeInFrames` 同口径。旧实现打 12（49152/4096），是 1024 口径的指纹。
+        val stereo = audioTrackBufferLine(
+            frames = 12288, sampleRate = 48000, channelCount = 2,
+            requestedBytes = 49152, minBytes = 8224,
+        )
+        assertTrue(stereo.contains("(49152B; requested=49152B/12288 frames"))
+
+        // 单声道：49152B = 24576 帧（按 PCM 块算会得到 24，差 1024 倍）。
+        val mono = audioTrackBufferLine(
+            frames = 24576, sampleRate = 48000, channelCount = 1,
+            requestedBytes = 49152, minBytes = 4112,
+        )
+        assertTrue(mono.contains("(49152B; requested=49152B/24576 frames"))
+    }
 }

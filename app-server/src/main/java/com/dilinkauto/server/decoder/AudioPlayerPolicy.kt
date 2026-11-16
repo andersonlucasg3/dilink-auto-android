@@ -81,6 +81,70 @@ internal fun audioRxDiagLine(
     "AudioDiag rx inFrames=$inFrames inZero=$inZero inMin=$inMin inMax=$inMax " +
         "outZero=$outZero outRmsMax=$outRmsMax"
 
+/** 16-bit PCM 每样本字节数（AAC-LC 解码输出，issue #206）。 */
+internal const val AUDIO_BYTES_PER_SAMPLE = 2
+
+/**
+ * `AudioTrack` 实际缓冲容量的换算结果（issue #206）。
+ *
+ * 字段语义：
+ * - [frames]：`AudioTrack.getBufferSizeInFrames()` 原值（**AudioTrack 帧**，每帧 = 每声道 1 个采样）；
+ * - [durationMs]：`frames × 1000 / sampleRate`；
+ * - [bytes]：`frames × channelCount × 2`。
+ */
+internal data class AudioTrackBufferStats(
+    val frames: Int,
+    val durationMs: Long,
+    val bytes: Long,
+)
+
+/**
+ * 把 `AudioTrack.getBufferSizeInFrames()` 换算成时长与字节数（issue #206）。
+ *
+ * `bufferSizeInFrames` 的单位已经是 AudioTrack 帧，**不能**再乘 AAC 的
+ * `PCM_SAMPLES_PER_FRAME`（1024）—— AAC 的 1024 samples 是「一个 PCM 块 = 21.333 ms」，
+ * 与 AudioTrack 的帧是两套单位。实车 `client.log:108` 因此把 12288 帧（256 ms / 49152 B）
+ * 报成 `262144ms (50331648B)`，正好大 1024 倍。
+ */
+internal fun audioTrackBufferStats(
+    frames: Int,
+    sampleRate: Int,
+    channelCount: Int,
+): AudioTrackBufferStats = AudioTrackBufferStats(
+    frames = frames,
+    durationMs = frames.toLong() * 1000L / sampleRate,
+    bytes = frames.toLong() * channelCount * AUDIO_BYTES_PER_SAMPLE,
+)
+
+/**
+ * `buildTrack` 的实际缓冲日志行（issue #206 的冻结契约）：
+ *
+ * ```
+ * AudioTrack buffer: 12288 frames ≈ 256ms (49152B; requested=49152B/12288 frames, min=8224)
+ * ```
+ *
+ * **行内两个 `frames` 必须是同一套单位（AudioTrack 帧）**：实际值取
+ * `AudioTrack.getBufferSizeInFrames()`，请求值由 [requestedBytes] 按
+ * `channelCount × 2B` 换算，而不是拿 `bufferBytes / (1024 × channelCount × 2)`
+ * 得到的「PCM 块数」。后者正是 1024 口径的指纹：实车请求 12 个 PCM 块 = 49152B，
+ * 换算成 AudioTrack 帧就是 12288 帧 —— 与 `bufferSizeInFrames` 同一个数。
+ *
+ * 归因 underrun 时看的是**实际分配值**（ROM 会把请求值向上取整），所以 [frames] 传的是
+ * `AudioTrack` 读回来的帧数，不是 `maxOf(minBufferSize, 12 个 PCM 块)` 的请求值。
+ */
+internal fun audioTrackBufferLine(
+    frames: Int,
+    sampleRate: Int,
+    channelCount: Int,
+    requestedBytes: Int,
+    minBytes: Int,
+): String {
+    val stats = audioTrackBufferStats(frames, sampleRate, channelCount)
+    val requestedFrames = requestedBytes / (channelCount * AUDIO_BYTES_PER_SAMPLE)
+    return "AudioTrack buffer: ${stats.frames} frames ≈ ${stats.durationMs}ms " +
+        "(${stats.bytes}B; requested=${requestedBytes}B/$requestedFrames frames, min=$minBytes)"
+}
+
 /**
  * `AudioTrack` 的低水位（帧，issue #164）。
  *

@@ -1,6 +1,7 @@
 package com.dilinkauto.protocol
 
 import kotlinx.coroutines.channels.Channel
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Shared "non-blocking enqueue → single consumer" skeleton for the log sinks
@@ -23,9 +24,19 @@ class AsyncLogQueue<T : Any>(capacity: Int = Channel.UNLIMITED) {
 
     private val channel = Channel<T>(capacity)
 
+    /**
+     * 队列里还没被 [consume] 取走的条数（issue #206 的 `CarLog backlog=` 用它）。
+     *
+     * `Channel` 不暴露深度，这里只在「成功入队 / 被取走」两处维护一个 O(1) 计数器：
+     * 队满时 `trySend` 会丢最新项，失败不入账，保证计数只反映真正留在队列里的条目。
+     */
+    private val pending = AtomicInteger(0)
+
+    val pendingCount: Int get() = pending.get()
+
     /** Non-blocking enqueue. Drops the item when the queue is at [capacity]. */
     fun offer(item: T) {
-        channel.trySend(item)
+        if (channel.trySend(item).isSuccess) pending.incrementAndGet()
     }
 
     /**
@@ -34,12 +45,15 @@ class AsyncLogQueue<T : Any>(capacity: Int = Channel.UNLIMITED) {
      * calling coroutine is cancelled.
      */
     suspend fun consume(sink: (T) -> Unit) {
-        for (item in channel) sink(item)
+        for (item in channel) {
+            pending.decrementAndGet()
+            sink(item)
+        }
     }
 
     /** Best-effort discard of everything currently queued (used by log rotate). */
     fun clear() {
-        while (channel.tryReceive().isSuccess) { /* drop */ }
+        while (channel.tryReceive().isSuccess) { pending.decrementAndGet() }
     }
 
     /** Close the channel — a running [consume] loop terminates. */
