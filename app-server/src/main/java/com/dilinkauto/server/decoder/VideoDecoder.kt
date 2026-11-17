@@ -276,9 +276,11 @@ class VideoDecoder {
      * 车机端据此经 CONTROL 通道向手机索要一个 IDR（[com.dilinkauto.protocol.ControlMsg.REQUEST_SYNC_FRAME]），
      * 把重同步等待从「下一个自然 GOP 边界（最多 ~1.2s）」缩短到一次往返。
      * 可能从网络线程或喂帧线程触发，实现方必须自行处理线程安全与限流。
+     *
+     * 参数是请求原因，直接透传给 `SyncRequestGate` 的日志，便于 grep 区分冷启动与真实断链。
      */
     @Volatile
-    var onNeedsSyncFrame: (() -> Unit)? = null
+    var onNeedsSyncFrame: ((String) -> Unit)? = null
 
     /**
      * "解码存活且码流持续是黑"时的轻量自愈回调（issue #15）。
@@ -323,13 +325,20 @@ class VideoDecoder {
      *
      * 缺口点分布在网络线程（队列丢弃）与喂帧线程（输入缓冲失败），[resync] 内部互斥。
      *
+     * @param coldStart 冷启动（新 codec 没有可复用参考帧）传 `true`：只等待首个 IDR，
+     *   使用单独的日志措辞，避免回签时被误判成真实断链。
      * @return 本次调用是否真的发出了 IDR 请求（首次缺口）。冷启动依赖这个返回值区分
      *   「我请求了」与「已经在等 IDR」，避免重复占用 `SyncRequestGate` 名额。
      */
-    internal fun noteGap(): Boolean {
+    internal fun noteGap(coldStart: Boolean = false): Boolean {
         if (!resync.onGap()) return false
-        logW("Reference chain broken — waiting for next IDR (${intake.snapshot().dropped} drops, ${inputFailCount} inputFails)")
-        onNeedsSyncFrame?.invoke()
+        val detail = "${intake.snapshot().dropped} drops, $inputFailCount inputFails"
+        if (coldStart) {
+            logW("冷启动：等待首个 IDR（$detail）")
+        } else {
+            logW("Reference chain broken — waiting for next IDR ($detail)")
+        }
+        onNeedsSyncFrame?.invoke(if (coldStart) COLD_START_IDR_REASON else "reference chain broken")
         return true
     }
 
@@ -532,12 +541,12 @@ class VideoDecoder {
                     // `requestSyncAfterRebuild()` 统一请求（#207）：一次重建只占一个名额。
                     if (!reusedCachedKeyFrame) {
                         if (requestIdrOnColdStart) {
-                            if (noteGap()) {
-                                log("requesting IDR (reason=cold start without a usable reference frame)")
+                            if (noteGap(coldStart = true)) {
+                                log("requesting IDR (reason=$COLD_START_IDR_REASON)")
                             }
                         } else {
                             resync.onGap()
-                            logW("Cold start without a usable reference frame — waiting for rebuild IDR request")
+                            logW("冷启动：等待重建请求的 IDR（$COLD_START_IDR_REASON）")
                         }
                     }
 
@@ -846,8 +855,7 @@ class VideoDecoder {
             // 被新码流边界作废的缓存 IDR 从此再也不会喂入，必须记丢（issue #205）。
             if (cachedKeyFrameStore.clear()) intake.onDropped(isKey = true)
         }
-        // When stopped, cache the most recent IDR so start() can decide whether it is
-        // usable as a reference frame. P-frames are dropped (no codec to decode them).
+        // 停播期间缓存最近的 IDR，供 start() 判断能否作为参考帧；P 帧没有解码器可解，直接丢弃。
         if (!running.get() && !isConfig) {
             if (isKey) {
                 // 旧缓存被新 IDR 覆盖：它既不会被喂也不会再被解，记丢并留一行痕迹（issue #205）。
@@ -1052,7 +1060,7 @@ class VideoDecoder {
     internal fun requestSyncAfterRebuild(rebuilt: Boolean, reason: String) {
         if (!rebuilt) return
         log("requesting IDR (reason=$reason)")
-        onNeedsSyncFrame?.invoke()
+        onNeedsSyncFrame?.invoke(reason)
     }
 
     /**
@@ -1093,6 +1101,14 @@ class VideoDecoder {
 
 companion object {
         private const val TAG = "VideoDecoder"
+
+        /**
+         * 冷启动 IDR 请求原因（issue #216）。
+         *
+         * 解码器的 `requesting IDR (reason=...)` 与协调器的 `Requesting IDR from phone (...)` 共用
+         * 这一个字符串，回签时可直接 grep，不会和真实断链的 `reference chain broken` 混淆。
+         */
+        internal const val COLD_START_IDR_REASON = "cold start without a usable reference frame"
 
         /**
          * 解码输入队列容量（issue #163）。

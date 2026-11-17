@@ -140,15 +140,56 @@ class CachedKeyFrameGenerationTest {
         assertTrue("找不到冷启动分支", coldStart >= 0)
 
         val guarded = src.indexOf("if (requestIdrOnColdStart) {", coldStart)
-        val noteGap = src.indexOf("noteGap()", guarded)
+        val noteGap = src.indexOf("noteGap(coldStart = true)", guarded)
         assertTrue(
-            "冷启动默认路径必须调用 noteGap() 主动请求一次 IDR，实际 coldStart=$coldStart guarded=$guarded noteGap=$noteGap",
+            "冷启动默认路径必须调用 noteGap(coldStart = true) 主动请求一次 IDR，实际 coldStart=$coldStart guarded=$guarded noteGap=$noteGap",
             guarded in (coldStart + 1)..(coldStart + 400) && noteGap in (guarded + 1)..(guarded + 300),
         )
         assertTrue(
-            "请求必须留下可 grep 的 reason",
-            src.contains("requesting IDR (reason=cold start without a usable reference frame)"),
+            "冷启动请求原因必须是统一字符串，便于与真实断链区分",
+            src.contains("requesting IDR (reason=\$COLD_START_IDR_REASON)"),
         )
+        assertTrue(
+            "冷启动 reason 常量值必须与 PR 说明一致",
+            src.contains("""internal const val COLD_START_IDR_REASON = "cold start without a usable reference frame""""),
+        )
+    }
+
+    @Test
+    fun `冷启动与真实断链使用不同的等待日志与请求原因`() {
+        val coldLogs = mutableListOf<String>()
+        var coldReason: String? = null
+        val cold = VideoDecoder().apply {
+            logSink = { coldLogs += it }
+            onNeedsSyncFrame = { coldReason = it }
+        }
+        assertTrue(cold.noteGap(coldStart = true))
+        assertTrue(
+            "冷启动必须单独一句措辞，实际：$coldLogs",
+            coldLogs.any { it.contains("冷启动") && it.contains("首个 IDR") },
+        )
+        assertFalse(
+            "冷启动不得打真实断链日志，否则回签会误判：$coldLogs",
+            coldLogs.any { it.contains("Reference chain broken") },
+        )
+        assertEquals(
+            "冷启动请求原因必须统一",
+            "cold start without a usable reference frame",
+            coldReason,
+        )
+
+        val gapLogs = mutableListOf<String>()
+        var gapReason: String? = null
+        val gap = VideoDecoder().apply {
+            logSink = { gapLogs += it }
+            onNeedsSyncFrame = { gapReason = it }
+        }
+        assertTrue(gap.noteGap())
+        assertTrue(
+            "真实断链必须保留原日志，实际：$gapLogs",
+            gapLogs.any { it.contains("Reference chain broken") },
+        )
+        assertEquals("real gap 的请求原因必须保持原样", "reference chain broken", gapReason)
     }
 
     @Test
@@ -175,7 +216,7 @@ class CachedKeyFrameGenerationTest {
         var requests = 0
         val d = VideoDecoder().apply {
             logSink = {}
-            onNeedsSyncFrame = { requests++ }
+            onNeedsSyncFrame = { _ -> requests++ }
         }
 
         assertTrue("首次缺口必须真的发出请求", d.noteGap())

@@ -237,8 +237,8 @@ class CarConnectionService : Service() {
         // issue #9 / #75 / #163 / #198：两端共用 protocol-core 的 SyncRequestGate（滑动窗口：
         // 1s 内最多 2 次）。IDR 请求统一走 sessionCoordinator.requestSyncFrame —— 参考链断裂
         // 与「Surface 重绑失败后重建解码器」共用同一闸门，任何一方都不能绕过限流。
-        videoDecoder.onNeedsSyncFrame = {
-            sessionCoordinator.requestSyncFrame("reference chain broken")
+        videoDecoder.onNeedsSyncFrame = { reason ->
+            sessionCoordinator.requestSyncFrame(reason)
         }
 
         // issue #200：首帧真正上屏后就绪判定必须能被触发一次。喂帧线程只在持有 codecLock

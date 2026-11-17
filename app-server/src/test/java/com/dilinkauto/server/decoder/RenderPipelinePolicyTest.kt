@@ -250,7 +250,7 @@ class RenderPipelinePolicyTest {
         assertTrue(
             "重建成功后必须在唯一重建入口里请求 IDR",
             decoder.contains("requestSyncAfterRebuild(rebuilt = running.get(), reason = reason)") &&
-                decoder.contains("onNeedsSyncFrame?.invoke()"),
+                decoder.contains("onNeedsSyncFrame?.invoke(reason)"),
         )
         assertTrue(
             "重建分支必须走唯一的 recreateDecoder()",
