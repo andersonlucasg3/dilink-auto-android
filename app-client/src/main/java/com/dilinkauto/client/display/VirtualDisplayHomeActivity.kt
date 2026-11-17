@@ -9,7 +9,7 @@ import android.os.Bundle
  * When launched with FLAG_ACTIVITY_CLEAR_TASK, it clears all other activities
  * on the virtual display's task stack, returning the VD to a blank state.
  *
- * The car server navigates to its own LauncherScreen when this is visible
+ * The car server navigates to its own home screen when this is visible
  * (the car receives a black video stream).
  */
 class VirtualDisplayHomeActivity : Activity() {

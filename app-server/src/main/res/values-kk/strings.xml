@@ -23,7 +23,6 @@
     <string name="nav_home">Басты бет</string>
 
     <!-- Айна -->
-    <string name="status_updating">Автокөлік қолданбасы жаңартылуда…</string>
     <string name="status_please_wait">Күте тұрыңыз</string>
 
     <!-- Бағдар -->
@@ -33,11 +32,11 @@
     <string name="how_to_connect_title">Қалай қосылуға болады</string>
 
     <!-- Connection Mode (WiFi ADB / USB ADB) -->
-    <string name="dev_mode_title">Тікелей Wi-Fi режимі</string>
+    <string name="dev_mode_title">WiFi ADB режимі</string>
     <string name="dev_mode_desc_on">WiFi ADB (автокөлік телефонға Wi-Fi арқылы қосылады — USB кабелі қажет емес)</string>
     <string name="dev_mode_desc_off">USB ADB (автокөлік телефонға USB кабелі арқылы қосылады)</string>
     <string name="wifi_adb_setup_title">WiFi ADB баптау</string>
-    <string name="wifi_adb_setup_desc">Тікелей Wi-Fi режимін пайдалану үшін алдымен телефонда ADB Wi-Fi арқылы қосу керек. Телефонды компьютерге USB арқылы қосып, келесіні орындаңыз:\n\nadb tcpip 5555\n\nМұны тек бір рет жасау керек. Осыдан кейін автокөлік телефонға Wi-Fi арқылы USB кабелінсіз қосыла алады.</string>
+    <string name="wifi_adb_setup_desc">Алдымен телефонда сымсыз ADB-ні баптаңыз — telefon-дағы DiLink Auto қолданбасын қараңыз.</string>
 
     <!-- Manual Connect -->
     <string name="manual_connect_label">Немесе IP арқылы қолмен қосылыңыз</string>
@@ -74,7 +73,7 @@
     <!-- Notifications -->
     <string name="no_notifications">Хабарландырулар жоқ</string>
     <string name="notifications_count">Хабарландырулар (%d)</string>
-    <string name="clear_all">Барлығын Тазалау</string>
+    <string name="clear_all">Барлығын тазалау</string>
     <string name="clear_notification">Хабарландыруды тазалау</string>
 
     <!-- Connection Status Messages -->
@@ -86,12 +85,11 @@
     <string name="status_connecting_usb">USB қосылуда… Телефондағы авторизация диалогын тексеріңіз</string>
     <string name="status_usb_failed">USB қосылымы сәтсіз — телефондағы авторизация диалогын тексеріңіз</string>
     <string name="status_usb_connected">USB қосылды</string>
-    <string name="status_updating_car">Автокөлік қолданбасы жаңартылуда…</string>
     <string name="status_preparing_vd">Виртуалды дисплей дайындалуда…</string>
     <string name="status_starting_vd">Виртуалды дисплей іске қосылуда…</string>
     <string name="status_vd_failed">VD сервері сәтсіз аяқталды</string>
     <string name="status_waiting_video">Бейне ағынын күту…</string>
-    <string name="status_updating_please_wait">Автокөлік қолданбасы жаңартылуда… Күте тұрыңыз</string>
     <string name="action_uninstall">Жою</string>
     <string name="action_app_info">Қолданба туралы ақпарат</string>
+    <string name="home_allowlist_empty">No apps allowed. Open the phone app and select apps in Settings > Car app allowlist.</string>
 </resources>

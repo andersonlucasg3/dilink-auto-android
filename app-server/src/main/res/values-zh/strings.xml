@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DiLink Auto</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">DiLink Auto 车机服务</string>
+    <string name="notification_title">DiLink Auto</string>
+    <string name="notification_searching">正在搜索手机…</string>
+    <string name="notification_connected">已连接到手机</string>
+
+    <!-- Launcher -->
+    <string name="search_hint">搜索应用…</string>
+    <string name="not_connected">未连接</string>
+    <string name="plug_phone_usb">请将手机插入车机 USB 接口</string>
+    <string name="phone_ip_label">手机 IP 地址</string>
+    <string name="connect_button">连接</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_launcher">启动台</string>
+    <string name="nav_recent">最近任务</string>
+    <string name="nav_notifications">通知中心</string>
+    <string name="nav_back">返回</string>
+    <string name="nav_home">主页</string>
+
+    <!-- Mirror -->
+    <string name="status_please_wait">请稍候</string>
+
+    <!-- Orientation note -->
+    <string name="landscape_app_note">应用控制自身的显示方向。仅支持竖屏的应用可能会显示黑边。</string>
+
+    <!-- How to Connect -->
+    <string name="how_to_connect_title">连接步骤</string>
+
+    <!-- Connection Mode (WiFi ADB / USB ADB) -->
+    <string name="dev_mode_title">Wi-Fi ADB 模式</string>
+    <string name="dev_mode_desc_on">Wi-Fi ADB（车机通过 Wi-Fi 连接手机 — 无需 USB 数据线）</string>
+    <string name="dev_mode_desc_off">USB ADB（车机通过 USB 数据线连接手机）</string>
+    <string name="wifi_adb_setup_title">Wi-Fi ADB 设置指南</string>
+    <string name="wifi_adb_setup_desc">使用 Wi-Fi ADB 模式前，请先在手机上开启网络 ADB。详见 DiLink Auto 手机端应用。</string>
+
+    <!-- Audio mirroring (issue #72, Refs #13) -->
+    <string name="audio_mirror_title">音频镜像</string>
+    <string name="audio_mirror_desc_on">镜像期间手机自身静音，声音从车机播放</string>
+    <string name="audio_mirror_desc_off">音频不发送到车机</string>
+    <string name="audio_mirror_unsupported">手机系统不支持音频镜像（需 Android 11 及以上）</string>
+
+    <!-- Startup DPI Override -->
+    <string name="startup_dpi_title">启动 DPI</string>
+    <string name="startup_dpi_desc">0 = 自动校准（适用于大多数车机）</string>
+    <string name="startup_dpi_hint">DPI 越高 UI 越大。范围 120–480。竖屏应用可能被挤压。</string>
+    <string name="dpi_hint_static">超过 120–480 或本视口上限的输入会按自动标定值生效</string>
+    <string name="dpi_hint_basis">（以上次会话视口为准）</string>
+    <string name="dpi_hint_auto">上次会话实际生效 %1$d dpi；视口上限 %2$d dpi %3$s</string>
+    <string name="dpi_hint_in_range">上次会话实际生效 %1$d dpi；视口上限 %2$d dpi，设置 %3$d dpi 会原样生效 %4$s</string>
+    <string name="dpi_hint_over_cap">上次会话实际生效 %1$d dpi；视口上限 %2$d dpi，设置 %3$d dpi 超出，将按自动标定值使用 %4$s</string>
+    <string name="dpi_hint_invalid">上次会话实际生效 %1$d dpi；视口上限 %2$d dpi，设置 %3$d dpi 非法，将按自动标定值使用 %4$s</string>
+
+    <!-- Video Bitrate Settings -->
+    <string name="video_bitrate_title">视频码率</string>
+    <string name="video_bitrate_desc">降低码率可减轻 Wi-Fi 传输与车机解码压力</string>
+    <string name="video_bitrate_hint">骁龙 439 等弱车机芯片建议 2.5–4 Mbps</string>
+
+    <!-- Video FPS Settings -->
+    <string name="video_fps_title">目标帧率</string>
+    <string name="video_fps_desc">发送给解码器的帧率。降低帧率可减少 CPU/GPU 负载</string>
+    <string name="video_fps_hint">24 FPS 相比 30 FPS 可节省约 20% 的 CPU/GPU 与 Wi-Fi 负载</string>
+    <string name="video_fps_hint_measured">当前实测 %1$s fps（目标 %2$d fps）。30/60 档仍待实车验证，请以这个实测值为准</string>
+
+    <!-- VD 合成面积档位（issue #153 PB） -->
+    <string name="vd_area_tier_title">VD 合成面积档位</string>
+    <string name="vd_area_tier_desc_off">默认档：按车机宽 1.6 倍封顶（最小 1600），合成面积约省 44%。下次连接生效</string>
+    <string name="vd_area_tier_desc_on">键盘兼容档：保留 2560 上限，输入法最完整、合成面积最大。下次连接生效</string>
+
+    <!-- Setting Presets -->
+    <string name="preset_auto">自动</string>
+    <string name="preset_dpi_160">160（标配）</string>
+    <string name="preset_bitrate_2m">2M（极速）</string>
+    <string name="preset_bitrate_2_5m">2.5M（推荐 439）</string>
+    <string name="preset_bitrate_3m">3M（均衡）</string>
+    <string name="preset_bitrate_4m">4M（默认）</string>
+    <string name="preset_bitrate_6m">6M（高清）</string>
+    <string name="preset_fps_20">20 FPS（超节能）</string>
+    <string name="preset_fps_24">24 FPS（推荐 439）</string>
+    <string name="preset_fps_30">30 FPS（流畅）</string>
+    <string name="preset_fps_60">60 FPS（高刷）</string>
+    <string name="fps_value">%1$d FPS</string>
+    <string name="manual_custom_hint">自定义</string>
+
+    <!-- Manual Connect -->
+    <string name="manual_connect_label">或通过 IP 手动连接</string>
+    <string name="manual_connect_ip_label">手机 IP 地址</string>
+    <string name="manual_connect_button">连接</string>
+
+    <!-- Branding -->
+    <string name="branding_title">DiLink Auto</string>
+    <string name="branding_tagline">在汽车中控屏上畅享手机应用</string>
+
+    <!-- Connection Status -->
+    <string name="status_ready_to_connect">就绪，等待连接</string>
+    <!-- issue #201：用户主动断开是持久化状态，重启 App 也不会自动连，必须明确提示。 -->
+    <string name="status_disconnected_by_user">已按上次操作断开，点「重新连接」才会连上</string>
+    <string name="reconnect_button">重新连接</string>
+    <string name="reconnect_button_after_disconnect">立即重新连接</string>
+    <string name="status_connecting">正在连接…</string>
+    <string name="status_connected">已连接</string>
+    <string name="status_streaming">正在投屏</string>
+
+    <!-- How to Connect Steps -->
+    <string name="how_to_step_1">开启手机 Wi-Fi 个人热点</string>
+    <string name="how_to_step_2">将手机插入车机的 USB 数据接口</string>
+    <string name="how_to_step_3">在手机上打开 DiLink Auto 应用</string>
+    <string name="how_to_step_4">等待车机自动完成连接</string>
+
+    <!-- Nav Bar -->
+    <string name="nav_eject">断开连接</string>
+    <string name="nav_alerts">提醒</string>
+
+    <!-- Network -->
+    <string name="network_connected">已连接</string>
+    <string name="network_offline">离线</string>
+
+    <!-- Recent Apps -->
+    <string name="recent_app_fallback">应用</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">暂无通知</string>
+    <string name="notifications_count">通知 (%d)</string>
+    <string name="clear_all">全部清除</string>
+    <string name="clear_notification">清除通知</string>
+
+    <!-- Connection Status Messages -->
+    <string name="status_deploying_vd">正在部署虚拟显示器…</string>
+    <string name="status_waiting_usb">等待 USB 连接…</string>
+    <string name="status_waiting_wifi">等待 Wi-Fi 连接…</string>
+    <string name="status_tcp_adb_failed">TCP ADB 连接失败</string>
+    <string name="status_tcp_adb_connected">TCP ADB 已连接</string>
+    <string name="status_connecting_tcp_adb">正在通过 TCP ADB 连接至 %s…</string>
+    <string name="status_connecting_usb">正在建立 USB 连接… 请在手机上确认授权弹窗</string>
+    <string name="status_usb_failed">USB 连接失败 — 请检查手机上的授权弹窗</string>
+    <string name="status_usb_connected">USB 已连接</string>
+    <string name="status_preparing_vd">正在准备虚拟显示器…</string>
+    <string name="status_starting_vd">正在启动虚拟显示器…</string>
+    <string name="status_vd_failed">虚拟显示器服务启动失败</string>
+    <string name="status_waiting_video">正在等待视频流…</string>
+    <string name="status_no_adb">请将手机连接至车机 USB 接口</string>
+    <string name="status_no_phone_ip">无法获取手机 IP 地址</string>
+
+    <!-- App Context Actions -->
+    <string name="action_uninstall">卸载</string>
+    <string name="action_app_info">应用信息</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_ok">确定</string>
+
+    <!-- App Info dialog -->
+    <string name="app_info_package">包名</string>
+    <string name="app_info_version">版本</string>
+    <string name="app_info_version_code">版本号</string>
+    <string name="app_info_target_sdk">目标 SDK</string>
+    <string name="app_info_installed">安装时间</string>
+
+    <!-- Destructive action confirmation -->
+    <string name="action_uninstall_confirm_title">卸载 %1$s？</string>
+    <string name="action_uninstall_confirm_body">该应用将从你的手机上卸载，此操作无法撤销。</string>
+
+    <!-- Now playing transport -->
+    <string name="now_playing_previous">上一首</string>
+    <string name="now_playing_play">播放</string>
+    <string name="now_playing_pause">暂停</string>
+    <string name="now_playing_next">下一首</string>
+
+    <!-- Home screen copy -->
+    <string name="search_apps">搜索应用</string>
+    <string name="clear_search">清除搜索</string>
+    <string name="no_apps_match">没有匹配“%1$s”的应用</string>
+    <string name="pin_to_top">置顶</string>
+    <string name="unpin_from_top">取消置顶</string>
+    <string name="app_manage_hint">长按应用可置顶、卸载或查看应用信息</string>
+    <string name="searching_for_phone">正在搜索手机</string>
+    <string name="phone_hint">请确保手机上正在运行 DiLink Auto\n且两台设备连接到同一网络</string>
+    <string name="connecting">连接中</string>
+    <string name="connected_waiting_for_data">已连接 — 等待数据</string>
+    <string name="home_allowlist_empty">未选择任何应用。请在手机端打开 应用设置 &gt; 车机应用白名单 中选择。</string>
+</resources>

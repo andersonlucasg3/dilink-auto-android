@@ -1,0 +1,412 @@
+#!/bin/bash
+# DiLink-Auto 双手机 E2E — mock adb（无设备离线回放层③）
+#
+# 用途：PATH=<本目录>:$PATH bash scripts/e2e-dual-device.sh --phone mockA --car mockB --scenario S01
+# 让主编走一遍完整编排流（安装/preflight/解锁/中立态/场景四函数/冻结/汇总/退出码），
+# 验证的是**编排逻辑**，不是产品行为。
+#
+# 状态机（$MOCK_ADB_STATE，默认 debug-logs/e2e/mock-state）：
+#   client_up / server_up：monkey 拉起置 1，am force-stop 清 0
+#   unlocked：input text（PIN）置 1 → dumpsys window 报 isKeyguardShowing=false
+#   session：op_connect 的「input text」之后第 2 次 input tap（Connect 钮）置 1
+#   disconnected：Eject/删哨兵置 1，Connect/force-stop 清 0——client 活着但会话已结束
+#   client_killed：会话中 client 被杀（force-stop/install -r）置 1，monkey 拉起清 0
+#   touches：会话中镜像区 tap 计数（无标签控件命中）——clientlog 动态追加
+#            「Touch #N」中继行，模拟 A 端 CarTouchSender → B 的中继（S02 判据）
+#   → 9637/9638/9639/19647 全部在位、pgrep 出引擎 pid、client.log 切 streaming 版、
+#     screen_off_timeout=2147483647、vdlog 帧计数随读取次数增长；
+#     disconnected=1 时 client.log 切 ejected 版（真机形态：Car disconnected (control)）
+#
+# fixture 目录 $MOCK_ADB_FIXTURE（默认 scripts/lib/mock-adb/fixtures），由
+# make-fixtures.py 生成；真机 golden 抄录后替换可提高保真度。
+#
+# 边界（.plan/e2e-harness-design.md §2.6）：mock 不过 ≈ 真机不过；真机不过可用 mock
+# 复现编排 bug。mock 与真机输出格式差（\r\n/编码）本身是假阳性来源。
+
+set -uo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
+FIX="${MOCK_ADB_FIXTURE:-$HERE/fixtures}"
+ST="${MOCK_ADB_STATE:-$ROOT/debug-logs/e2e/mock-state}"
+PHONE="${MOCK_PHONE_SERIAL:-mockA}"
+CAR="${MOCK_CAR_SERIAL:-mockB}"
+mkdir -p "$ST"
+
+flag()    { [ -s "$ST/$1" ] && cat "$ST/$1" 2>/dev/null || echo 0; }
+setflag() { echo "${2:-1}" > "$ST/$1"; }
+is_phone_tcp() { case "$1" in *:5555) return 0 ;; *) return 1 ;; esac; }
+
+# ── shell 命令分发 ──────────────────────────────────────────────────────
+exec_shell() {
+  local cmd="$*" w p n
+  case "$cmd" in
+    "getprop ro.product.model")
+      { [ "$SERIAL" = "$PHONE" ] || is_phone_tcp "$SERIAL"; } && echo "MI 9" || echo "MEIZU 20 Inf" ;;
+    "getprop ro.build.version.release")
+      { [ "$SERIAL" = "$PHONE" ] || is_phone_tcp "$SERIAL"; } && echo "10" || echo "15" ;;
+    "getprop ro.serialno")
+      if is_phone_tcp "$SERIAL"; then echo "$PHONE"; else echo "$SERIAL"; fi ;;
+    "getprop ro.product.name") echo "mock" ;;
+    ip\ -4\ addr\ show\ wlan0*)
+      # 调用方两种用法：裸看（打印整行，inspect 用）或管道 sed 抽 IP（只打印 IP）
+      if [ "$SERIAL" = "$PHONE" ] || is_phone_tcp "$SERIAL"; then _ip=192.168.3.12; else _ip=192.168.3.20; fi
+      case "$cmd" in
+        *sed*) echo "$_ip" ;;
+        *) echo "    inet $_ip/24 brd 192.168.3.255 scope global wlan0" ;;
+      esac ;;
+    ip\ -4\ route\ show\ table\ all*)
+      # devices.sh active_wifi_iface 优先读默认路由（issue #104 后不再写死网卡名）。
+      # mock 固定走 wlan0；缺这条分支会让 preflight 拿不到活动 WiFi IP，
+      # 整个层③回放在 3/9 就 abort，S01 的 op_connect 路径根本跑不到。
+      echo "default via 192.168.3.1 dev wlan0 proto static" ;;
+    ip\ -4\ addr\ show*)
+      # active_wifi_iface 的 fallback（无默认路由时枚举 wlan*）；放在 wlan0 分支之后，
+      # 精确匹配优先，不影响上面的 per-iface 查询。
+      if [ "$SERIAL" = "$PHONE" ] || is_phone_tcp "$SERIAL"; then _ip=192.168.3.12; else _ip=192.168.3.20; fi
+      echo "3: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500"
+      echo "    inet $_ip/24 brd 192.168.3.255 scope global wlan0" ;;
+    "wm size")
+      if [ "$(flag session)" = "1" ]; then echo "Physical size: 1080x1920"; else echo "Physical size: 1080x2340"; fi ;;
+    wm\ size\ -d*)
+      # assert_vd_size_eq 的观测对象：VD 的 Physical size = 握手下发值（fixture 固定）
+      echo "Physical size: 1080x1920" ;;
+    settings\ get\ system\ screen_off_timeout)
+      [ "$(flag session)" = "1" ] && echo 2147483647 || echo 300000 ;;
+    settings\ get\ system\ user_rotation) echo "${BASELINE_USER_ROTATION:-0}" ;;
+    settings\ get\ global\ airplane_mode_on) echo 0 ;;
+    settings\ get\ secure\ default_input_method) echo "com.android.inputmethod.latin/.LatinIME" ;;
+    settings\ put*) exit 0 ;;
+    # 注意：模式写作 pgrep*"[P]..."——**不要**写 pgrep\ -f\ "..."：本机 bash 5.2
+    # (msys) 里 `\ ` 转义空格后接双引号段的组合匹配行为异常（2026-10-16 实测：
+    # pgrep\ -f\ "*client"* 对 pgrep -f "[c]om...client" NOMATCH），且 \[ 写在
+    # 双引号内不转义（模式含字面反斜杠）。通配符 + 引号段最稳。
+    pgrep*"[P]ipelineServer"*)
+      [ "$(flag session)" = "1" ] && echo 4242 || true ;;
+    pgrep*"[c]om.dilinkauto.client"*)
+      [ "$(flag client_up)" = "1" ] && echo 4243 || true ;;
+    pgrep*"[c]om.dilinkauto.server"*)
+      [ "$(flag server_up)" = "1" ] && echo 4244 || true ;;
+    if\ ss\ -ltn*|if\ ss\ -tn*)
+      # listening_on / port_established 的探测串：从串里抠端口号再按状态回答。
+      # 端口词形如 ":9637"（带引号）或 ":9637;"——先把引号/分号剥掉再匹配。
+      p=""
+      for w in $cmd; do
+        w=${w//\"/}; w=${w//;/}
+        case "$w" in :[0-9][0-9][0-9][0-9]) p="${w#:}" ;; esac
+      done
+      mock_port_answer "$p" ;;
+    ss\ -ltnp*)
+      # op_neutral / S21 asserts 查 9637 属主。mock 不建模 ss -ltnp 进程列表，
+      # 但要区分 9637 谁在 LISTEN：occupied=1 → nc 占（holder 含 nc）；否则 client 持守。
+      # 抠端口；:9637 且 occupied → 回一行 "0 102 nc 9637"（含 nc，匹配 s21 case *nc*）；
+      # :9637 且 client_up → 回一行 "0 102 com.dilinkauto.client 9637"（无 nc，走产品持守）。
+      p=""
+      for w in $cmd; do
+        w=${w//\"/}; w=${w//;/}
+        case "$w" in :[0-9][0-9][0-9][0-9]) p="${w#:}" ;; esac
+      done
+      [ "$p" = "9637" ] || exit 0
+      if [ "$(flag occupied)" = "1" ]; then
+        echo "0 102 nc 0 0 *:9637 (*:*) users:((\"nc\",pid=99,fd=3))"
+      elif [ "$(flag client_up)" = "1" ]; then
+        echo "0 102 com.dilinkauto.client 0 0 *:9637 (*:*) users:((\"com.dilinkauto.client\",pid=4243,fd=5))"
+      fi
+      exit 0 ;;
+    ss\ -ltn*|ss\ -tn*) mock_port_answer "" ;;
+    grep\ -E*|grep\ :\*) mock_port_answer "" ;;   # /proc/net/tcp 兜底探测（grep -E ":NNNN ..."）
+    grep\ :\*) mock_port_answer "" ;;
+    tail\ -c*\ /sdcard/DiLinkAuto/client.log|cat\ /sdcard/DiLinkAuto/client.log*)
+      mock_clientlog ;;
+    cat\ /sdcard/DiLinkAuto/vd-server.log*|tail\ -c*\ /sdcard/DiLinkAuto/vd-server.log*)
+      mock_vdlog ;;
+    logcat\ -d)
+      # S21（issue #31）：occupied + server_up + 未建流 → A 端连接尝试失败证据
+      # （WiFi track: trying / Failed to connect ADB to / WiFi connect failed:）。
+      # 仅 car 侧（dcar）产出；phone 侧仍走 logcat-phone.log（无 S21 失败串）。
+      if [ "$(flag occupied)" = "1" ] && [ "$(flag server_up)" = "1" ] && [ "$(flag session)" != "1" ] \
+         && { [ "$SERIAL" != "$PHONE" ] && ! is_phone_tcp "$SERIAL"; }; then
+        cat "$FIX/logcat-car-s21-fail.log"
+      else
+        { [ "$SERIAL" = "$PHONE" ] || is_phone_tcp "$SERIAL"; } && cat "$FIX/logcat-phone.log" || cat "$FIX/logcat-car.log"
+      fi ;;
+    logcat\ -c) exit 0 ;;
+    rm\ -f\ /sdcard/*)
+      case "$cmd" in
+        *stop-request*|*vd-server.log*) rm -f "$ST/session"; setflag disconnected ;;   # 删哨兵/引擎日志 = 会话终结信号
+        *e2e-occupy.pid*) rm -f "$ST/occupied" "$ST/reconnect_tick" ;;   # op_neutral 清占位 pid → 释放 9637（S21 收尾）
+      esac
+      exit 0 ;;
+    ls\ /sdcard/DiLinkAuto/stop-request*)
+      [ "$(flag session)" = "1" ] && echo "/sdcard/DiLinkAuto/stop-request" || true ;;
+    am\ force-stop*)
+      case "$cmd" in
+        *com.dilinkauto.client*)
+          # 会话中被杀 → car 侧控制口 EOF 打 handleDisconnect（client_killed 态）。
+          # 注意：op_neutral 会 force-stop B 的 client（ops.sh:100）——若仍 occupied 且
+          # 失败证据已就绪（tick≥4），视作 S21 收尾，释放 occupied/nc 占位（9637 归空）。
+          if [ "$(flag session)" = "1" ] || [ "$(flag disconnected)" = "1" ]; then setflag client_killed; fi
+          if [ "$(flag occupied)" = "1" ] && [ "$(flag reconnect_tick)" -ge 4 ]; then
+            rm -f "$ST/occupied" "$ST/reconnect_tick"
+          fi
+          rm -f "$ST/client_up" "$ST/session" "$ST/disconnected" "$ST/touches" ;;
+        *com.dilinkauto.server*)
+          # op_reconnect force-stop A 的 server（ops.sh:262）——occupied=1 时不清 occupied
+          # （occupy 与 server 死活正交；nc 仍在 LISTEN）；S21 reconnect 流程靠此推进 tick
+          rm -f "$ST/server_up" "$ST/session" "$ST/disconnected" ;;
+      esac
+      exit 0 ;;
+    monkey\ -p\ com.dilinkauto.client*) setflag client_up; rm -f "$ST/client_killed"; exit 0 ;;
+    monkey\ -p\ com.dilinkauto.server*)
+      # op_reconnect 的 monkey 拉起 A 的 server（ops.sh:264）。S21（occupied=1）时递增
+      # reconnect_tick 推进 mock 时间线（issue #31）——每 tick ≈ 1 次 car_state_now 采样
+      # （sleep 2）。tick 0-2：client_up=0（B client 仍死）→ car 走进程缺失→UNKNOWN；
+      # tick 3：模拟 A 的 adb 轨 am start 拉起 B → client_up=1；tick ≥4：失败证据就绪。
+      if [ "$(flag occupied)" = "1" ]; then
+        local t; t=$(( $(flag reconnect_tick) + 1 )); setflag reconnect_tick "$t"
+        [ "$t" -ge 3 ] && setflag client_up   # A 的 TCP ADB 轨 am start 重启 B 的 client
+      fi
+      setflag server_up; exit 0 ;;
+    input\ text*)
+      # PIN/IP 输入：置 unlocked（dumpsys window 报 isKeyguardShowing=false）并
+      # 重置 tap 计数——「自上次 text 以来第 2 次 tap」= op_connect 的 Connect 钮。
+      setflag unlocked; rm -f "$ST/taps"; exit 0 ;;
+    input\ tap*)
+      mock_tap "$@" ;;
+    input\ keyevent*|input\ touchscreen*|input\ swipe*) exit 0 ;;
+    uiautomator\ dump*)
+      # dump 成功后 cat 的调用方拿到 hierarchy；只 dump 的调用方忽略 stdout
+      cat "$FIX/ui-hierarchy.xml"; echo ;;
+    cat\ /sdcard/ui_*.xml|cat\ /sdcard/*.xml) cat "$FIX/ui-hierarchy.xml"; echo ;;
+    dumpsys\ power*) echo "mWakefulness=Awake" ;;
+    dumpsys\ deviceidle*) echo "mState=ACTIVE" ;;
+    dumpsys\ window*)
+      # 调用方三种管道用法都要按设备侧语义应答（管道在设备上执行，mock 必须自己过滤）：
+      #   | grep -oE 'isKeyguardShowing=(true|false)'  → 只打印该 token
+      #   | grep -c 'isKeyguardShowing=false'          → 打印 0/1
+      #   | grep -E 'isKeyguardShowing|mCurrentFocus'  → 打印两行
+      local kg focus
+      if [ "$(flag unlocked)" = "1" ]; then
+        kg="isKeyguardShowing=false"; focus="mCurrentFocus=Window{1234 u0 com.dilinkauto.mock/.MainActivity}"
+      else
+        kg="isKeyguardShowing=true";  focus="mCurrentFocus=Window{1234 u0 StatusBar}"
+      fi
+      case "$cmd" in
+        *grep\ -c*) [ "$kg" = "isKeyguardShowing=false" ] && echo 1 || echo 0 ;;
+        *isKeyguardShowing=*) echo "$kg" ;;
+        *) echo "  $focus"; echo "  $kg" ;;
+      esac ;;
+    dumpsys\ display*)
+      if [ "$(flag session)" = "1" ]; then
+        echo "  DiLinkAutoVD"
+        echo "    Display: mDisplayId=3"
+        echo "    real 1080x1920"
+      else
+        echo "(no DiLinkAutoVD)"
+      fi ;;
+    dumpsys\ SurfaceFlinger*)
+      # vd_phys_display_id 的观测对象：会话中给出 Virtual Display 段（SF DisplayId 大数
+      # + name="DiLinkAutoVD"），否则无段（函数返回空 → 辅判据跳过）。
+      if [ "$(flag session)" = "1" ]; then
+        echo "Virtual Display 11529215049289396546"
+        echo '    name="DiLinkAutoVD"'
+        echo "    powerMode=On"
+      else
+        echo "(no virtual displays)"
+      fi ;;
+    pm\ path*)
+      case "$cmd" in
+        *com.dilinkauto.client*) [ "$(flag client_installed)" = "1" ] && echo "package:/data/app/com.dilinkauto.client-1/base.apk" || true ;;
+        *com.dilinkauto.server*) [ "$(flag server_installed)" = "1" ] && echo "package:/data/app/com.dilinkauto.server-1/base.apk" || true ;;
+      esac ;;
+    svc\ wifi*|cmd\ wifi*|cmd\ display\ power-*|am\ broadcast*|am\ start*) exit 0 ;;
+    ping\ -c*) exit 0 ;;
+    echo\ \|\ nc\ -w*|*\ nc\ -w*) exit 0 ;;
+    setsid\ toybox\ nc*) setflag occupied; exit 0 ;;   # occupy_9637 占住 9637（S21）
+    echo\ *\>\ /sdcard/DiLinkAuto/*) exit 0 ;;
+    cat\ /sdcard/DiLinkAuto/e2e-occupy.pid*) exit 0 ;;
+    kill\ -9*) exit 0 ;;
+    "cat /sdcard/DiLinkAuto/client.log") mock_clientlog ;;
+    # issue #180 第三版：停止命令改成「同目录 temp + mv」的原子写
+    # （`p=...; tmp=...; cat pid > tmp; mv -f tmp p` / `t=$(head -c 64 vd-server.session); case ...`），
+    # 整串不再以 `rm -f /sdcard/` 开头，上面的 rm 分支匹配不到。这里按同一语义收口：
+    # 出现停止哨兵请求 = 会话终结信号。
+    *stop-request*) rm -f "$ST/session"; setflag disconnected; exit 0 ;;
+    *) echo "mock-adb(shell): 未实现：$cmd" >&2; exit 2 ;;
+  esac
+}
+
+mock_clientlog() {
+  # S21（issue #31）三态：occupied + server_up + 未建流时按 reconnect_tick 阶段产出：
+  #   tick 0-2（client_up=0，B client 仍死）：B 端 client.log 停在 idle（Listening 行）
+  #     ——但 car_state_now 此时走进程缺失→UNKNOWN，不读本文件。
+  #   tick ≥4（失败证据就绪）：cat clientlog-s21-fail.log（Connection error + Car
+  #     disconnected (control)）——car_state_now 走状态行扫描命中 IDLE。
+  # 真机形态（B 本地行）：[ts][I][Tag] msg；A 中继行 [ts][I][CarLog] [ts][I] msg。
+  if [ "$(flag occupied)" = "1" ] && [ "$(flag server_up)" = "1" ] && [ "$(flag session)" != "1" ]; then
+    if [ "$(flag client_up)" = "1" ] && [ "$(flag reconnect_tick)" -ge 4 ]; then
+      cat "$FIX/clientlog-s21-fail.log"; return
+    fi
+    cat "$FIX/clientlog-idle.log"; return   # client 未起 / tick<4：仍 LISTEN（WAITING）
+  fi
+  # 四态（优先级从高到低）：
+  #   killed     —— 会话中 client 进程被杀（force-stop/install -r）：car 看到
+  #                 控制口 EOF 打 handleDisconnect；无重监听行（进程死了）。
+  #   ejected    —— Eject 优雅收尾：handleDisconnect + client 重进监听循环。
+  #   streaming  —— 会话中。
+  #   idle       —— 从未连接（尾行是重监听 → phone WAITING）。
+  if [ "$(flag client_killed)" = "1" ]; then cat "$FIX/clientlog-killed.log"
+  elif [ "$(flag disconnected)" = "1" ]; then cat "$FIX/clientlog-ejected.log"
+  elif [ "$(flag session)" = "1" ]; then
+    cat "$FIX/clientlog-streaming.log"
+    # 会话中镜像区 tap（触摸回传）→ 动态追加 A 端 Touch #N 中继行。
+    # 真机格式（2026-10-16 从设备实际 client.log / client-20261016-183625 双源抄录）：
+    #   [16:26:26.576][I][CarLog] [16:26:27.307][I] Touch #1 action=1 ptr=0 x=0.31 y=0.63
+    # 注意：整行必须是「B 时间戳[I][CarLog] A 时间戳[I] 正文」——assert_touch_echo
+    # 的正则是 `CarLog\].*Touch #[0-9]+ action=`，需要 `CarLog]` 右方括号；
+    # 旧版误用 logcat 形态 `I/CarLog(4301):`（无方括号）→ 断言永不命中（2026-10-16 修）。
+    local tn
+    tn=$(cat "$ST/touches" 2>/dev/null || echo 0)
+    case "${tn:-}" in ''|*[!0-9]*) tn=0 ;; esac
+    local i=1
+    while [ "$i" -le "$tn" ]; do
+      echo "[23:02:2$((i % 10)).5${i}0][I][CarLog] [23:02:2$((i % 10)).5${i}5][I] Touch #$i action=1 ptr=0 x=0.25 y=0.55"
+      i=$((i + 1))
+    done
+  else cat "$FIX/clientlog-idle.log"; fi
+}
+
+# ── input tap：按 fixture UI XML 的节点边界判定点到哪个控件 ─────────────
+# uiautomator 一节点一行；取该行的 bounds 与 text/content-desc，命中中心点即该节点。
+# 控件语义（与真实 app-server UI 对齐）：
+#   Connect        → 建流（session=1）
+#   Eject/断开连接  → 断开会话（session=0，client 仍在）
+#   Home/主页/Back  → 导航，无状态变化
+#   EditText/磁贴   → 无状态变化
+mock_tap() {
+  # $@ = ("input","tap","<x>","<y>")（exec_shell 原样透传）
+  # 注意：uiautomator 的根节点 bounds 是整屏，任何点都"包含"——必须收集所有
+  # 包含该点的节点，取**面积最小**的（最具体的控件；2026-10-16 修：原先第一个
+  # 匹配就 return，恒定命中根节点 → 所有点击都判"无标签控件"）。
+  local x=${3:-0} y=${4:-0} line b x1 y1 x2 y2 label area best_area="" best_label=""
+  while IFS= read -r line; do
+    case "$line" in *bounds=*) ;; *) continue ;; esac
+    b=$(echo "$line" | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1)
+    [ -n "$b" ] || continue
+    b=${b#bounds=\"[}; b=${b%%]*}
+    x1=${b%,*}; y1=${b#*,}
+    b=${line##*\[}; b=${b%%\]*}
+    x2=${b%,*}; y2=${b#*,}
+    [ "$x" -ge "$x1" ] && [ "$x" -le "$x2" ] && [ "$y" -ge "$y1" ] && [ "$y" -le "$y2" ] || continue
+    label=$(echo "$line" | grep -oE '(text|content-desc)="[^"]+"' | head -2 | sed 's/.*="//; s/"//' | tr '\n' ' ' | sed 's/ *$//')
+    area=$(( (x2 - x1) * (y2 - y1) ))
+    # 有标签的节点优先；同优先级取面积最小（最具体）
+    if [ -n "$label" ]; then
+      if [ -z "$best_label" ] || [ "$area" -lt "$best_area" ]; then
+        best_area=$area; best_label=$label
+      fi
+    elif [ -z "$best_label" ] && { [ -z "$best_area" ] || [ "$area" -lt "$best_area" ]; }; then
+      best_area=$area
+    fi
+  done < "$FIX/ui-hierarchy.xml"
+  label=$best_label
+  case "$label" in
+    *Connect*)         rm -f "$ST/disconnected"; setflag session; log_mock "tap($x,$y) → Connect：建流" ;;
+    *Eject*|*断开连接*)  rm -f "$ST/session"; setflag disconnected; log_mock "tap($x,$y) → Eject：断开会话" ;;
+    *EditText*)        log_mock "tap($x,$y) → EditText：聚焦" ;;
+    "")
+      # 无标签控件（面积最小的包含节点是根 FrameLayout）= 镜像区 tap。
+      # 会话中这是「触摸回传」路径：记 touch 计数，mock_clientlog 动态追加
+      # A 端 CarTouchSender 的「Touch #N」中继行（S02 assert_touch_echo 判据，
+      # 2026-10-16 与真机日志面校准：A 端前 5 次触摸打印后中继）。
+      if [ "$(flag session)" = "1" ]; then
+        n=$(cat "$ST/touches" 2>/dev/null || echo 0)
+        case "${n:-}" in ''|*[!0-9]*) n=0 ;; esac
+        n=$((n + 1)); echo "$n" > "$ST/touches"
+        log_mock "tap($x,$y) → 镜像区（触摸回传 touch #$n）"
+      else
+        log_mock "tap($x,$y) → 无标签控件（面积最小 $best_area）"
+      fi ;;
+    *)                 log_mock "tap($x,$y) → $label" ;;
+  esac
+  return 0
+}
+log_mock() { echo "[mock-adb $(date +%H:%M:%S)] $*" >> "${MOCK_ADB_TRACE:-/dev/null}"; }
+
+# 端口应答：session=1 时 9637/9638/9639/19647 全部在位（LISTEN 与 ESTABLISHED 都答 Y，
+# 因为 mock 不区分 accept 前后——真机上 LISTEN 是瞬态，harness 已按 ESTABLISHED 判）。
+mock_port_answer() {
+  local port=$1
+  if [ "$(flag session)" != "1" ]; then
+    # S21（issue #31）：occupied=1 时 9637 被 nc LISTEN（即使 client_up=0 也答 Y）
+    if [ "$port" = "9637" ]; then
+      if [ "$(flag occupied)" = "1" ]; then echo Y
+      elif [ "$(flag client_up)" = "1" ]; then echo Y
+      else echo N; fi
+      return 0
+    fi
+    echo N; return 0
+  fi
+  case "$port" in 9637|9638|9639|19647|"") echo Y ;; *) echo N ;; esac
+}
+
+# vdlog：帧计数随读取次数增长（wait_stream_alive 的观测对象）
+mock_vdlog() {
+  local n; n=$(( $(flag vdreads) + 1 )); setflag vdreads "$n"
+  if [ "$(flag session)" != "1" ]; then
+    echo "(no vd-server.log yet — engine not started)"
+    return 0
+  fi
+  sed "s/@FRAMES@/$(( n * 120 ))/g; s/@TEX@/$(( n % 7 + 1 ))/g" "$FIX/vd-server.log"
+}
+
+# ── 顶层级命令 ──────────────────────────────────────────────────────────
+SERIAL=""
+if [ "${1:-}" = "-s" ]; then SERIAL="${2:-}"; shift 2; fi
+
+case "${1:-}" in
+  devices)
+    printf 'List of devices attached\n%s\tdevice\n%s\tdevice\n' "$PHONE" "$CAR"; exit 0 ;;
+  connect)    echo "connected to ${2:-}"; exit 0 ;;
+  disconnect) echo "disconnected"; exit 0 ;;
+  kill-server|start-server) exit 0 ;;
+  get-state)
+    case "$SERIAL" in
+      "$PHONE"|"$CAR"|"") echo device; exit 0 ;;
+      *:5555) echo device; exit 0 ;;
+    esac
+    echo "error: device '$SERIAL' not found" >&2; exit 1 ;;
+  tcpip)  echo "restarting in TCP mode port: ${2:-5555}"; exit 0 ;;
+  install)
+    # install -r：装 APK（pm path 随之可应答）；重装杀进程 → START_STICKY ~18s 后才重启
+    # （op_reinstall 内部会 force-stop 压掉迟到重启再 monkey 拉起，故这里也记 killed 态）
+    case "$SERIAL" in
+      "$PHONE"|*:5555)
+        setflag client_installed
+        if [ "$(flag session)" = "1" ] || [ "$(flag disconnected)" = "1" ]; then setflag client_killed; fi
+        rm -f "$ST/client_up" "$ST/session" "$ST/disconnected" ;;
+      "$CAR") setflag server_installed ;;
+    esac
+    echo "Success"; exit 0 ;;
+  uninstall) echo "Success"; exit 0 ;;
+  exec-out)
+    if [ "${2:-}" = "screencap" ]; then cat "$FIX/screencap.png"; exit 0; fi
+    exit 0 ;;
+  pull)
+    # pull <remote> <local>
+    local_src="${2:-}"; local_dst="${3:-/dev/null}"
+    case "$local_src" in
+      */vd-server.log) cp "$FIX/vd-server.log" "$local_dst" 2>/dev/null || : > "$local_dst" ;;
+      */client.log)     mock_clientlog > "$local_dst" 2>/dev/null || : > "$local_dst" ;;
+      *) : > "$local_dst" ;;
+    esac
+    echo "1 file pulled."; exit 0 ;;
+  push) echo "1 file pushed."; exit 0 ;;
+  # logcat 是**直调**（logcat_dump/logcat_clear 用 `adb -s X logcat -d/-c`，不经 shell）
+  # ——顶层必须自己接住，否则掉进「未实现」exit 2、输出空文件（2026-10-17 fn-test
+  # 暴露：此前无断言依赖 logcat 内容，空文件让 assert_no_anr 真空通过）。
+  # 注意 `logcat -d` 是两个独立参数，**不能 shift**（shift 后只剩 -d，exec_shell 认不出）。
+  logcat) exec_shell "$*" ;;
+  shell) shift; exec_shell "$@" ;;
+  *) echo "mock-adb: 未实现的命令：$*" >&2; exit 2 ;;
+esac

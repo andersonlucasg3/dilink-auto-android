@@ -2,6 +2,11 @@
 <resources>
     <string name="app_name">DiLink Auto</string>
 
+    <!-- Shared actions / accessible names -->
+    <string name="action_back">Back</string>
+    <string name="action_settings">Settings</string>
+    <string name="clear_search">Clear search</string>
+
     <!-- Notifications -->
     <string name="notification_channel_name">DiLink Auto Service</string>
     <string name="notification_channel_description">Keeps DiLink Auto running for car connection</string>
@@ -9,7 +14,6 @@
     <string name="notification_connected">Connected to car</string>
     <string name="notification_waiting">Waiting for car connection…</string>
     <string name="notification_streaming">Streaming to car display</string>
-    <string name="notification_channel_update">App Updates</string>
     <string name="accessibility_description">DiLink Auto uses accessibility to forward touch events from the car display to your phone.</string>
 
     <!-- Main Screen -->
@@ -41,29 +45,6 @@
     <string name="status_streaming">Streaming</string>
     <string name="status_streaming_desc">Virtual display active</string>
 
-    <!-- Updates -->
-    <string name="updates_title">Updates</string>
-    <string name="updates_check_phone">Check for phone update</string>
-    <string name="updates_checking">Checking for updates…</string>
-    <string name="updates_up_to_date">Phone: up to date (v%1$s)</string>
-    <string name="updates_available">Phone: v%1$s available</string>
-    <string name="updates_size_mb">%1$.1f MB</string>
-    <string name="updates_download_btn">Download Update</string>
-    <string name="updates_downloading">Downloading… %1$d%%</string>
-    <string name="updates_ready">Phone: v%1$s ready</string>
-    <string name="updates_install_btn">Install Update</string>
-    <string name="updates_installing">Installing v%1$s via Shizuku…</string>
-    <string name="updates_installed">Phone updated! Restart to apply.</string>
-    <string name="updates_retry">Retry</string>
-    <string name="updates_available_title">Update Available</string>
-    <string name="updates_update_btn">Update</string>
-    <string name="updates_dismiss_btn">Dismiss</string>
-    <string name="updates_downloading_title">Downloading Update v%1$s</string>
-    <string name="updates_ready_title">Ready to Install</string>
-    <string name="updates_car_title">Car App</string>
-    <string name="updates_car_desc">Install or update the car app over WiFi ADB</string>
-    <string name="updates_car_install">Install</string>
-
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_permissions">Permissions</string>
@@ -73,25 +54,18 @@
     <string name="perm_battery_granted">Keeps streaming alive when screen is off</string>
     <string name="perm_accessibility">Accessibility Service</string>
     <string name="perm_accessibility_granted">Enables car touchscreen control</string>
-    <string name="perm_notifications">Notification Access</string>
-    <string name="perm_notifications_granted">Forwards notifications to car display</string>
     <string name="perm_granted">Granted</string>
     <string name="perm_usb_debugging">USB Debugging</string>
     <string name="perm_usb_desc">Required on both phone and car</string>
     <string name="perm_shizuku">Shizuku</string>
-    <string name="perm_shizuku_desc">Install Shizuku for ADB-free connection. Start Shizuku once via ADB, then grant permission here.</string>
+    <string name="perm_shizuku_desc">Shizuku isn\'t installed. Install it to deploy the virtual display server without USB ADB — tap to open its install page.</string>
     <string name="perm_shizuku_needs_permission">Shizuku — Needs Permission</string>
     <string name="perm_shizuku_permission_desc">Shizuku is running. Tap to grant DiLink-Auto permission.</string>
     <string name="perm_shizuku_available">Shizuku — Connected</string>
     <string name="perm_shizuku_granted">Shizuku is active. The phone can deploy the virtual display server without USB ADB.</string>
+    <string name="value_unknown">Unknown</string>
 
     <!-- Support -->
-    <string name="support_title">Support</string>
-    <string name="support_heading">Help keep DiLink-Auto going</string>
-    <string name="support_sponsor_btn">Sponsor on GitHub</string>
-    <string name="support_pix_btn">Pay with Pix (Brazil)</string>
-    <string name="support_pix_key">https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d</string>
-    <string name="support_sponsor_url">https://github.com/sponsors/andersonlucasg3</string>
 
     <!-- About -->
     <string name="about_title">About</string>
@@ -102,8 +76,6 @@
     <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
     <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
     <string name="about_lib_scrcpy">scrcpy (FakeContext/SurfaceScaler concepts) — Apache 2.0</string>
-    <string name="about_dev_credit">Developed with ❤ by Anderson Lucas de Castro Ramos 🇧🇷</string>
-    <string name="about_dev_github">github.com/andersonlucasg3</string>
 
     <!-- Onboarding -->
     <string name="onboarding_welcome_title">Welcome to DiLink-Auto</string>
@@ -114,8 +86,6 @@
     <string name="onboarding_battery_desc">Keeps the connection alive when your screen is off. Without this, streaming stops whenever your phone sleeps.</string>
     <string name="onboarding_accessibility_title">Accessibility Service</string>
     <string name="onboarding_accessibility_desc">Lets the car\'s touchscreen control your phone. Without this, you\'ll see the screen but can\'t tap anything.</string>
-    <string name="onboarding_notification_title">Notification Access</string>
-    <string name="onboarding_notification_desc">Shows phone notifications on the car display. Without this, you\'ll miss calls and messages while driving.</string>
     <string name="onboarding_car_setup_title">Before You Connect</string>
     <string name="onboarding_car_setup_desc">Make sure everything is ready before connecting:</string>
     <string name="onboarding_car_prereq_wifi_adb">Wi-Fi ADB enabled on car</string>
@@ -155,26 +125,24 @@
     <string name="car_app_retry">Retry</string>
     <string name="car_app_installed">Car App Installed</string>
 
-    <!-- Donation -->
-    <string name="donation_title">Support Development</string>
-    <string name="donation_desc">Help keep DiLink-Auto going. Every contribution helps!</string>
-    <string name="donation_github">GitHub Sponsor</string>
-    <string name="donation_pix">Pix (Brazil)</string>
-
     <!-- Samsung-Specific Warnings -->
     <string name="samsung_warning_title">Samsung Device Detected</string>
     <string name="samsung_warning_desc">Samsung One UI requires extra setup: disable Auto Blocker (blocks USB ADB), grant Unrestricted battery, and allow All Files Access. See Settings for details.</string>
     <string name="samsung_settings_guide">Samsung Setup Guide</string>
 
-    <!-- Distribution Channel -->
-    <string name="channel_title">Distribution Channel</string>
-    <string name="channel_release">Release</string>
-    <string name="channel_prerelease">Pre-release</string>
-    <string name="channel_release_desc">Stable releases — recommended for daily use</string>
-    <string name="channel_prerelease_desc">Development builds — latest features, may be unstable</string>
-
     <!-- Settings Sections -->
-    <string name="settings_distribution">Distribution</string>
+    <string name="settings_debug">Debug</string>
+
+    <!-- Car App Allowlist -->
+    <string name="allowlist_title">Car app allowlist</string>
+    <string name="allowlist_desc">Choose which apps appear on the car. Unselected apps never reach the car, reducing load.</string>
+    <string name="allowlist_select_all">Select all</string>
+    <string name="allowlist_deselect_all">Deselect all</string>
+    <string name="allowlist_search_hint">Search apps</string>
+    <string name="allowlist_empty">No apps selected — the car home screen will be empty.</string>
+    <string name="allowlist_no_match">No apps match “%1$s”</string>
+    <string name="log_enabled">Diagnostic logs</string>
+    <string name="log_enabled_desc">Write logs to file for troubleshooting. Disable for better performance.</string>
 
     <!-- Install on Car Status -->
     <string name="car_install_status_searching">Searching for car</string>
@@ -200,10 +168,6 @@
     <string name="car_install_status_auth_needed">Authorization required — Accept the USB debugging dialog on the car screen, then tap Continue to retry</string>
 
     <!-- Auto-Update Status -->
-    <string name="status_auto_update">Updating car app (v%1$s → v%2$s)…</string>
-    <string name="status_auto_update_complete">Car app updated! Restarting…</string>
-    <string name="status_update_failed">Update failed: %s</string>
-    <string name="status_auto_update_failed">Auto-update failed: %s</string>
 
     <!-- Notification Actions -->
     <string name="notification_action_stop">Stop</string>

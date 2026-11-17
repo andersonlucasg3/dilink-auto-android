@@ -23,7 +23,6 @@
     <string name="nav_home">Home</string>
 
     <!-- Mirror -->
-    <string name="status_updating">Updating car app…</string>
     <string name="status_please_wait">Please wait</string>
 
     <!-- Orientation note -->
@@ -33,11 +32,59 @@
     <string name="how_to_connect_title">How to connect</string>
 
     <!-- Connection Mode (WiFi ADB / USB ADB) -->
-    <string name="dev_mode_title">WiFi Direct Mode</string>
+    <string name="dev_mode_title">WiFi ADB Mode</string>
     <string name="dev_mode_desc_on">WiFi ADB (car connects to phone over WiFi — no USB cable needed)</string>
     <string name="dev_mode_desc_off">USB ADB (car connects to phone via USB cable)</string>
     <string name="wifi_adb_setup_title">WiFi ADB Setup</string>
-    <string name="wifi_adb_setup_desc">To use WiFi Direct Mode, you must first enable ADB over WiFi on your phone. Connect your phone to a computer via USB and run:\n\nadb tcpip 5555\n\nThis only needs to be done once. After that, the car can connect to your phone over WiFi without a USB cable.</string>
+    <string name="wifi_adb_setup_desc">Set up wireless ADB on your phone first — see the DiLink Auto phone app.</string>
+
+    <!-- Audio mirroring (issue #72, Refs #13) -->
+    <string name="audio_mirror_title">Audio mirroring</string>
+    <string name="audio_mirror_desc_on">Your phone stays muted while mirroring — sound plays on the car</string>
+    <string name="audio_mirror_desc_off">Audio is not sent to the car</string>
+    <string name="audio_mirror_unsupported">Phone does not support audio mirroring (requires Android 11 or newer)</string>
+
+    <!-- Startup DPI Override -->
+    <string name="startup_dpi_title">Startup DPI</string>
+    <string name="startup_dpi_desc">0 = auto-calibrate (recommended for most cars)</string>
+    <string name="startup_dpi_hint">Higher DPI = larger UI. Values 120–480. May squeeze portrait-only apps.</string>
+    <string name="dpi_hint_static">Inputs outside 120–480 or above this viewport\'s cap fall back to the auto-calibrated DPI</string>
+    <string name="dpi_hint_basis">(based on the previous session\'s viewport)</string>
+    <string name="dpi_hint_auto">Last session ran at %1$d dpi; viewport cap %2$d dpi %3$s</string>
+    <string name="dpi_hint_in_range">Last session ran at %1$d dpi; viewport cap %2$d dpi, %3$d dpi will be used as-is %4$s</string>
+    <string name="dpi_hint_over_cap">Last session ran at %1$d dpi; viewport cap %2$d dpi, %3$d dpi exceeds the cap so the auto-calibrated value is used %4$s</string>
+    <string name="dpi_hint_invalid">Last session ran at %1$d dpi; viewport cap %2$d dpi, %3$d dpi is out of range so the auto-calibrated value is used %4$s</string>
+
+    <!-- Video Bitrate Settings -->
+    <string name="video_bitrate_title">Video Bitrate</string>
+    <string name="video_bitrate_desc">Lower bitrate reduces Wi-Fi transmission &amp; decoder pressure</string>
+    <string name="video_bitrate_hint">Recommended: 2.5–4 Mbps for weak car chips (Snapdragon 439)</string>
+
+    <!-- Video FPS Settings -->
+    <string name="video_fps_title">Target FPS</string>
+    <string name="video_fps_desc">Frame rate sent to decoder. Lower FPS reduces CPU/GPU load</string>
+    <string name="video_fps_hint">24 FPS cuts 20% CPU/GPU and Wi-Fi load vs 30 FPS</string>
+    <string name="video_fps_hint_measured">Measured %1$s fps on the current stream (target %2$d fps). 30/60 FPS is still pending an on-vehicle check — read this number before keeping it</string>
+
+    <!-- VD composite area tier (issue #153 PB) -->
+    <string name="vd_area_tier_title">VD composite area tier</string>
+    <string name="vd_area_tier_desc_off">Default: cap at 1.6x car width (min 1600), ~44% less composite area. Applies on next connect.</string>
+    <string name="vd_area_tier_desc_on">Keyboard compatibility: keeps the 2560 cap, full IME but largest composite area. Applies on next connect.</string>
+
+    <!-- Setting Presets -->
+    <string name="preset_auto">Auto</string>
+    <string name="preset_dpi_160">160 (Standard)</string>
+    <string name="preset_bitrate_2m">2M (Fastest)</string>
+    <string name="preset_bitrate_2_5m">2.5M (Recommended)</string>
+    <string name="preset_bitrate_3m">3M (Balanced)</string>
+    <string name="preset_bitrate_4m">4M (Default)</string>
+    <string name="preset_bitrate_6m">6M (High quality)</string>
+    <string name="preset_fps_20">20 FPS (Eco)</string>
+    <string name="preset_fps_24">24 FPS (Recommended)</string>
+    <string name="preset_fps_30">30 FPS (Smooth)</string>
+    <string name="preset_fps_60">60 FPS (High refresh)</string>
+    <string name="fps_value">%1$d FPS</string>
+    <string name="manual_custom_hint">Custom</string>
 
     <!-- Manual Connect -->
     <string name="manual_connect_label">Or connect manually by IP</string>
@@ -50,6 +97,10 @@
 
     <!-- Connection Status -->
     <string name="status_ready_to_connect">Ready to connect</string>
+    <!-- issue #201：用户主动断开是持久化状态，重启 App 也不会自动连，必须明确提示。 -->
+    <string name="status_disconnected_by_user">Disconnected as requested — press Reconnect to connect again</string>
+    <string name="reconnect_button">Reconnect</string>
+    <string name="reconnect_button_after_disconnect">Reconnect now</string>
     <string name="status_connecting">Connecting…</string>
     <string name="status_connected">Connected</string>
     <string name="status_streaming">Streaming</string>
@@ -74,7 +125,7 @@
     <!-- Notifications -->
     <string name="no_notifications">No notifications</string>
     <string name="notifications_count">Notifications (%d)</string>
-    <string name="clear_all">Clear All</string>
+    <string name="clear_all">Clear all</string>
     <string name="clear_notification">Clear notification</string>
 
     <!-- Connection Status Messages -->
@@ -87,14 +138,48 @@
     <string name="status_connecting_usb">Connecting USB… Check phone for authorization dialog</string>
     <string name="status_usb_failed">USB connection failed — check phone for auth dialog</string>
     <string name="status_usb_connected">USB connected</string>
-    <string name="status_updating_car">Updating car app…</string>
     <string name="status_preparing_vd">Preparing virtual display…</string>
     <string name="status_starting_vd">Starting virtual display…</string>
     <string name="status_vd_failed">VD server failed</string>
     <string name="status_waiting_video">Waiting for video stream…</string>
-    <string name="status_updating_please_wait">Updating car app… Please wait</string>
+    <string name="status_no_adb">Connect phone to car USB port</string>
+    <string name="status_no_phone_ip">Could not determine phone IP address</string>
+    <string name="status_blank_host">Enter a phone address first</string>
+    <string name="status_bad_port">Port must be 1–65535</string>
 
     <!-- App Context Actions -->
     <string name="action_uninstall">Uninstall</string>
     <string name="action_app_info">App info</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_ok">OK</string>
+
+    <!-- App Info dialog -->
+    <string name="app_info_package">Package</string>
+    <string name="app_info_version">Version</string>
+    <string name="app_info_version_code">Version code</string>
+    <string name="app_info_target_sdk">Target SDK</string>
+    <string name="app_info_installed">Installed</string>
+
+    <!-- Destructive action confirmation -->
+    <string name="action_uninstall_confirm_title">Uninstall %1$s?</string>
+    <string name="action_uninstall_confirm_body">This uninstalls the app from your phone. It cannot be undone.</string>
+
+    <!-- Now playing transport -->
+    <string name="now_playing_previous">Previous</string>
+    <string name="now_playing_play">Play</string>
+    <string name="now_playing_pause">Pause</string>
+    <string name="now_playing_next">Next</string>
+
+    <!-- Home screen copy -->
+    <string name="search_apps">Search apps</string>
+    <string name="clear_search">Clear search</string>
+    <string name="no_apps_match">No apps match “%1$s”</string>
+    <string name="pin_to_top">Pin to top</string>
+    <string name="unpin_from_top">Unpin from top</string>
+    <string name="app_manage_hint">Long-press an app to pin, uninstall, or see info</string>
+    <string name="searching_for_phone">Searching for phone</string>
+    <string name="phone_hint">Make sure DiLink Auto is running on your phone\nand both devices are on the same network</string>
+    <string name="connecting">Connecting</string>
+    <string name="connected_waiting_for_data">Connected - waiting for data</string>
+    <string name="home_allowlist_empty">No apps allowed. Open the phone app and select apps in Settings &gt; Car app allowlist.</string>
 </resources>

@@ -23,9 +23,49 @@ object Discovery {
 
     const val SERVICE_TYPE = "_dilinkauto._tcp."
     const val SERVICE_NAME = "DiLink-Auto"
-    const val DEFAULT_PORT = 9637  // Control + Data
-    const val VIDEO_PORT = 9638    // Video only (phone → car)
-    const val INPUT_PORT = 9639    // Input only (car → phone)
+
+    fun isCompatibleServiceName(name: String?): Boolean =
+        name != null && name.startsWith(SERVICE_NAME)
+
+    // 协议端口常量的唯一来源是平台无关的 :protocol-core（见 [Ports]）。
+    //
+    // 下面的别名曾为避免改动"大量历史调用点"而保留；那些调用点现已全部迁移到
+    // [Ports]（docs/audit-srp-dry.md DRY-10），别名不再有使用者，故按原计划标注废弃。
+    // 保留而未删除，是为了不让下游/未同步的调用方编译失败。
+    @Deprecated(
+        message = "端口常量的唯一来源是 :protocol-core 的 Ports；请改用 Ports",
+        replaceWith = ReplaceWith("Ports.DEFAULT_PORT", "com.dilinkauto.protocol.Ports"),
+        level = DeprecationLevel.WARNING
+    )
+    const val DEFAULT_PORT = Ports.DEFAULT_PORT
+
+    @Deprecated(
+        message = "端口常量的唯一来源是 :protocol-core 的 Ports；请改用 Ports",
+        replaceWith = ReplaceWith("Ports.VIDEO_PORT", "com.dilinkauto.protocol.Ports"),
+        level = DeprecationLevel.WARNING
+    )
+    const val VIDEO_PORT = Ports.VIDEO_PORT
+
+    @Deprecated(
+        message = "端口常量的唯一来源是 :protocol-core 的 Ports；请改用 Ports",
+        replaceWith = ReplaceWith("Ports.INPUT_PORT", "com.dilinkauto.protocol.Ports"),
+        level = DeprecationLevel.WARNING
+    )
+    const val INPUT_PORT = Ports.INPUT_PORT
+
+    @Deprecated(
+        message = "端口常量的唯一来源是 :protocol-core 的 Ports；请改用 Ports",
+        replaceWith = ReplaceWith("Ports.LIFECYCLE_PORT", "com.dilinkauto.protocol.Ports"),
+        level = DeprecationLevel.WARNING
+    )
+    const val LIFECYCLE_PORT = Ports.LIFECYCLE_PORT
+
+    @Deprecated(
+        message = "端口常量的唯一来源是 :protocol-core 的 Ports；请改用 Ports",
+        replaceWith = ReplaceWith("Ports.ADB_PORT", "com.dilinkauto.protocol.Ports"),
+        level = DeprecationLevel.WARNING
+    )
+    const val ADB_PORT = Ports.ADB_PORT
 
     /**
      * Registers the DiLink-Auto service on the local network.
@@ -35,7 +75,7 @@ object Discovery {
      */
     suspend fun registerService(
         context: Context,
-        port: Int = DEFAULT_PORT,
+        port: Int = Ports.DEFAULT_PORT,
         deviceName: String = android.os.Build.MODEL
     ): ServiceRegistration = suspendCancellableCoroutine { cont ->
         val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -89,15 +129,35 @@ object Discovery {
             override fun onDiscoveryStarted(serviceType: String) {}
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                // Only trust our own service name (or conflict-renamed instances):
+                // NSD's service-type discovery returns every responder advertising
+                // `_dilinkauto._tcp`, and an impostor on the same LAN was previously
+                // resolved and shown to the user as a connection target (the car has no
+                // other authentication, so this is the first gate).
+                if (!isCompatibleServiceName(serviceInfo.serviceName)) {
+                    android.util.Log.w(
+                        "Discovery",
+                        "Ignoring foreign mDNS responder: '${serviceInfo.serviceName}'"
+                    )
+                    return
+                }
                 // Resolve the service to get IP and port
                 nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {}
 
                     override fun onServiceResolved(info: NsdServiceInfo) {
+                        val host = info.host?.hostAddress ?: return
+                        // A resolved port outside the protocol's known range is
+                        // another impostor tell — drop instead of offering it.
+                        val port = info.port
+                        if (port !in 1..65535) {
+                            android.util.Log.w("Discovery", "Ignoring service with invalid port: $port")
+                            return
+                        }
                         val service = DiscoveredService(
                             name = info.serviceName,
-                            host = info.host?.hostAddress ?: return,
-                            port = info.port,
+                            host = host,
+                            port = port,
                             deviceName = info.attributes["device"]
                                 ?.let { String(it) } ?: "Unknown"
                         )

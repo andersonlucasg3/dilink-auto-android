@@ -1,46 +1,57 @@
 package com.dilinkauto.server.adb
 
 import android.util.Log
-import dadb.AdbKeyPair
-import dadb.Dadb
-import kotlinx.coroutines.*
+import com.dilinkauto.protocol.Ports
+import com.dilinkauto.protocol.adb.TcpAdbConnection
 import java.io.File
 
 /**
- * Controls the phone via direct ADB connection using dadb.
- * Connects to the phone's adbd (wireless debugging) on the given host:port.
+ * Controls the phone via a persistent TCP ADB connection.
+ * Uses TcpAdbConnection which keeps a single socket open for all commands.
  *
- * Used to:
- * - Launch third-party apps on the phone's virtual display
- * - Inject input events (tap, swipe, back) on the virtual display
+ * ### Transport-failure contract (2026-10-17, S05 live root-cause fix)
  *
- * These operations require shell-level privileges, which ADB provides.
+ * [TcpAdbConnection.shell] / [shellBackground] swallow every transport error
+ * internally and report it as `-1` — they never throw. The old implementation
+ * here only cleared [isConnected] in its own `catch`, so a half-open socket
+ * (WiFi flap on the phone side) kept `isConnected == true` forever. The state
+ * machine then kept reusing the dead controller (`Dev mode: TCP ADB still
+ * connected`) and every deploy failed within ~150 ms
+ * (`VD server failed to start`), looping with backoff indefinitely.
+ *
+ * Rule: `-1` from the protocol layer **is** a transport failure (0 means "stream
+ * closed cleanly", regardless of the command's own exit code). Every command
+ * method therefore clears [isConnected] on failure, which lets
+ * `CarConnectionService.handleDisconnect` / `startTcpAdbTrack` rebuild the
+ * controller instead of reusing it.
  */
 class RemoteAdbController(
     private val phoneHost: String,
-    private val adbPort: Int = 5555,
+    private val adbPort: Int = Ports.ADB_PORT,
     private val virtualDisplayId: Int,
-    private val keyDir: File
+    private val keyDir: File,
+    /** Test seam: unit tests inject a scripted fake; production builds the real one. */
+    private val connectionFactory: (String, Int, File) -> TcpAdbConnection =
+        { h, p, k -> TcpAdbConnection(h, p, k) }
 ) {
-    private var dadb: Dadb? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var adb: TcpAdbConnection? = null
 
     @Volatile
     var isConnected = false
         private set
 
-    /**
-     * Connects to the phone's ADB daemon.
-     * Must be called from a background thread.
-     */
     fun connect(): Boolean {
         return try {
-            val keyPair = getOrCreateKeyPair()
             Log.i(TAG, "Connecting to phone ADB at $phoneHost:$adbPort...")
-            dadb = Dadb.create(phoneHost, adbPort, keyPair)
-            isConnected = true
-            Log.i(TAG, "ADB connected to phone, virtualDisplayId=$virtualDisplayId")
-            true
+            adb = connectionFactory(phoneHost, adbPort, keyDir)
+            if (adb!!.connect()) {
+                isConnected = true
+                Log.i(TAG, "ADB connected to phone, virtualDisplayId=$virtualDisplayId")
+                true
+            } else {
+                isConnected = false
+                false
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to connect ADB to $phoneHost:$adbPort", e)
             isConnected = false
@@ -48,199 +59,51 @@ class RemoteAdbController(
         }
     }
 
-    /**
-     * Launches an app on the virtual display via ADB shell.
-     */
-    fun launchApp(packageName: String): Boolean {
-        // First: resolve the launch activity via package manager
-        val resolveResult = shellOutput(
-            "cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $packageName"
-        )
-
-        // Parse the component name (last line of output, format: package/activity)
-        val component = resolveResult?.lines()
-            ?.lastOrNull { it.contains("/") }
-            ?.trim()
-
-        return if (component != null) {
-            shellInternal(
-                "am start --display $virtualDisplayId -n $component",
-                "launchApp($packageName → $component)"
-            )
-        } else {
-            // Fallback: try am start with package name only
-            Log.w(TAG, "Could not resolve activity for $packageName, trying direct launch")
-            shellInternal(
-                "am start --display $virtualDisplayId " +
-                    "-a android.intent.action.MAIN " +
-                    "-c android.intent.category.LAUNCHER " +
-                    "-n $packageName",
-                "launchApp($packageName) direct"
-            )
-        }
-    }
-
-    /**
-     * Sends a tap event to the virtual display.
-     */
-    fun tap(x: Int, y: Int): Boolean {
-        return shellInternal(
-            "input -d $virtualDisplayId tap $x $y",
-            "tap($x, $y)"
-        )
-    }
-
-    /**
-     * Sends a swipe event to the virtual display.
-     */
-    fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Boolean {
-        return shellInternal(
-            "input -d $virtualDisplayId swipe $x1 $y1 $x2 $y2 $durationMs",
-            "swipe"
-        )
-    }
-
-    /**
-     * Sends a BACK key event to the virtual display.
-     */
-    fun back(): Boolean {
-        return shellInternal(
-            "input -d $virtualDisplayId keyevent 4",
-            "back"
-        )
-    }
-
-    /**
-     * Sends a HOME key event to the virtual display.
-     */
-    fun home(): Boolean {
-        return shellInternal(
-            "input -d $virtualDisplayId keyevent 3",
-            "home"
-        )
-    }
-
-    /**
-     * Launches an app asynchronously (non-blocking from the caller's thread).
-     */
-    fun launchAppAsync(packageName: String) {
-        scope.launch { launchApp(packageName) }
-    }
-
-    fun tapAsync(x: Int, y: Int) {
-        scope.launch { tap(x, y) }
-    }
-
-    fun swipeAsync(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int) {
-        scope.launch { swipe(x1, y1, x2, y2, durationMs) }
-    }
-
-    fun backAsync() {
-        scope.launch { back() }
-    }
-
-    fun homeAsync() {
-        scope.launch { home() }
-    }
-
-    /**
-     * Pushes a file to the phone via ADB.
-     */
-    fun pushFile(inputStream: java.io.InputStream, remotePath: String) {
-        val connection = dadb ?: throw IllegalStateException("Not connected")
-        val tempFile = File.createTempFile("push", ".tmp", keyDir)
-        try {
-            tempFile.outputStream().use { out -> inputStream.copyTo(out) }
-            connection.push(tempFile, remotePath)
-            Log.i(TAG, "Pushed ${tempFile.length()} bytes to $remotePath")
-        } finally {
-            tempFile.delete()
-        }
-    }
-
-    /**
-     * Runs a shell command without waiting for it to complete.
-     * Used for starting long-running processes like the VD server.
-     */
-    fun shellAsync(command: String) {
-        scope.launch {
-            try {
-                val connection = dadb ?: return@launch
-                Log.d(TAG, "shellAsync: $command")
-                // This will block until the process exits, but it's in a coroutine
-                connection.shell(command)
-                Log.d(TAG, "shellAsync finished: $command")
-            } catch (e: Exception) {
-                Log.e(TAG, "shellAsync error", e)
-            }
-        }
-    }
-
-    fun shellOutput(command: String): String? {
-        val connection = dadb ?: return null
+    fun shell(command: String): Boolean {
+        val connection = adb ?: return false
         return try {
-            val result = connection.shell(command)
-            if (result.exitCode == 0) result.allOutput else null
+            val rc = connection.shell(command)
+            // -1 = transport failure (see class doc). 0 = stream closed cleanly.
+            if (rc != 0) isConnected = false
+            rc == 0
         } catch (e: Exception) {
-            Log.e(TAG, "shellOutput($command) exception", e)
-            null
-        }
-    }
-
-    fun shell(command: String): Boolean = shellInternal(command, command.take(80))
-
-    fun shellNoWait(command: String): Boolean {
-        if (dadb == null) return false
-        shellAsync(command)
-        return true
-    }
-
-    private fun shellInternal(command: String, label: String): Boolean {
-        val connection = dadb ?: run {
-            Log.w(TAG, "$label: not connected")
-            return false
-        }
-
-        return try {
-            val result = connection.shell(command)
-            if (result.exitCode != 0) {
-                Log.w(TAG, "$label failed (exit=${result.exitCode}): ${result.allOutput}")
-            } else {
-                Log.d(TAG, "$label OK")
-            }
-            result.exitCode == 0
-        } catch (e: Exception) {
-            Log.e(TAG, "$label exception", e)
+            Log.e(TAG, "$command exception", e)
             isConnected = false
             false
         }
     }
 
-    private fun getOrCreateKeyPair(): AdbKeyPair {
-        val privateKeyFile = File(keyDir, "adbkey")
-        val publicKeyFile = File(keyDir, "adbkey.pub")
+    fun shellBackground(command: String): Int {
+        val connection = adb ?: return -1
+        return try {
+            val id = connection.shellBackground(command)
+            // -1 = socket null / OPEN rejected / exception — all transport-level.
+            if (id < 0) isConnected = false
+            id
+        } catch (e: Exception) {
+            Log.e(TAG, "shellBackground error", e)
+            isConnected = false
+            -1
+        }
+    }
 
-        return if (privateKeyFile.exists() && publicKeyFile.exists()) {
-            Log.d(TAG, "Using existing ADB key pair")
-            AdbKeyPair.read(privateKeyFile, publicKeyFile)
-        } else {
-            Log.i(TAG, "Generating new ADB key pair")
-            keyDir.mkdirs()
-            AdbKeyPair.generate(privateKeyFile, publicKeyFile)
-            AdbKeyPair.read(privateKeyFile, publicKeyFile)
+    fun shellNoWait(command: String): Boolean {
+        val connection = adb ?: return false
+        return try {
+            val ok = connection.shellNoWait(command)
+            if (!ok) isConnected = false
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "shellNoWait error", e)
+            isConnected = false
+            false
         }
     }
 
     fun disconnect() {
-        scope.cancel()
-        try {
-            dadb?.close()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error closing ADB connection", e)
-        }
-        dadb = null
+        try { adb?.close() } catch (_: Exception) {}
+        adb = null
         isConnected = false
-        Log.i(TAG, "ADB disconnected")
     }
 
     companion object {

@@ -9,7 +9,6 @@
     <string name="notification_connected">Connecté à la voiture</string>
     <string name="notification_waiting">En attente de la connexion…</string>
     <string name="notification_streaming">Diffusion sur l\'écran de la voiture</string>
-    <string name="notification_channel_update">Mises à jour</string>
     <string name="accessibility_description">DiLink Auto utilise les services d\'accessibilité pour transmettre les touches du véhicule vers le téléphone.</string>
 
     <!-- Écran principal -->
@@ -42,25 +41,6 @@
     <string name="status_streaming_desc">Affichage virtuel actif</string>
 
     <!-- Mises à jour -->
-    <string name="updates_title">Mises à jour</string>
-    <string name="updates_check_phone">Vérifier la mise à jour du téléphone</string>
-    <string name="updates_checking">Vérification des mises à jour…</string>
-    <string name="updates_up_to_date">Téléphone : à jour (v%1$s)</string>
-    <string name="updates_available">Téléphone : v%1$s disponible</string>
-    <string name="updates_size_mb">%1$.1f Mo</string>
-    <string name="updates_download_btn">Télécharger la mise à jour</string>
-    <string name="updates_downloading">Téléchargement… %1$d%%</string>
-    <string name="updates_ready">Téléphone : v%1$s prête</string>
-    <string name="updates_install_btn">Installer la mise à jour</string>
-    <string name="updates_retry">Réessayer</string>
-    <string name="updates_available_title">Mise à jour disponible</string>
-    <string name="updates_update_btn">Mettre à jour</string>
-    <string name="updates_dismiss_btn">Ignorer</string>
-    <string name="updates_downloading_title">Téléchargement de la mise à jour v%1$s</string>
-    <string name="updates_ready_title">Prêt à installer</string>
-    <string name="updates_car_title">Appli Voiture</string>
-    <string name="updates_car_desc">Installer ou mettre à jour l\'appli voiture via WiFi ADB</string>
-    <string name="updates_car_install">Installer</string>
 
     <!-- Paramètres -->
     <string name="settings_title">Paramètres</string>
@@ -71,8 +51,6 @@
     <string name="perm_battery_granted">Maintient la diffusion même écran éteint</string>
     <string name="perm_accessibility">Service d\'accessibilité</string>
     <string name="perm_accessibility_granted">Permet le contrôle tactile depuis la voiture</string>
-    <string name="perm_notifications">Accès aux notifications</string>
-    <string name="perm_notifications_granted">Transmet les notifications sur l\'écran de la voiture</string>
     <string name="perm_granted">Accordé</string>
     <string name="perm_usb_debugging">Débogage USB</string>
     <string name="perm_usb_desc">Requis sur le téléphone et la voiture</string>
@@ -84,10 +62,6 @@
     <string name="perm_shizuku_granted">Shizuku actif. Le téléphone peut déployer le serveur d\'affichage virtuel sans USB ADB.</string>
 
     <!-- Support -->
-    <string name="support_title">Soutenir</string>
-    <string name="support_heading">Aidez à maintenir DiLink-Auto</string>
-    <string name="support_sponsor_btn">Sponsoriser sur GitHub</string>
-    <string name="support_pix_btn">Payer avec Pix (Brésil)</string>
 
     <!-- À propos -->
     <string name="about_title">À propos</string>
@@ -98,8 +72,6 @@
     <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
     <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
     <string name="about_lib_scrcpy">scrcpy (concepts FakeContext/SurfaceScaler) — Apache 2.0</string>
-    <string name="about_dev_credit">Développé avec ❤ par Anderson Lucas de Castro Ramos 🇧🇷</string>
-    <string name="about_dev_github">github.com/andersonlucasg3</string>
 
     <!-- Intégration -->
     <string name="onboarding_welcome_title">Bienvenue sur DiLink-Auto</string>
@@ -110,8 +82,6 @@
     <string name="onboarding_battery_desc">Maintient la connexion quand l\'écran est éteint. Sans cela, la diffusion s\'arrête en veille.</string>
     <string name="onboarding_accessibility_title">Service d\'accessibilité</string>
     <string name="onboarding_accessibility_desc">Permet à l\'écran de la voiture de contrôler le téléphone. Sans cela, vous verrez l\'écran sans pouvoir toucher.</string>
-    <string name="onboarding_notification_title">Accès aux notifications</string>
-    <string name="onboarding_notification_desc">Affiche les notifications du téléphone sur l\'écran de la voiture. Sans cela, vous manquerez appels et messages.</string>
     <string name="onboarding_car_setup_title">Avant de connecter</string>
     <string name="onboarding_car_setup_desc">Assurez-vous que tout est prêt avant de connecter :</string>
     <string name="onboarding_car_prereq_wifi_adb">Débogage Wi-Fi ADB activé sur la voiture</string>
@@ -151,26 +121,19 @@
     <string name="car_app_retry">Réessayer</string>
     <string name="car_app_installed">Appli Voiture Installée</string>
 
-    <!-- Donation -->
-    <string name="donation_title">Soutenir le Développement</string>
-    <string name="donation_desc">Aidez à maintenir DiLink-Auto. Chaque contribution compte !</string>
-    <string name="donation_github">Sponsor GitHub</string>
-    <string name="donation_pix">Pix (Brésil)</string>
-
     <!-- Samsung-Specific Warnings -->
     <string name="samsung_warning_title">Appareil Samsung détecté</string>
     <string name="samsung_warning_desc">Samsung One UI nécessite une configuration supplémentaire : désactivez Auto Blocker (bloque USB ADB), accordez un accès illimité à la batterie et autorisez l\'accès à tous les fichiers. Voir Paramètres pour plus de détails.</string>
     <string name="samsung_settings_guide">Guide de configuration Samsung</string>
 
-    <!-- Distribution Channel -->
-    <string name="channel_title">Canal de Distribution</string>
-    <string name="channel_release">Stable</string>
-    <string name="channel_prerelease">Pré-version</string>
-    <string name="channel_release_desc">Versions stables — recommandé pour un usage quotidien</string>
-    <string name="channel_prerelease_desc">Versions de développement — dernières fonctionnalités, peuvent être instables</string>
-
     <!-- Settings Sections -->
-    <string name="settings_distribution">Distribution</string>
+    <!-- Car App Allowlist -->
+    <string name="allowlist_title">Car app allowlist</string>
+    <string name="allowlist_desc">Choose which apps appear on the car. Unselected apps never reach the car, reducing load.</string>
+    <string name="allowlist_select_all">Select all</string>
+    <string name="allowlist_deselect_all">Deselect all</string>
+    <string name="allowlist_search_hint">Search apps</string>
+    <string name="allowlist_empty">No apps selected — the car home screen will be empty.</string>
 
     <!-- Install on Car Status -->
     <string name="car_install_status_searching">Recherche de la voiture</string>
@@ -196,10 +159,6 @@
     <string name="car_install_status_auth_needed">Autorisation requise — Acceptez la boîte de dialogue de débogage USB sur l\'écran de la voiture, puis appuyez sur Continuer pour réessayer</string>
 
     <!-- Auto-Update Status -->
-    <string name="status_auto_update">Mise à jour de l\'appli voiture (v%1$s → v%2$s)…</string>
-    <string name="status_auto_update_complete">Appli voiture mise à jour ! Redémarrage…</string>
-    <string name="status_update_failed">Échec de la mise à jour : %s</string>
-    <string name="status_auto_update_failed">Échec de la mise à jour auto : %s</string>
 
     <!-- Notification Actions -->
     <string name="notification_action_stop">Arrêter</string>

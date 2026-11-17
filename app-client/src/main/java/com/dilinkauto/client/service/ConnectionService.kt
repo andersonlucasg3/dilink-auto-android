@@ -3,20 +3,21 @@ package com.dilinkauto.client.service
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
-import android.content.pm.PackageManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.LauncherApps
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.os.UserHandle
-import android.util.Log
+import android.os.SystemClock
+import android.util.DisplayMetrics
+import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.dilinkauto.client.ClientApp
 import com.dilinkauto.client.FileLog
@@ -24,72 +25,192 @@ import com.dilinkauto.client.R
 import com.dilinkauto.client.ShizukuManager
 import com.dilinkauto.client.display.VirtualDisplayClient
 import com.dilinkauto.protocol.*
-import dadb.AdbKeyPair
-import dadb.Dadb
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+typealias State = SessionState
+
 class ConnectionService : Service() {
 
     private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     @Volatile private var controlConnection: Connection? = null
-    @Volatile private var videoConnection: Connection? = null
-    @Volatile private var inputConnection: Connection? = null
     @Volatile private var vdClient: VirtualDisplayClient? = null
     private var pendingAppLaunch: String? = null
-    private var vdWaitJob: Job? = null
     private var handshakeJob: Job? = null
-    private var vdWidth = 1304
-    private var vdHeight = 792
-    private var targetFps = 30
-    private var serviceRegistration: Discovery.ServiceRegistration? = null
-    private var wakeLock: PowerManager.WakeLock? = null
-    private var connectionLoopJob: Job? = null
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private var networkChangeDebounce: Job? = null
-    private var autoUpdateAttempted = false
-    private var autoUpdateFailedAt = 0L
 
-    enum class State { IDLE, WAITING, CONNECTED, STREAMING }
+    /**
+     * issue #76：本会话是否收到过 `HANDSHAKE_REQUEST`。
+     *
+     * 只用于两件事：握手超时时区分「对端一直不发」与「收到了但本端处理慢」，
+     * 以及空会话 cleanup 时跳过整条物理屏恢复链路。每次 accept 新会话时重置。
+     */
+    @Volatile
+    private var handshakeReceived = false
+    private var targetFps = VideoConfig.TARGET_FPS
+    private var targetBitrate = VideoConfig.DEFAULT_BITRATE
+    private var serviceRegistration: Discovery.ServiceRegistration? = null
+    private var connectionLoopJob: Job? = null
+    private var networkMonitor: ClientNetworkMonitor? = null
+
+    /** 网络事件 → 是否重建投屏通道的判据（issue #200，见 [NetworkRebuildPolicy]）。 */
+    private val networkRebuildPolicy = NetworkRebuildPolicy()
+    private lateinit var appListBuilder: AppListBuilder
+    private lateinit var displayRestorer: PhoneDisplayRestorer
+
+    // ─── Session generation (audit A-01) ───
+    //
+    // cleanupSession() used to be guarded by a single AtomicBoolean that the
+    // network callbacks reset *before* the cancelled loop's finally block had
+    // run, so one generation's late teardown consumed the guard belonging to
+    // the *next* generation: the fresh lifecycle ServerSocket was never closed
+    // and the stale vdClient kept streaming (the leaked-VD failure mode).
+    //
+    // Every accept now mints a generation id; a teardown only runs when the id
+    // it captured is still the active one, so a stale finally block is a no-op
+    // and the new session's teardown always gets its own guard.
+    private val sessionSeq = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var activeSessionId = 0
+
+    /** Serialises the vdClient read-modify-write in handleHandshake (audit A-03). */
+    private val vdLock = Any()
+
+    /**
+     * Process-lifetime scope for teardown work (audit A-04).
+     *
+     * `cleanupSession()` runs on Main from several call sites and
+     * `VirtualDisplayClient.stopVdServer()` joins a write worker for up to
+     * 1s — an ANR-shaped stall. Moving the blocking part here (instead of
+     * serviceScope, which onDestroy() cancels before the work runs, and
+     * instead of Main) keeps the physical-panel restore alive after the
+     * service is stopped. Mirrors PhoneDisplayRestorer's own scope contract.
+     */
+    private val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * 内嵌资产（vd-server.jar / app-server.apk）的部署器。
+     *
+     * **必须是 `by lazy`**：[deployAssets] 在 onCreate 早期就把它交给工作协程
+     * （`serviceScope.launch(Dispatchers.IO)`），而 onCreate 的主线程路径还要跑完
+     * 设备信息、IME 缓存等 IO 才轮到赋值 —— `lateinit` 版本在真机上被 worker
+     * 线程抢先访问，服务崩溃重启（2026-10-09 实测）。与 [notifier] 是同一次
+     * DRY 重构留下的同族问题，修法保持一致。
+     */
+    private val assetDeployer: AssetDeployer by lazy { AssetDeployer(AssetManagerAssetSource(applicationContext.assets)) }
+
+    /**
+     * 前台通知 + wake lock 门面（DRY-6，与车机端共享）。
+     *
+     * **必须是 `by lazy`，不能是 `lateinit`**：`onCreate` 在初始化其余字段之前就会调
+     * [acquireWakeLock]（真机实测，2026-10-09），`lateinit` 版本会让服务一创建即抛
+     * `UninitializedPropertyAccessException`，AMS 随后把重启排到 30 分钟后 —— 表现为
+     * "装上后毫无反应"。lazy 把构造时机绑定到首次访问，访问顺序不再是隐式契约。
+     * 构造块只捕获参数、不做 Android API 调用（见 [ForegroundNotifier]），
+     * 首次访问时 Service 必已 attach，`getString` 可用。
+     */
+    private val notifier: com.dilinkauto.protocol.ForegroundNotifier by lazy {
+        // Stop action 是手机侧独有的；车机端没有面向用户的停止入口。
+        ForegroundNotifier(
+            context = this,
+            channelId = ClientApp.CHANNEL_SERVICE,
+            notificationId = NOTIFICATION_ID,
+            wakeLockTag = "DiLinkAuto::ConnectionService",
+            title = getString(R.string.notification_title),
+            text = { ctx, res -> ctx.getString(res) },
+            extraAction = ForegroundNotifier.stopAction(
+                iconRes = android.R.drawable.ic_media_pause,
+                label = getString(R.string.notification_action_stop),
+                serviceClass = ConnectionService::class.java,
+                action = ACTION_STOP
+            )
+        )
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private var packageRemovedReceiver: BroadcastReceiver? = null
 
+    /**
+     * 手机电量采集与上行（issue #151）。
+     *
+     * sticky 广播只在服务存活期间订阅；`isReady` 要求**握手完成**且控制连接可用，
+     * 以免把新消息推给尚未完成握手的对端（老车机对它也是静默忽略，这里只是双保险）。
+     */
+    private var phoneBatteryReporter: PhoneBatteryReporter? = null
+    @Volatile private var savedDefaultIme: String? = null
+
+    /**
+     * 本会话 vd-server 的 token（issue #180 第三版）。
+     *
+     * Shizuku 部署时由 plan 生成并记下来；会话收尾（[cleanupSession] →
+     * `PhoneDisplayRestorer`）必须用**它**写停止哨兵。回读设备上的
+     * `vd-server.session` 会读到下一代引擎 —— 那正是"旧会话停止命令杀掉新引擎"的成因。
+     */
+    @Volatile private var vdSessionToken: String? = null
+
     override fun onCreate() {
         super.onCreate()
+        FileLog.loadEnabled(getSharedPreferences(AppPrefs.FILE_NAME, MODE_PRIVATE))
         FileLog.rotate() // Archive previous log, start fresh
         // Clear stale static state from previous service instance
         activeConnection = null
         _serviceState.value = State.IDLE
         acquireWakeLock()
-        registerNetworkCallback()
+        setupNetworkMonitor()
         registerPackageRemovedReceiver()
+        // issue #151：电量采集跟随服务生命周期；只在握手完成后上行，未连接不发。
+        PhoneBatteryReporter(
+            scope = serviceScope,
+            context = applicationContext,
+            isReady = { handshakeReceived && controlConnection?.isConnected == true },
+            send = { type, payload -> controlConnection?.sendData(type, payload) }
+        ).also {
+            phoneBatteryReporter = it
+            it.start()
+        }
         deployAssets()
         logDeviceInfo()
-        UpdateManager.checkForUpdate(force = false)
+        cacheDefaultIme()
+        // Wire the extracted locator's WiFi dependency (avoids passing the Service
+        // into CarIpLocator; the locator is a plain object for unit-testability).
+        @Suppress("DEPRECATION")
+        CarIpLocator.wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager
+        // A-M8: publish the subnet snapshot once here instead of enumerating
+        // interfaces per scan; findCarAdb is additionally serialized (Mutex).
+        refreshSubnetSnapshot()
+        appListBuilder = AppListBuilder(applicationContext, serviceScope)
+        // No scope passed: the restorer owns a process-lifetime scope so a
+        // Service.onDestroy() mid-restore cannot skip `cmd display power-reset`.
+        displayRestorer = PhoneDisplayRestorer(applicationContext)
+    }
+
+    /** Snapshot the device's local IPv4 addresses for CarIpLocator's sweep (audit A-M8). */
+    private fun refreshSubnetSnapshot() {
+        val localIps = NetUtil.localIpv4Addresses()
+        CarIpLocator.setLocalSubnetSnapshot(localIps)
+        if (localIps.isNotEmpty()) {
+            FileLog.i(TAG, "Local IPv4 snapshot for car scan: ${localIps.joinToString(", ")}")
+        }
+    }
+
+    private fun cacheDefaultIme() {
+        try {
+            val currentIme = android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)
+            if (com.dilinkauto.protocol.ImeRestore.shouldRestoreIme(currentIme)) {
+                savedDefaultIme = currentIme
+                getSharedPreferences(AppPrefs.FILE_NAME, MODE_PRIVATE).edit().putString(AppPrefs.SAVED_DEFAULT_IME, currentIme).apply()
+                FileLog.i(TAG, "Cached default IME: $currentIme")
+            }
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Failed to cache default IME: ${e.message}")
+        }
     }
 
     private fun logDeviceInfo() {
-        val info = buildString {
-            val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-            val mi = android.app.ActivityManager.MemoryInfo()
-            am?.getMemoryInfo(mi)
-            val dm = resources.displayMetrics
-
-            appendLine("── Device Info ──")
-            appendLine("model=${android.os.Build.MODEL} manufacturer=${android.os.Build.MANUFACTURER}")
-            appendLine("product=${android.os.Build.PRODUCT} device=${android.os.Build.DEVICE}")
-            appendLine("android=${android.os.Build.VERSION.RELEASE} sdk=${android.os.Build.VERSION.SDK_INT}")
-            appendLine("display=${dm.widthPixels}x${dm.heightPixels} @${dm.densityDpi}dpi density=${dm.density}")
-            appendLine("cores=${Runtime.getRuntime().availableProcessors()}")
-            appendLine("abi=${android.os.Build.SUPPORTED_ABIS?.joinToString(",") ?: "?"}")
-            appendLine("heapMax=${Runtime.getRuntime().maxMemory()} heapTotal=${Runtime.getRuntime().totalMemory()} heapFree=${Runtime.getRuntime().freeMemory()}")
-            appendLine("totalMem=${mi.totalMem} availMem=${mi.availMem} lowMemory=${mi.lowMemory}")
-        }
-        FileLog.i(TAG, info)
+        // issue #8: 启动头先打一行可读版本号，不必反编译 dex 即可判断跑的是哪份构建。
+        FileLog.i(TAG, "DiLink client ${com.dilinkauto.client.BuildConfig.VERSION_NAME}+g${com.dilinkauto.client.BuildConfig.BUILD_REVISION}")
+        FileLog.i(TAG, DeviceInfo.buildDeviceInfoBlock(this))
     }
 
     private fun registerPackageRemovedReceiver() {
@@ -108,7 +229,7 @@ class ConnectionService : Service() {
                             FileLog.w(TAG, "Failed to send APP_UNINSTALLED: ${e.message}")
                         }
                         // Resend the full app list so car has accurate state
-                        sendAppList()
+                        appListBuilder.sendAppList(conn)
                     }
                 }
             }
@@ -126,10 +247,13 @@ class ConnectionService : Service() {
 
     private fun deployAssets() {
         serviceScope.launch(Dispatchers.IO) {
-            val dir = java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto")
+            // DIR_PATH 已是绝对路径（/sdcard/DiLinkAuto），直接使用。
+            // 不要再与 getExternalStorageDirectory() 拼接，否则 child 的前导斜杠
+            // 不会重置路径，会拼出 /storage/emulated/0/sdcard/DiLinkAuto 影子目录。
+            val dir = java.io.File(VdDeploy.DIR_PATH)
             dir.mkdirs()
-            extractAsset("vd-server.jar", java.io.File(dir, "vd-server.jar"))
-            extractAsset("app-server.apk", java.io.File(filesDir, "app-server.apk"))
+            assetDeployer.extract(VdDeploy.JAR_NAME, java.io.File(dir, VdDeploy.JAR_NAME))
+            assetDeployer.extract("app-server.apk", java.io.File(filesDir, "app-server.apk"))
             assetsReady = true
         }
     }
@@ -143,73 +267,74 @@ class ConnectionService : Service() {
         }
     }
 
-    private fun extractAsset(assetName: String, target: java.io.File) {
-        try {
-            val assetBytes = assets.open(assetName).use { it.readBytes() }
-            val assetCrc = java.util.zip.CRC32().apply { update(assetBytes) }.value
-
-            if (target.exists()) {
-                val fileCrc = java.util.zip.CRC32().apply { update(target.readBytes()) }.value
-                if (fileCrc == assetCrc) {
-                    FileLog.i(TAG, "$assetName up-to-date (crc=$assetCrc)")
-                    return
-                }
-            }
-
-            val tmp = java.io.File("${target.absolutePath}.tmp")
-            tmp.writeBytes(assetBytes)
-            tmp.renameTo(target)
-            FileLog.i(TAG, "$assetName deployed to ${target.absolutePath} (${assetBytes.size} bytes, crc=$assetCrc)")
-        } catch (e: Exception) {
-            FileLog.w(TAG, "Failed to extract $assetName: ${e.message}")
+    /**
+     * 确保磁盘上的 vd-server.jar 与当前 APK 内嵌的版本一致，返回该 jar 的 CRC。
+     *
+     * 为什么必须在每次握手前调用：磁盘上的 jar 会跨进程存活，而
+     * [deployAssets] 只在 [onCreate] 跑一次。若这里不校验，Service 未被系统
+     * 回收、只是重连车机或强杀重启 vd-server 时，`CLASSPATH=... app_process`
+     * 会静默加载上一次的旧引擎 —— 应用能跑、日志正常，但跑的是旧代码。
+     *
+     * CRC 相同则直接返回，代价仅一次内存读，不写盘、不需要 Shizuku；
+     * 因此 Shizuku 与车机 ADB 两条部署路径都可以无条件调用。
+     */
+    private fun ensureVdServerJarCurrent(): Long {
+        val target = java.io.File(VdDeploy.JAR_PATH)
+        val crc = assetDeployer.ensureCurrent(VdDeploy.JAR_NAME, target)
+        if (crc < 0L) {
+            // CRC state unknown (asset unreadable / write failed). The old jar on
+            // disk may be stale, so report -1 rather than guessing.
+            FileLog.w(TAG, "VD jar CRC unknown; on-disk jar at ${target.absolutePath} may be stale")
         }
+        return crc
     }
 
-    private fun registerNetworkCallback() {
+    private fun setupNetworkMonitor() {
         val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        val request = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            .build()
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                FileLog.i(TAG, "Network available: $network")
-                networkChangeDebounce?.cancel()
-                val state = _serviceState.value
-                if (state == State.WAITING) {
-                    FileLog.i(TAG, "New network while WAITING — restarting listen loop")
-                    cleanupSession()
-                    connectionLoopJob?.cancel()
-                    startConnectionLoop()
-                }
-            }
-            override fun onLost(network: Network) {
-                // Only react if the lost network is the one our connection uses.
-                // Ignore unrelated network drops (mobile data, other WiFi, etc.)
-                val conn = controlConnection
-                if (conn != null && conn.isConnected) {
-                    val cm2 = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-                    val activeNet = cm2.activeNetwork
-                    // If another network is still active and our connection has it, ignore
-                    if (activeNet != null && activeNet != network) {
-                        FileLog.i(TAG, "Network lost: $network (not our active network $activeNet — ignoring)")
+        networkMonitor = ClientNetworkMonitor(
+            connectivityManager = cm,
+            scope = serviceScope,
+            listener = object : ClientNetworkMonitor.Listener {
+                override fun onNetworkAvailable(network: Network) {
+                    refreshSubnetSnapshot()
+                    val state = _serviceState.value
+                    if (state == State.WAITING) {
+                        FileLog.i(TAG, "New network while WAITING — restarting listen loop")
+                        cleanupSession()
+                        connectionLoopJob?.cancel()
+                        startConnectionLoop()
                         return
                     }
-                }
-                FileLog.i(TAG, "Network lost: $network — debouncing before reacting")
-                // Debounce: delay 3s before reacting to transient network flaps.
-                // 4G changes can cause brief hotspot resets that recover immediately.
-                networkChangeDebounce?.cancel()
-                networkChangeDebounce = serviceScope.launch {
-                    delay(3000)
-                    if (controlConnection?.isConnected != true) {
-                        FileLog.i(TAG, "Network lost confirmed — resetting connection")
+                    if (state != State.CONNECTED && state != State.STREAMING) return
+                    // issue #200：Wi-Fi 重关联时 onAvailable 可能先于链路真正可用到达（现场
+                    // 16:36:09.248 之后视频仍静默了 5.98s），所以不能无条件重建 —— 全量重建
+                    // 实测 3.7~4.9s，断链期间连握手都完不成，只会把 6s 冻屏拉长。
+                    // 只有「链路已恢复、控制通道却还在静默」（socket 半死）才重建。
+                    val silence = controlConnection?.msSinceLastFrameReceived() ?: -1L
+                    val action = networkRebuildPolicy.onNetworkAvailable(
+                        // 单调时钟（与车机侧一致）：冷却窗口只比差值，墙钟跳变会算错。
+                        nowMs = SystemClock.elapsedRealtime(),
+                        streaming = true,
+                        controlSilenceMs = silence,
+                    )
+                    if (action == NetworkRebuildPolicy.Action.REBUILD) {
+                        FileLog.w(TAG, "Network available while $state, control silent ${silence}ms — proactive rebuild (issue #200)")
+                        resetConnectionForNetworkChange()
+                    } else {
+                        FileLog.i(TAG, "Network available while $state — control silent ${silence}ms, keep session (issue #200)")
                     }
+                }
+
+                override fun onNetworkLostConfirmed(network: Network) {
                     resetConnectionForNetworkChange()
                 }
+
+                override fun isConnectionActive(): Boolean {
+                    val conn = controlConnection
+                    return conn != null && conn.isConnected
+                }
             }
-        }
-        cm.registerNetworkCallback(request, callback)
-        networkCallback = callback
+        ).apply { start() }
     }
 
     private fun resetConnectionForNetworkChange() {
@@ -244,8 +369,22 @@ class ConnectionService : Service() {
                 stopSelf()
             }
             ACTION_INSTALL_CAR -> {
-                val explicitIp = intent?.getStringExtra("car_ip")
+                val explicitIp = intent.getStringExtra("car_ip")
                 installCarApp(explicitIp)
+            }
+            ACTION_ALLOWLIST_UPDATED -> {
+                // Allowlist screen changed the selection — re-send so the car grid updates live.
+                appListBuilder.sendAppList(controlConnection)
+            }
+            // START_STICKY 的系统重启以 **intent=null** 重新投递 onStartCommand。
+            // 此前没有 null 分支：AMS 重启进程后服务再也不会回到监听态（真机
+            // 2026-10-09 实测：08:42:12 进程被重启，日志只有设备信息 + 资产部署，
+            // 没有 "Listening for car connection"，9637-9639 全部无监听，直到
+            // 用户手动重开 app）。行为与 ACTION_START 等价；isActive 防重入。
+            null -> {
+                FileLog.i(TAG, "onStartCommand with null intent — system restart, resuming service")
+                startForeground(NOTIFICATION_ID, buildNotification(R.string.notification_waiting))
+                if (connectionLoopJob?.isActive != true) startConnectionLoop()
             }
         }
         return START_STICKY
@@ -254,9 +393,6 @@ class ConnectionService : Service() {
     // ─── Connection Loop ───
 
     private fun startConnectionLoop() {
-        // Reset auto-update state on explicit start — gives user a fresh chance
-        autoUpdateAttempted = false
-        autoUpdateFailedAt = 0L
         connectionLoopJob?.cancel()
         connectionLoopJob = serviceScope.launch {
             // Register mDNS in background — don't block the listen loop.
@@ -268,7 +404,7 @@ class ConnectionService : Service() {
                         serviceRegistration = withTimeoutOrNull(5000) {
                             Discovery.registerService(
                                 this@ConnectionService,
-                                port = Discovery.DEFAULT_PORT,
+                                port = Ports.DEFAULT_PORT,
                                 deviceName = android.os.Build.MODEL
                             )
                         }
@@ -292,16 +428,26 @@ class ConnectionService : Service() {
     private suspend fun listenAndHandleOneConnection() {
         _serviceState.value = State.WAITING
         updateNotification(R.string.notification_waiting)
-        FileLog.i(TAG, "Listening for car connection on port ${Discovery.DEFAULT_PORT}...")
+        FileLog.i(TAG, "Listening for car connection on port ${Ports.DEFAULT_PORT}...")
 
+        // Declared outside try so the finally can scope its teardown to the
+        // generation this iteration accepted (see the session-generation doc).
+        var sessionId = 0
         try {
             // ─── Accept control connection (port 9637) ───
-            val ctrl = Connection.accept(Discovery.DEFAULT_PORT, serviceScope)
+            val ctrl = Connection.accept(Ports.DEFAULT_PORT, serviceScope)
+            // A brand-new session begins: mint its generation and allow the next
+            // teardown to run against it. Any late teardown from a previous
+            // generation is ignored by cleanupSession's id check.
+            sessionId = sessionSeq.incrementAndGet()
+            activeSessionId = sessionId
+            handshakeReceived = false
+            resetCleanupGuard(sessionId)
             controlConnection = ctrl
             activeConnection = ctrl
             _serviceState.value = State.CONNECTED
             updateNotification(R.string.notification_connected)
-            FileLog.i(TAG, "Car connected (control), waiting for handshake")
+            FileLog.i(TAG, "Car connected (control, session #$sessionId), waiting for handshake")
 
             ctrl.onFrames(Channel.CONTROL) { frame -> handleControlFrame(frame) }
             ctrl.onFrames(Channel.DATA) { frame -> handleDataFrame(frame) }
@@ -314,60 +460,40 @@ class ConnectionService : Service() {
             }
 
             ctrl.start() // heartbeat enabled (default)
+            // issue #76：握手是纯被动的（handshakeJob 只在收到 HANDSHAKE_REQUEST 时才创建），
+            // 对端在首帧前关闭或一直不发时，旧实现会无限期挂在 disconnected.await() 上。
+            // 注意：超时只能覆盖「等 HANDSHAKE_REQUEST」这一段；收到握手后会话可能持续
+            // 几十分钟，若继续套 5s 超时会把正常会话在 5s 后主动掐断（2026-11-13 S01 实测）。
+            val handshakeWindowExpired = withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) {
+                while (!handshakeReceived && !disconnected.isCompleted) {
+                    delay(25)
+                }
+                handshakeReceived
+            }
+            if (handshakeWindowExpired == null) {
+                val reason = if (handshakeReceived) {
+                    "Handshake timeout: request received but not completed within ${HANDSHAKE_TIMEOUT_MS}ms"
+                } else {
+                    "Handshake timeout: no HANDSHAKE_REQUEST within ${HANDSHAKE_TIMEOUT_MS}ms"
+                }
+                FileLog.w(TAG, "$reason (session #$sessionId)")
+                ctrl.disconnect()
+            }
+            // 未超时：正常会话在这里一直等到对端断开；握手窗口已结束，不再受 5s 限制。
             disconnected.await()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             FileLog.w(TAG, "Connection error: ${e.message}")
         } finally {
-            cleanupSession()
+            // Only tears down when this generation is still the active one —
+            // a network-change restart that already accepted a new session must
+            // not consume that session's cleanup guard.
+            cleanupSession(sessionId)
             delay(1000)
         }
     }
 
-    /**
-     * Accept video and input connections after handshake succeeds.
-     * Called from handleHandshake() after the control connection is established.
-     * Opens ServerSockets on ports 9638/9639, then accepts both in parallel.
-     */
-    private suspend fun acceptVideoAndInputConnections() {
-        FileLog.i(TAG, "Accepting video (${Discovery.VIDEO_PORT}) and input (${Discovery.INPUT_PORT}) connections...")
-        try {
-            val videoDef = serviceScope.async(Dispatchers.IO) {
-                Connection.accept(Discovery.VIDEO_PORT, serviceScope)
-            }
-            val inputDef = serviceScope.async(Dispatchers.IO) {
-                Connection.accept(Discovery.INPUT_PORT, serviceScope)
-            }
-
-            val video = withTimeout(10_000) { videoDef.await() }
-            videoConnection = video
-            video.onLog { msg -> FileLog.w(TAG, "VideoConn: $msg") }
-            video.onDisconnect {
-                FileLog.i(TAG, "Car disconnected (video)")
-                controlConnection?.disconnect()
-            }
-            video.start(enableHeartbeat = false)
-            FileLog.i(TAG, "Video connection accepted")
-
-            val input = withTimeout(10_000) { inputDef.await() }
-            inputConnection = input
-            input.onFrames(Channel.INPUT) { frame ->
-                // Must run on IO — touch writes to localhost socket, blocked by StrictMode on Main
-                serviceScope.launch(Dispatchers.IO) { handleInputFrame(frame) }
-            }
-            input.onLog { msg -> FileLog.w(TAG, "InputConn: $msg") }
-            input.onDisconnect {
-                FileLog.i(TAG, "Car disconnected (input)")
-                controlConnection?.disconnect()
-            }
-            input.start(enableHeartbeat = false)
-            FileLog.i(TAG, "Input connection accepted — all 3 connections established")
-        } catch (e: Exception) {
-            FileLog.e(TAG, "Failed to accept video/input connections: ${e.message}")
-            controlConnection?.disconnect()
-        }
-    }
 
     // ─── Frame Handlers ───
 
@@ -375,334 +501,288 @@ class ConnectionService : Service() {
         FileLog.d(TAG, "Control frame: type=0x${frame.messageType.toString(16)}")
         when (frame.messageType) {
             ControlMsg.HANDSHAKE_REQUEST -> {
+                // issue #76：先置位再解码；即使 payload 损坏，也能在超时日志里
+                // 区分「对端发了但本端没处理完」与「对端一直没发」。
+                handshakeReceived = true
                 val req = HandshakeRequest.decode(frame.payload)
                 FileLog.i(TAG, "Handshake from car: ${req.deviceName} ${req.screenWidth}x${req.screenHeight}")
-                handleHandshake(req)
-            }
-            ControlMsg.LAUNCH_APP -> {
-                val msg = LaunchAppMessage.decode(frame.payload)
-                val client = vdClient
-                if (client != null) {
-                    client.launchApp(msg.packageName)
-                } else {
-                    pendingAppLaunch = msg.packageName
-                    FileLog.i(TAG, "Queued app launch: ${msg.packageName} (VD not ready)")
+                // A-02: handleHandshake does disk I/O (jar CRC), a bind (19647)
+                // and package enumeration — all far too heavy for the reader
+                // coroutine that dispatches this frame inline. Run it on the
+                // handshake job; the previous handshake is cancelled first so a
+                // rotation re-handshake cannot interleave with its predecessor.
+                handshakeJob?.cancel()
+                handshakeJob = serviceScope.launch(Dispatchers.IO) {
+                    try {
+                        handleHandshake(req)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // Connection's reader also guards its listener, but this
+                        // coroutine must not die silently: a failed handshake
+                        // has to tear the session down, not just kill the job.
+                        FileLog.e(TAG, "Handshake failed", e)
+                    }
                 }
             }
-            ControlMsg.GO_HOME -> { vdClient?.goHome() }
-            ControlMsg.GO_BACK -> { vdClient?.goBack() }
-            ControlMsg.VD_SERVER_READY -> {
-                val port = java.nio.ByteBuffer.wrap(frame.payload).getInt()
-                FileLog.i(TAG, "Car says VD server ready on port $port")
-                waitForVDServer(port)
-            }
-            ControlMsg.APP_UNINSTALL -> {
-                val pkg = String(frame.payload, Charsets.UTF_8)
-                FileLog.i(TAG, "Car requested uninstall: $pkg")
-                val client = vdClient
-                if (client != null) {
-                    client.uninstallApp(pkg)
-                } else {
-                    FileLog.w(TAG, "VD client not connected, cannot uninstall $pkg")
-                }
-            }
-            ControlMsg.APP_INFO -> {
-                val pkg = String(frame.payload, Charsets.UTF_8)
-                FileLog.i(TAG, "Car requested app info: $pkg")
-                sendAppInfoData(pkg)
-            }
-            ControlMsg.APP_SHORTCUTS -> {
-                val pkg = String(frame.payload, Charsets.UTF_8)
-                FileLog.i(TAG, "Car requested shortcuts for: $pkg")
-                sendAppShortcuts(pkg)
-            }
-            ControlMsg.APP_SHORTCUT_ACTION -> {
-                val action = AppShortcutActionMessage.decode(frame.payload)
-                FileLog.i(TAG, "Car requested shortcut action: ${action.shortcutId} for ${action.packageName}")
-                serviceScope.launch(Dispatchers.IO) {
-                    launchShortcut(action.packageName, action.shortcutId)
-                }
-            }
+            // LAUNCH_APP, GO_BACK, GO_HOME, APP_UNINSTALL, APP_INFO
+            // now go directly Car → VD via port 9639 Channel.CONTROL
         }
     }
 
+    /**
+     * Real physical pixel size of the default display, bypassing compatibility
+     * scaling.
+     *
+     * **Why not `resources.displayMetrics`:** when the app is subject to
+     * screen-compat mode Android scales the reported metrics — the 2026-10-09
+     * test phone (real 1368x3192 @560dpi) reports a 2992px long edge there.
+     * Sizing the VD from it left the IME, whose width Chinese ROMs hardcode to
+     * the *true* physical width (and which ignores VD density entirely), 200px
+     * (~6.7%) wider than the VD at every DPI setting — the chopped-keyboard
+     * bug. `maximumWindowMetrics` (API 30+) / `getRealMetrics` (API 29) report
+     * the untouched physical size.
+     */
+    private fun realDisplaySize(): Pair<Int, Int> {
+        val wm = getSystemService(WindowManager::class.java)
+        if (wm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = wm.maximumWindowMetrics.bounds
+            return bounds.width() to bounds.height()
+        }
+        @Suppress("DEPRECATION")
+        val display = wm?.defaultDisplay
+        if (display != null) {
+            val dm = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            display.getRealMetrics(dm)
+            return dm.widthPixels to dm.heightPixels
+        }
+        // No default display: fall back to compat metrics rather than crash
+        // the handshake — a slightly narrow VD degrades gracefully (cropped
+        // IME), an exception here kills the whole connection.
+        return resources.displayMetrics.let { it.widthPixels to it.heightPixels }
+    }
+
     private fun handleHandshake(request: HandshakeRequest) {
+        // P-M3: the version field was carried and never validated by any of the
+        // three consumers — a peer claiming an incompatible version had its
+        // trailing fields read at the wrong offsets. Reject at the boundary.
+        requireSupportedProtocolVersion(request.protocolVersion)
         val conn = controlConnection ?: return
-        FileLog.i(TAG, "Car display: ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi fps=${request.targetFps}")
+        FileLog.i(TAG, "Car display: ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi fps=${request.targetFps} bitrate=${request.bitrate}")
         targetFps = request.targetFps
+        targetBitrate = if (request.bitrate > 0) request.bitrate else VideoConfig.DEFAULT_BITRATE
 
-        val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
-        val dpiScale = phoneDpi.toFloat() / 160f
-        val minHeightPx = (VideoConfig.TARGET_SW_DP * dpiScale).toInt()
-        val carAspect = request.screenWidth.toFloat() / request.screenHeight
-        val scaledH = minHeightPx and 0x7FFFFFFE.toInt()
-        val scaledW = ((scaledH * carAspect).toInt()) and 0x7FFFFFFE.toInt()
-        vdWidth = scaledW
-        vdHeight = scaledH
-        FileLog.i(TAG, "Touch mapping: ${scaledW}x${scaledH}")
+        // A handshake always leads to a fresh VD, so the teardown of whatever
+        // came before must be allowed to run again (rotation re-handshake case:
+        // the guard was consumed by the mid-stream VD swap below).
+        resetCleanupGuard()
 
-        vdClient?.disconnect()
-        vdClient = null
+        cacheDefaultIme()
 
-        val vdJarPath = java.io.File(
-            java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
-            "vd-server.jar"
-        ).absolutePath
-        val connMethod = if (ShizukuManager.isAvailable) CONNECTION_METHOD_SHIZUKU else CONNECTION_METHOD_USB_ADB
+        // Mid-stream re-handshake: the car rotated and is reusing the control
+        // connection. Tear down the old VD before creating a new one at the
+        // new orientation. Old VD exits via its watchdog, restoring the panel.
+        // A-03: the whole read-modify-write is under vdLock — two overlapping
+        // handshakes (rotation + reconnect) used to both pass the null check
+        // and both bind 19647; the loser leaked its ServerSocket.
+        synchronized(vdLock) {
+            vdClient?.let {
+                FileLog.i(TAG, "Re-handshake: tearing down old VD (rotation)")
+                it.stopVdServer()
+                it.disconnect()
+            }
+            vdClient = null
+        }
+
+        // Create VD at car viewport size. The DPI/size computation (anti-crop
+        // scale for Chinese-ROM IME hardcoding + DPI override vs. auto) lives
+        // in VdDimensions (protocol-core); see it for the rationale. The phone
+        // side MUST be the real physical size — see [realDisplaySize].
+        val (phoneRealW, phoneRealH) = realDisplaySize()
+        // issue #153 PB：档位随握手下发，手机在这一次建屏时取用；不在会话中 resize。
+        // 老车机不带该尾字段 → decode 出 0 = VdAreaTier.AUTO（默认档）。
+        val areaTier = VdAreaTier.normalize(request.vdAreaTier)
+        // issue #202 A：尺寸与 DPI 都由 VdDimensions.resolve 单点决策，这里只取结果与来源。
+        // 旧实现把 override 直接交给 coerceDpiOverride（越界夹到边界 480），于是
+        // 「手滑输入 560」会被保存成一个看起来合法的 480 并在每次重连复现。
+        val vd = VdDimensions.resolve(request, phoneRealW, phoneRealH, areaTier)
+        val vdWidth = vd.width
+        val vdHeight = vd.height
+        val displayDpi = vd.dpi
+        FileLog.i(TAG, "VD: ${vdWidth}x${vdHeight} @${displayDpi}dpi (car ${request.screenWidth}x${request.screenHeight} @${request.screenDpi}dpi, phone real ${phoneRealW}x${phoneRealH}, override=${request.dpiOverride}, areaTier=$areaTier, dpiSource=${vd.token})")
+        // 非法/越界 override 已回落到自动标定值：这里必须是 W 级，现场才能解释"为什么不是 480"。
+        vd.warning?.let { FileLog.w(TAG, it) }
+
+        // Open lifecycle channel if not already open (survives re-handshakes).
+        // A-03: created under vdLock so a concurrent handshake cannot double-bind.
+        synchronized(vdLock) {
+            vdClient ?: VirtualDisplayClient(serviceScope, this@ConnectionService).also {
+                it.onStackEmpty = {
+                    val c = controlConnection
+                    if (c?.isConnected == true) {
+                        try { c.sendControl(ControlMsg.VD_STACK_EMPTY) } catch (_: Exception) {}
+                    }
+                }
+                it.onDisplayReady = {
+                    val c = controlConnection
+                    if (c?.isConnected == true) {
+                        try {
+                            c.sendControl(ControlMsg.VD_PORTS_BOUND)
+                            FileLog.i(TAG, "Sent VD_PORTS_BOUND to car — direct video/input streaming")
+                        } catch (e: Exception) {
+                            FileLog.e(TAG, "Failed to send VD_PORTS_BOUND", e)
+                        }
+                    }
+                }
+                it.startListening(VirtualDisplayClient.SERVER_PORT)
+                vdClient = it
+                FileLog.i(TAG, "VD lifecycle channel open on 127.0.0.1:${VirtualDisplayClient.SERVER_PORT}")
+            }
+        }
+
+        // 握手响应里告知车机端 jar 路径前，先确保磁盘上的 jar 就是当前 APK
+        // 内嵌的那一份。放在此处可覆盖 Shizuku 与车机 ADB 两条部署路径，
+        // 且早于响应发送 —— 车机端拿到路径后不会启动到旧 jar。
+        val vdJarCrc = ensureVdServerJarCurrent()
+        // 直接用 VdDeploy.JAR_PATH，不再与 getExternalStorageDirectory() 拼接：
+        // child 的前导斜杠不重置父路径，拼接会得到 /storage/emulated/0/sdcard/DiLinkAuto
+        // 这类影子目录，与实际写入位置不一致。
+        val vdJarPath = VdDeploy.JAR_PATH
+        // A-L18: snapshot the Shizuku decision ONCE and thread it through both
+        // the response and the deploy path. Reading checkPermission() for the
+        // response and isAvailable later for the deploy let a binder death
+        // between the two produce "we said SHIZUKU but deployed nothing".
+        val useShizuku = ShizukuManager.checkPermission()
+        val connMethod = if (useShizuku) CONNECTION_METHOD_SHIZUKU else CONNECTION_METHOD_USB_ADB
         val resp = HandshakeResponse(
             accepted = true,
             deviceName = android.os.Build.MODEL,
             displayWidth = request.screenWidth,
             displayHeight = request.screenHeight,
             virtualDisplayId = -1,
-            adbPort = 5555,
+            adbPort = Ports.ADB_PORT,
             vdServerJarPath = vdJarPath,
             connectionMethod = connMethod,
-            vdDpi = phoneDpi
+            vdDpi = displayDpi,
+            // 让无 Shizuku 的部署端（桌面 ADB 路径）也能用放大的 VD 尺寸防 IME
+            // 裁切——桌面自己的视口是编码尺寸，不是 VD 尺寸（2026-10-09 实锤：
+            // 桌面按 1280x720 建 VD，IME 1368px 键盘行被切 88px）。
+            vdWidth = vdWidth,
+            vdHeight = vdHeight,
+            // 采集端能力位（issue #72, Refs #13）。代理判据 = SDK_INT >= 30，理由与
+            // 已知误报见 [phoneAudioFeatures] 的 KDoc —— 此处无法拿到真实
+            // REMOTE_SUBMIX 结果（响应构造早于 vd-server 部署），不假装精确。
+            supportedFeatures = phoneAudioFeatures(Build.VERSION.SDK_INT)
         )
         handshakeJob?.cancel()
         handshakeJob = serviceScope.launch(Dispatchers.IO) {
-            // Check version BEFORE sending response — determines the flow
-            val carVersionName = request.appVersionName.ifEmpty { request.appVersionCode.toString() }
-            val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
-                it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
+            try {
+                conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
+                FileLog.i(TAG, "Handshake response sent")
+                // issue #204：握手成功是「链路真的通」的最硬证据。系统回调可能再也不来
+                // （现场 16:36:37 lost 之后再无 available，而 16:36:42 会话照常建立），
+                // 这里用真实流量把监控状态拉回 available，只改状态与日志，不触发重建。
+                networkMonitor?.onTrafficConfirmed()
+            } catch (e: Exception) {
+                FileLog.e(TAG, "Failed to send handshake response", e)
+                return@launch
             }
-            // Skip auto-update if a previous attempt failed recently (5min cooldown)
-            val updateCooldown = autoUpdateFailedAt > 0L &&
-                System.currentTimeMillis() - autoUpdateFailedAt < 5 * 60 * 1000L
-            val needsUpdate = UpdateManager.compareVersions(myVersionName, carVersionName) > 0
-                && !autoUpdateAttempted && !updateCooldown
 
-            if (needsUpdate) {
-                // ─── UPDATE FLOW ───
-                // Send handshake response first so the car knows we accepted
-                try {
-                    conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
-                    FileLog.i(TAG, "Handshake response sent (update needed)")
-                } catch (e: Exception) {
-                    FileLog.e(TAG, "Failed to send handshake response", e)
-                    return@launch
-                }
+            // 每次握手（首连与旋转重握手都走这里）都把手机端的诊断开关同步给车机。
+            // 车机端 startConnection 会把 logWriter 重置成 BuildConfig.DEBUG，
+            // 旧的实现只有用户手动切换设置时才发 LOG_TOGGLE，于是 release 下每次
+            // 重连后车机日志都被静默关掉（issue #72）。放在握手响应之后，是因为
+            // 车机在发 HANDSHAKE_REQUEST 之前就注册好了 Channel.DATA 处理器。
+            syncLogToggle(conn)
 
-                // Tell the car we're about to update it — don't reconnect, just wait.
-                try {
-                    conn.sendControl(ControlMsg.UPDATING_CAR)
-                    FileLog.i(TAG, "Sent UPDATING_CAR to car")
-                } catch (_: Exception) {}
+            // If Shizuku is available, deploy VD server directly BEFORE waiting for lifecycle connection
+            if (useShizuku) {
+                startVdServerViaShizuku(request.screenWidth, request.screenHeight, vdWidth, vdHeight, displayDpi, vdJarCrc, vd.token)
+            }
 
-                // Do NOT start VD wait or send app list — the car will restart after update.
-                autoUpdateAttempted = true
-                FileLog.i(TAG, "Car app outdated ($carVersionName < $myVersionName) — updating, then waiting for reconnect")
-                _installStatusStatic.value = getString(R.string.status_auto_update, carVersionName, myVersionName)
-                autoUpdateCarApp(conn)
-                // autoUpdateCarApp restarts the car app — it will reconnect with the new version.
-                // We disconnect and go back to WAITING.
-                delay(2000) // give the update a moment to start
-                FileLog.i(TAG, "Update initiated — disconnecting to wait for car reconnect")
-                withContext(Dispatchers.Main) { cleanupSession() }
-            } else {
-                // ─── NORMAL FLOW ───
-                // Send handshake response first — the car will then connect
-                // on video (9638) and input (9639) ports.
-                try {
-                    conn.sendControl(ControlMsg.HANDSHAKE_RESPONSE, resp.encode())
-                    FileLog.i(TAG, "Handshake response sent")
-                } catch (e: Exception) {
-                    FileLog.e(TAG, "Failed to send handshake response", e)
-                    return@launch
-                }
-
-                if (UpdateManager.compareVersions(myVersionName, carVersionName) > 0) {
-                    FileLog.i(TAG, "Car app outdated ($carVersionName) — update already attempted this session, proceeding")
+            // Wait for VD to connect on the lifecycle channel already opened.
+            // Runs inside handshakeJob — cancelled properly on reconnect.
+            val client = vdClient ?: return@launch
+            if (!client.isConnected) {
+                if (client.acceptConnection(VirtualDisplayClient.SERVER_PORT)) {
+                    FileLog.i(TAG, "VD server lifecycle connected (displayId=${client.displayId})")
+                    withContext(Dispatchers.Main) {
+                        _serviceState.value = State.STREAMING
+                        updateNotification(R.string.notification_streaming)
+                    }
+                    appListBuilder.sendAppList(conn)
                 } else {
-                    FileLog.i(TAG, "Car app up-to-date ($carVersionName)")
-                }
-
-                // Accept video and input connections from car
-                acceptVideoAndInputConnections()
-
-                // Now that video connection is established, open VD ServerSocket
-                // and wait for VD server to connect
-                val vidConn = videoConnection
-                if (vidConn == null) {
-                    FileLog.e(TAG, "Video connection not established — cannot start VD")
+                    FileLog.w(TAG, "VD server did not connect within timeout — tearing down")
+                    withContext(Dispatchers.Main) { cleanupSession() }
                     return@launch
                 }
-                waitForVDServer(VD_SERVER_PORT)
-
-                // If Shizuku is available, start the VD server directly
-                // (no need for the car's USB ADB to deploy it)
-                if (ShizukuManager.isAvailable) {
-                    startVdServerViaShizuku(request.screenWidth, request.screenHeight)
-                }
-
-                sendAppList()
             }
+        }
+    }
+
+    /**
+     * 把手机端的诊断日志开关下发给车机（issue #72）。
+     *
+     * 车机端 CarConnectionService 每次 `startConnection` 都会把
+     * `CarLogWriter` 重置为 `BuildConfig.DEBUG`（release 下为关），只有收到
+     * `DataMsg.LOG_TOGGLE` 才会重新打开。手机端只在用户手动切换设置时发过这一帧，
+     * 所以「手机上开着日志 + 中途断线重连」的组合会让车机端整段会话静默无日志。
+     *
+     * 失败不影响会话：一帧诊断数据的丢失不能反过来把连接打掉。
+     */
+    private fun syncLogToggle(conn: Connection) {
+        try {
+            conn.sendData(DataMsg.LOG_TOGGLE, byteArrayOf(if (FileLog.enabled) 1 else 0))
+            FileLog.i(TAG, "Log toggle synced to car: ${FileLog.enabled}")
+        } catch (e: Exception) {
+            FileLog.w(TAG, "Failed to sync log toggle to car: ${e.message}")
         }
     }
 
     // ─── VD Server Connection ───
-
-    private fun waitForVDServer(port: Int) {
-        // If already connected, don't restart
-        if (vdClient?.isConnected == true) {
-            FileLog.d(TAG, "VD server already connected — skipping")
-            return
-        }
-        // Cancel any previous wait and clean up
-        vdWaitJob?.cancel()
-        vdClient?.disconnect()
-        vdClient = null
-
-        // Open ServerSocket SYNCHRONOUSLY so it's ready before the car deploys the VD server.
-        val vidConn = videoConnection ?: return
-        val ctrlConn = controlConnection ?: return
-        val client = VirtualDisplayClient(vidConn, ctrlConn, serviceScope, this)
-        client.startListening(port)
-
-        vdWaitJob = serviceScope.launch(Dispatchers.IO) {
-            if (client.acceptConnection(port)) {
-                vdClient = client
-                FileLog.i(TAG, "VD server connected (displayId=${client.displayId})")
-                // Configure accessibility service for direct touch injection on the VD.
-                // The VD server's IInputManager.injectInputEvent requires INJECT_EVENTS
-                // permission, which shell UID (2000) lacks on many production devices.
-                InputInjectionService.instance?.setVirtualDisplay(client.displayId, vdWidth, vdHeight)
-                withContext(Dispatchers.Main) {
-                    _serviceState.value = State.STREAMING
-                    updateNotification(R.string.notification_streaming)
-                }
-                pendingAppLaunch?.let { pkg ->
-                    FileLog.i(TAG, "Launching queued app: $pkg")
-                    client.launchApp(pkg)
-                    pendingAppLaunch = null
-                }
-            } else {
-                FileLog.w(TAG, "VD server did not connect within timeout")
-            }
-        }
-    }
 
     /**
      * Start the VD server process directly on the phone using Shizuku.
      *
      * Shizuku provides shell-level privileges so the phone can run app_process
      * without waiting for the car's USB ADB connection. The VD server will
-     * reverse-connect to localhost:19637 as usual.
+     * reverse-connect to localhost:19647 as usual.
      */
-    private fun startVdServerViaShizuku(carWidth: Int, carHeight: Int) {
-        if (!ShizukuManager.isAvailable) {
-            FileLog.w(TAG, "Shizuku not available — cannot start VD server")
-            return
-        }
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val phoneDpi = VideoConfig.VIRTUAL_DISPLAY_DPI
-                val dpiScale = phoneDpi.toFloat() / 160f
-                val scaledH = ((VideoConfig.TARGET_SW_DP * dpiScale).toInt()) and 0x7FFFFFFE.toInt()
-                val scaledW = ((scaledH * carWidth.toFloat() / carHeight).toInt()) and 0x7FFFFFFE.toInt()
-                val jarPath = java.io.File(
-                    java.io.File(android.os.Environment.getExternalStorageDirectory(), "DiLinkAuto"),
-                    "vd-server.jar"
-                ).absolutePath
-                val logFile = "/data/local/tmp/vd-server.log"
-                val args = "$scaledW $scaledH $phoneDpi $VD_SERVER_PORT $carWidth $carHeight $targetFps"
+    private suspend fun startVdServerViaShizuku(carWidth: Int, carHeight: Int, vdWidth: Int, vdHeight: Int, dpi: Int = VideoConfig.DEFAULT_FALLBACK_DPI, jarCrc: Long = -1L, dpiSource: String = "-") {
+        try {
+            val allowedPackages = appListBuilder.allowedPackages().orEmpty()
+            val outcome = ShizukuVdDeployer.deploy(
+                carWidth = carWidth,
+                carHeight = carHeight,
+                vdWidth = vdWidth,
+                vdHeight = vdHeight,
+                dpi = dpi,
+                targetFps = targetFps,
+                targetBitrate = targetBitrate,
+                carHost = controlConnection?.remoteAddress ?: VdDeployArgs.CAR_HOST_ANY,
+                allowedPackages = allowedPackages,
+                dpiSource = dpiSource
+            ) ?: return
 
-                // Kill any existing VD server process
-                ShizukuManager.execAndWait("pkill -f VirtualDisplayServer 2>/dev/null")
-                delay(200)
-
-                // Launch VD server via app_process (shell UID 2000) using Shizuku.
-                // The command runs detached (&) so it doesn't block the Shizuku service call.
-                val cmd = "CLASSPATH=$jarPath exec app_process / " +
-                        "com.dilinkauto.vdserver.VirtualDisplayServer $args" +
-                        " >$logFile 2>&1"
-                ShizukuManager.execBackground(cmd)
-                FileLog.i(TAG, "VD server started via Shizuku: ${scaledW}x${scaledH}")
-            } catch (e: Exception) {
-                FileLog.e(TAG, "Shizuku VD server start failed", e)
+            if (outcome.forcedKill) {
+                FileLog.w(TAG, "Previous VD server did not exit in time — forced kill used")
             }
-        }
-    }
-
-    /**
-     * Auto-update car app via dadb when handshake reveals outdated version.
-     * Gets the car's IP from the WiFi gateway (car connects to phone's hotspot).
-     */
-    private fun autoUpdateCarApp(@Suppress("UNUSED_PARAMETER") conn: Connection) {
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                ensureAssetsReady()
-                val apkFile = java.io.File(filesDir, "app-server.apk")
-                if (!apkFile.exists()) {
-                    FileLog.w(TAG, "Auto-update: car APK not found")
-                    return@launch
-                }
-
-                // Get car IP from the active TCP connection (most reliable)
-                val carIp = controlConnection?.remoteAddress
-                    ?: findCarAdb()
-                if (carIp == null) {
-                    FileLog.w(TAG, "Auto-update: can't determine car IP")
-                    return@launch
-                }
-
-                FileLog.i(TAG, "Auto-updating car app at $carIp:5555...")
-                _installStatusStatic.value = getString(R.string.car_install_status_connecting_to, carIp)
-                val privKey = java.io.File(filesDir, "adbkey")
-                val pubKey = java.io.File(filesDir, "adbkey.pub")
-                if (!privKey.exists()) {
-                    filesDir.mkdirs()
-                    AdbKeyPair.generate(privKey, pubKey)
-                }
-                val keyPair = AdbKeyPair.read(privKey, pubKey)
-
-                val dadbExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
-                val dadb: Dadb? = try {
-                    val future = dadbExecutor.submit<Dadb> {
-                        Dadb.create(carIp, 5555, keyPair)
-                    }
-                    try {
-                        future.get(15, java.util.concurrent.TimeUnit.SECONDS)
-                    } catch (e: java.util.concurrent.TimeoutException) {
-                        FileLog.w(TAG, "Auto-update Dadb.create() timed out — will retry in 5min")
-                        null
-                    }
-                } finally {
-                    dadbExecutor.shutdownNow()
-                }
-
-                if (dadb == null) {
-                    _installStatusStatic.value = getString(R.string.car_install_status_auth_needed)
-                    autoUpdateFailedAt = System.currentTimeMillis()
-                    return@launch
-                }
-
-                try {
-                    _installStatusStatic.value = "Pushing car APK..."
-                    val remotePath = "/data/local/tmp/app-server.apk"
-                    dadb.push(apkFile, remotePath)
-                    _installStatusStatic.value = "Installing car app..."
-                    val result = dadb.shell("pm install -r $remotePath").allOutput
-                    FileLog.i(TAG, "Auto-update result: ${result.trim()}")
-                    if (result.contains("Success")) {
-                        _installStatusStatic.value = getString(R.string.status_auto_update_complete)
-                        lastSentIconHash.clear() // car's icon cache was wiped by reinstall
-                        FileLog.i(TAG, "Car app auto-updated — restarting")
-                        dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
-                    } else {
-                        _installStatusStatic.value = getString(R.string.status_update_failed, result.trim())
-                        autoUpdateFailedAt = System.currentTimeMillis()
-                        FileLog.w(TAG, "Auto-update failed: ${result.trim()} — will retry in 5min")
-                    }
-                } finally {
-                    dadb.close()
-                }
-            } catch (e: Exception) {
-                _installStatusStatic.value = getString(R.string.status_auto_update_failed, e.message ?: "unknown")
-                autoUpdateFailedAt = System.currentTimeMillis()
-                FileLog.e(TAG, "Auto-update failed: ${e.message} — will retry in 5min")
+            // issue #180：记住本次会话的 token，收尾时用它写自己那份哨兵。
+            vdSessionToken = outcome.sessionToken
+            if (outcome.launched) {
+                FileLog.i(TAG, "VD server session token: ${outcome.sessionToken}")
             }
+            if (!outcome.launched) {
+                FileLog.e(TAG, "VD server launch failed (Shizuku execBackground returned false) — tearing down")
+                cleanupSession()
+                return
+            }
+            // 打出 jar CRC：测试时可直接从日志确认这次跑的是哪一版引擎，
+            // 避免"装了新 APK 却跑旧代码"无从查证。
+            FileLog.i(TAG, "VD server started via Shizuku: ${vdWidth}x$vdHeight @${dpi}dpi jarCrc=$jarCrc")
+        } catch (e: Exception) {
+            FileLog.e(TAG, "Shizuku VD server start failed", e)
         }
     }
 
@@ -711,809 +791,138 @@ class ConnectionService : Service() {
     private fun handleDataFrame(frame: FrameCodec.Frame) {
         when (frame.messageType) {
             DataMsg.CAR_LOG -> {
-                val line = String(frame.payload, Charsets.UTF_8)
+                // A-05: the DATA dispatch is asynchronous (the reader does not
+                // throttle it) and MAX_PAYLOAD_SIZE used to be 128MB, so a peer
+                // could push a single "log line" that allocated up to 256MB as a
+                // String and entered the unbounded FileLog queue. Cap the line;
+                // truncate rather than drop so the rest of the log stays usable.
+                val cap = CAR_LOG_LINE_MAX_BYTES
+                val bytes = frame.payload
+                if (bytes.size > cap) {
+                    FileLog.w(TAG, "CAR_LOG frame ${bytes.size}B exceeds $cap — truncating")
+                }
+                val safe = if (bytes.size > cap) bytes.copyOf(cap) else bytes
+                val line = String(safe, Charsets.UTF_8)
                 FileLog.i("CarLog", line)
             }
-            DataMsg.NOTIFICATION_CLEAR -> {
-                val msg = ClearNotificationMessage.decode(frame.payload)
-                NotificationService.instance?.cancelNotification(msg.packageName, msg.id)
-            }
-            DataMsg.NOTIFICATION_CLEAR_ALL -> {
-                NotificationService.instance?.cancelAll()
-            }
         }
     }
 
-    // ─── Input ───
-
-    private var inputFrameCount = 0L
-
-    private fun handleInputFrame(frame: FrameCodec.Frame) {
-        val client = vdClient
-        inputFrameCount++
-        if (inputFrameCount <= 3 || inputFrameCount % 100 == 0L) {
-            FileLog.i(TAG, "handleInputFrame #$inputFrameCount type=0x${frame.messageType.toString(16)} vdClient=${client != null} connected=${client?.isConnected}")
-        }
-
-        // Use VD server direct injection if IInputManager is available (low latency),
-        // otherwise fall back to accessibility gestures (guaranteed to work).
-        val useDirect = client != null && client.isConnected && client.hasDirectInjection
-        val cl = if (useDirect) client!! else null
-
-        try {
-            if (frame.messageType == InputMsg.TOUCH_MOVE_BATCH) {
-                val batch = TouchMoveBatch.decode(frame.payload)
-                if (cl != null) {
-                    val w = vdWidth
-                    val h = vdHeight
-                    for (p in batch.pointers) {
-                        cl.touch(1, p.pointerId, (p.x * w).toInt(), (p.y * h).toInt(), p.pressure)
-                    }
-                } else {
-                    for (p in batch.pointers) {
-                        InputInjectionService.instance?.injectTouch(TouchEvent(
-                            action = InputMsg.TOUCH_MOVE,
-                            pointerId = p.pointerId,
-                            x = p.x, y = p.y,
-                            pressure = p.pressure,
-                            timestamp = p.timestamp
-                        ))
-                    }
-                }
-                return
-            }
-
-            val event = TouchEvent.decode(frame.payload)
-            if (cl != null) {
-                val w = vdWidth
-                val h = vdHeight
-                val pixelX = (event.x * w).toInt()
-                val pixelY = (event.y * h).toInt()
-                val action = when (event.action) {
-                    InputMsg.TOUCH_DOWN -> 0
-                    InputMsg.TOUCH_MOVE -> 1
-                    InputMsg.TOUCH_UP -> 2
-                    else -> return
-                }
-                cl.touch(action, event.pointerId, pixelX, pixelY, event.pressure)
-            } else {
-                InputInjectionService.instance?.injectTouch(event)
-            }
-        } catch (e: Exception) {
-            FileLog.e(TAG, "handleInputFrame error type=0x${frame.messageType.toString(16)}: ${e.message}", e)
-        }
-    }
 
     // ─── Car App Install via ADB ───
 
-    private val _installStatus get() = _installStatusStatic
+    private val carAppInstallHost: CarAppInstallHost by lazy {
+        CarAppInstallHost(
+            context = this,
+            scope = serviceScope,
+            connectedCarIp = { controlConnection?.remoteAddress },
+            onReinstalled = { appListBuilder.resetIconHashes() },
+            ensureAssetsReady = { ensureAssetsReady() },
+            onStatus = { msg -> _installStatusStatic.value = msg }
+        )
+    }
 
     fun installCarApp(explicitIp: String? = null) {
-        serviceScope.launch(Dispatchers.IO) {
-            var keepStatus = false
-            try {
-                ensureAssetsReady()
-                val apkFile = java.io.File(filesDir, "app-server.apk")
-                if (!apkFile.exists()) {
-                    _installStatus.value = getString(R.string.car_install_status_car_apk_not_found)
-                    FileLog.w(TAG, "No embedded car APK")
-                    return@launch
-                }
-
-                _installStatus.value = if (explicitIp != null) getString(R.string.car_install_status_connecting_to, explicitIp) else getString(R.string.car_install_status_searching)
-                val carIp = if (!explicitIp.isNullOrBlank()) {
-                    if (probePort(explicitIp, 5555)) explicitIp else {
-                        _installStatus.value = getString(R.string.car_install_status_not_reachable, explicitIp)
-                        null
-                    }
-                } else findCarAdb()
-                if (carIp == null) {
-                    _installStatus.value = getString(R.string.car_install_status_car_not_found)
-                    FileLog.w(TAG, "Could not find car ADB on USB or network")
-                    return@launch
-                }
-
-                _installStatus.value = getString(R.string.car_install_status_connecting_to, carIp)
-                FileLog.i(TAG, "Connecting to car ADB at $carIp:5555")
-                val privKey = java.io.File(filesDir, "adbkey")
-                val pubKey = java.io.File(filesDir, "adbkey.pub")
-                if (!privKey.exists()) {
-                    filesDir.mkdirs()
-                    AdbKeyPair.generate(privKey, pubKey)
-                }
-                val keyPair = AdbKeyPair.read(privKey, pubKey)
-
-                // Dadb.create() does blocking socket I/O that coroutine cancellation
-                // cannot interrupt. Use Future.get(timeout) for reliable timeout.
-                FileLog.d(TAG, "Attempting Dadb.create() (15s timeout)...")
-                val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
-                val dadb: Dadb? = try {
-                    val future = executor.submit<Dadb> {
-                        Dadb.create(carIp, 5555, keyPair)
-                    }
-                    try {
-                        future.get(15, java.util.concurrent.TimeUnit.SECONDS)
-                    } catch (e: java.util.concurrent.TimeoutException) {
-                        FileLog.w(TAG, "Dadb.create() timed out after 15s — likely waiting for car auth dialog")
-                        null
-                    }
-                } finally {
-                    executor.shutdownNow()
-                }
-
-                if (dadb == null) {
-                    _installStatus.value = getString(R.string.car_install_status_auth_needed)
-                    keepStatus = true
-                    return@launch
-                }
-                FileLog.d(TAG, "Dadb.create() succeeded")
-
-                try {
-                    _installStatus.value = getString(R.string.car_install_status_checking_version)
-                    val versionOutput = dadb.shell(
-                        "dumpsys package com.dilinkauto.server 2>/dev/null | grep versionName"
-                    ).allOutput
-                    val installedVersionName = Regex("""versionName=(\S+)""")
-                        .find(versionOutput)?.groupValues?.get(1) ?: "0"
-                    val myVersionName = packageManager.getPackageInfo(packageName, 0).let {
-                        it.versionName ?: @Suppress("DEPRECATION") it.versionCode.toString()
-                    }
-                    FileLog.i(TAG, "Car app: installed=$installedVersionName, embedded=$myVersionName")
-
-                    if (UpdateManager.compareVersions(myVersionName, installedVersionName) <= 0) {
-                        _installStatus.value = getString(R.string.car_install_status_already_up_to_date, installedVersionName)
-                        return@launch
-                    }
-
-                    _installStatus.value = getString(R.string.car_install_status_pushing_apk, apkFile.length() / 1024 / 1024)
-                    val remotePath = "/data/local/tmp/app-server.apk"
-                    dadb.push(apkFile, remotePath)
-                    FileLog.i(TAG, "Car APK pushed (${apkFile.length()} bytes)")
-
-                    _installStatus.value = getString(R.string.car_install_status_installing_version, myVersionName)
-                    val result = dadb.shell("pm install -r $remotePath").allOutput
-                    FileLog.i(TAG, "Install result: ${result.trim()}")
-
-                    if (result.contains("Success")) {
-                        _installStatus.value = getString(R.string.car_install_status_launching_car_app)
-                        lastSentIconHash.clear() // car's icon cache was wiped by reinstall
-                        dadb.shell("am start --activity-clear-task -n com.dilinkauto.server/.MainActivity")
-                        _installStatus.value = getString(R.string.car_install_status_car_installed, myVersionName)
-                    } else {
-                        _installStatus.value = getString(R.string.car_install_status_failed, result.trim())
-                    }
-                } finally {
-                    dadb.close()
-                }
-            } catch (e: Exception) {
-                _installStatus.value = getString(R.string.car_install_status_error, e.message ?: "unknown")
-                FileLog.e(TAG, "Car app install failed", e)
-            } finally {
-                if (!keepStatus) {
-                    delay(5000)
-                    _installStatus.value = ""
-                }
-            }
-        }
+        carAppInstallHost.installCarApp(explicitIp)
     }
 
-    private suspend fun findCarAdb(): String? {
-        // 1. Check the control connection's remote address (car is already connected)
-        controlConnection?.remoteAddress?.let { ip ->
-            if (probePort(ip, 5555)) {
-                FileLog.i(TAG, "Found car ADB at $ip (control connection)")
-                return ip
-            }
-        }
-
-        // 2. Scan ALL local subnets (phone may be on both home WiFi + hotspot)
-        val subnetIps = getLocalSubnetIps()
-        val prefixes = subnetIps.map { it.substringBeforeLast(".") }.distinct()
-        FileLog.d(TAG, "Local subnets: $subnetIps (prefixes: $prefixes)")
-
-        // 3. ARP table (may be blocked on Android 14+)
-        try {
-            for (line in java.io.File("/proc/net/arp").readLines().drop(1)) {
-                val ip = line.split("\\s+".toRegex()).firstOrNull() ?: continue
-                if (ip == "0.0.0.0") continue
-                if (subnetIps.contains(ip)) continue
-                if (probePort(ip, 5555)) {
-                    FileLog.i(TAG, "Found car ADB at $ip (ARP)")
-                    return ip
-                }
-            }
-        } catch (e: Exception) {
-            FileLog.d(TAG, "ARP not available: ${e.message}")
-        }
-
-        // 4. Neighbor cache
-        try {
-            for (line in Runtime.getRuntime().exec(arrayOf("ip", "neigh")).inputStream.bufferedReader().readText().lines()) {
-                val ip = line.split("\\s+".toRegex()).firstOrNull() ?: continue
-                if (!ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) continue
-                if (subnetIps.contains(ip)) continue
-                if (probePort(ip, 5555)) {
-                    FileLog.i(TAG, "Found car ADB at $ip (neighbor)")
-                    return ip
-                }
-            }
-        } catch (_: Exception) {}
-
-        // 5. Parallel scan on ALL subnets
-        for (prefix in prefixes) {
-            FileLog.i(TAG, "Scanning $prefix.0/24 for ADB...")
-            val startMs = System.currentTimeMillis()
-            val result = probeSubnetConcurrent(prefix, ownIps = subnetIps, maxConcurrent = 32)
-            val elapsed = System.currentTimeMillis() - startMs
-            if (result != null) {
-                FileLog.i(TAG, "Found car ADB at $result ($prefix.0/24, ${elapsed}ms)")
-                return result
-            }
-            FileLog.d(TAG, "$prefix.0/24: no ADB found (${elapsed}ms)")
-        }
-
-        // 6. Gateway
-        try {
-            val wm = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
-            val gw = wm.dhcpInfo.gateway
-            if (gw != 0) {
-                val ip = String.format("%d.%d.%d.%d",
-                    gw and 0xFF, (gw shr 8) and 0xFF,
-                    (gw shr 16) and 0xFF, (gw shr 24) and 0xFF)
-                if (!subnetIps.contains(ip) && probePort(ip, 5555)) {
-                    FileLog.i(TAG, "Found car ADB at $ip (gateway)")
-                    return ip
-                }
-            }
-        } catch (_: Exception) {}
-
-        return null
-    }
-
-    private fun getLocalSubnetIps(): List<String> {
-        return try {
-            java.net.NetworkInterface.getNetworkInterfaces().toList()
-                .filter { !it.isLoopback && it.isUp }
-                .flatMap { iface ->
-                    iface.inetAddresses.toList()
-                        .filter { it is java.net.Inet4Address && !it.isLoopbackAddress }
-                        .map { it.hostAddress!! }
-                }
-                .filter { !it.startsWith("127.") }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    /**
-     * Scans a /24 subnet for port 5555 using parallel concurrent probes.
-     * Probes the full 1-254 range in batches of [maxConcurrent], 150ms timeout each.
-     * This finds the car reliably regardless of its DHCP-assigned IP.
-     */
-    private suspend fun probeSubnetConcurrent(
-        prefix: String, ownIps: List<String>, maxConcurrent: Int = 32
-    ): String? = coroutineScope {
-        // Skip .0 (network) and .255 (broadcast), and own IPs
-        val ownIpSet = ownIps.toSet()
-        val ips = (1..254).map { "$prefix.$it" }.filter { it !in ownIpSet }
-        ips.chunked(maxConcurrent).forEach { batch ->
-            val results = batch.map { ip ->
-                async(Dispatchers.IO) { if (probePortRaw(ip, 5555)) ip else null }
-            }
-            results.forEach { deferred ->
-                val found = deferred.await()
-                if (found != null) {
-                    coroutineContext.cancelChildren() // cancel remaining probes
-                    return@coroutineScope found
-                }
-            }
-        }
-        null
-    }
-
-    /** Non-suspend port probe (150ms timeout) for use in parallel scans */
-    private fun probePortRaw(ip: String, port: Int): Boolean {
-        return try {
-            val ch = java.nio.channels.SocketChannel.open()
-            ch.configureBlocking(false)
-            ch.connect(java.net.InetSocketAddress(ip, port))
-            val deadline = System.currentTimeMillis() + 150
-            try {
-                while (!ch.finishConnect()) {
-                    if (System.currentTimeMillis() > deadline) return false
-                    Thread.sleep(5)
-                }
-                true
-            } finally {
-                ch.close()
-            }
-        } catch (_: Exception) { false }
-    }
-
-    private suspend fun probePort(ip: String, port: Int): Boolean {
-        return try {
-            val ch = java.nio.channels.SocketChannel.open()
-            ch.configureBlocking(false)
-            ch.connect(java.net.InetSocketAddress(ip, port))
-            val deadline = System.currentTimeMillis() + 500
-            try {
-                while (!ch.finishConnect()) {
-                    if (System.currentTimeMillis() > deadline) return false
-                    kotlinx.coroutines.delay(50)
-                }
-                true
-            } finally {
-                ch.close()
-            }
-        } catch (_: Exception) { false }
-    }
-
-    // ─── App List ───
-
-    // Tracks the last icon hash sent per package — survives across reconnections
-    // within the same service lifetime to avoid re-sending unchanged icons.
-    private val lastSentIconHash = mutableMapOf<String, String>()
-
-    private fun sendAppList() {
-        val conn = controlConnection ?: return
-        val pm = packageManager
-
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val apps = pm.queryIntentActivities(
-                    Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
-                ).filter { info ->
-                    // Skip hidden apps (Xiaomi HyperOS, some custom ROMs disable
-                    // the launcher component without removing the package)
-                    val pkg = info.activityInfo.packageName
-                    val cn = android.content.ComponentName(pkg, info.activityInfo.name)
-                    val state = pm.getComponentEnabledSetting(cn)
-                    state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                }.map { info ->
-                    val pkg = info.activityInfo.packageName
-                    // Use lastUpdateTime as a lightweight change indicator.
-                    // The car-side AppIconCache handles persistence, multi-size
-                    // resizing, and in-memory Bitmap caching.
-                    val hash = try {
-                        pm.getPackageInfo(pkg, 0).lastUpdateTime.toString()
-                    } catch (_: Exception) { "" }
-                    // Only include icon data if the hash differs from last sent
-                    val prevHash = lastSentIconHash[pkg]
-                    val iconPng = if (hash.isNotEmpty() && hash == prevHash) {
-                        ByteArray(0) // car can use its cached icon
-                    } else {
-                        lastSentIconHash[pkg] = hash
-                        ClientApp.loadIconPng(pm, pkg, 192)
-                    }
-                    AppInfo(
-                        pkg,
-                        info.loadLabel(pm).toString(),
-                        categorizeApp(pkg),
-                        iconPng,
-                        hash
-                    )
-                }.sortedBy { it.category.id }
-
-                conn.sendData(DataMsg.APP_LIST, AppListMessage(apps).encode())
-                val skipped = apps.count { it.iconPng.isEmpty() }
-                FileLog.i(TAG, "App list sent: ${apps.size} apps (${skipped} icons skipped/unchanged)")
-            } catch (e: Exception) {
-                FileLog.e(TAG, "Failed to send app list", e)
-            }
-        }
-    }
-
-    // ─── App Shortcuts ───
-
-    private fun sendAppInfoData(packageName: String) {
-        val conn = controlConnection ?: return
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val pm = packageManager
-                val pi = pm.getPackageInfo(packageName, 0)
-                val ai = pm.getApplicationInfo(packageName, 0)
-                val appName = pm.getApplicationLabel(ai).toString()
-                val msg = AppInfoDataMessage(
-                    packageName = packageName,
-                    appName = appName,
-                    versionName = pi.versionName ?: "",
-                    versionCode = if (android.os.Build.VERSION.SDK_INT >= 28)
-                        pi.longVersionCode else pi.versionCode.toLong(),
-                    installTime = pi.firstInstallTime,
-                    targetSdk = pi.applicationInfo.targetSdkVersion
-                )
-                conn.sendData(DataMsg.APP_INFO_DATA, msg.encode())
-                FileLog.i(TAG, "Sent app info for $packageName v${pi.versionName}")
-            } catch (e: Exception) {
-                FileLog.w(TAG, "Failed to query/send app info for $packageName: ${e.message}")
-            }
-        }
-    }
-
-    private fun sendAppShortcuts(packageName: String) {
-        val conn = controlConnection ?: return
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val shortcuts = queryShortcuts(packageName)
-                val msg = AppShortcutsListMessage(packageName, shortcuts)
-                conn.sendControl(ControlMsg.APP_SHORTCUTS_LIST, msg.encode())
-                FileLog.i(TAG, "Sent ${shortcuts.size} shortcuts for $packageName")
-            } catch (e: Exception) {
-                FileLog.w(TAG, "Failed to query/send shortcuts for $packageName: ${e.message}")
-                // Send empty list so car doesn't hang waiting
-                try {
-                    val msg = AppShortcutsListMessage(packageName, emptyList())
-                    conn.sendControl(ControlMsg.APP_SHORTCUTS_LIST, msg.encode())
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
-    private suspend fun queryShortcuts(packageName: String): List<AppShortcut> {
-        FileLog.i(TAG, "Querying shortcuts for $packageName: shizuku=${ShizukuManager.isAvailable} vdClient=${vdClient != null} vdConnected=${vdClient?.isConnected}")
-        // True when Shizuku already proved cmd shortcut is unavailable on this device,
-        // so we can skip the redundant VD server attempt (both run the same command).
-        var cmdShortcutUnavailable = false
-        // Try Shizuku shell first — has full access to shortcut data
-        if (ShizukuManager.isAvailable) {
-            try {
-                val output = ShizukuManager.execAndWait("cmd shortcut get-shortcuts --package $packageName")
-                if (!output.isNullOrEmpty()) {
-                    val parsed = parseCmdShortcutOutput(output, packageName)
-                    if (parsed.isNotEmpty()) {
-                        FileLog.i(TAG, "Shizuku: ${parsed.size} shortcuts for $packageName")
-                        return parsed
-                    }
-                    // cmd shortcut unavailable on this device — try dumpsys via Shizuku
-                    cmdShortcutUnavailable = true
-                    FileLog.d(TAG, "Shizuku: cmd shortcut returned ${output.length} chars but parsed empty, trying dumpsys")
-                    val dumpOutput = ShizukuManager.execAndWait("dumpsys shortcut $packageName 2>&1")
-                    if (!dumpOutput.isNullOrBlank()) {
-                        val dumpParsed = parseCmdShortcutOutput(dumpOutput, packageName)
-                        if (dumpParsed.isNotEmpty()) {
-                            FileLog.i(TAG, "Shizuku dumpsys: ${dumpParsed.size} shortcuts for $packageName")
-                            return dumpParsed
-                        }
-                    }
-                    FileLog.i(TAG, "Shizuku: cmd shortcut unavailable, skipping VD server")
-                }
-            } catch (e: Exception) {
-                FileLog.w(TAG, "Shizuku shortcut query failed for $packageName: ${e.message}")
-            }
-        }
-        // Try VD server — skip if Shizuku already proved cmd shortcut is unavailable
-        if (!cmdShortcutUnavailable) {
-            val vd = vdClient
-            if (vd != null && vd.isConnected) {
-                FileLog.i(TAG, "VD server path: querying shortcuts for $packageName")
-                try {
-                    val output = vd.queryShortcuts(packageName)
-                    if (!output.isNullOrBlank()) {
-                        val parsed = parseCmdShortcutOutput(output, packageName)
-                        if (parsed.isNotEmpty()) {
-                            FileLog.i(TAG, "VD server returned ${parsed.size} shortcuts for $packageName")
-                            return parsed
-                        } else {
-                            FileLog.w(TAG, "VD server returned output but parsed empty for $packageName")
-                        }
-                    } else {
-                        FileLog.w(TAG, "VD server returned empty/null output for $packageName")
-                    }
-                } catch (e: Exception) {
-                    FileLog.w(TAG, "VD shortcut query failed for $packageName: ${e.message}")
-                }
-            }
-        }
-        // Fallback: read shortcuts directly from the APK's XML resource.
-        // Necessary when "cmd shortcut" service is unavailable (Samsung, Xiaomi, etc.)
-        val apkShortcuts = queryShortcutsFromApkXml(packageName)
-        if (apkShortcuts.isNotEmpty()) {
-            FileLog.i(TAG, "APK XML: ${apkShortcuts.size} shortcuts for $packageName")
-            return apkShortcuts
-        }
-        // Last resort: LauncherApps API (may fail with "Caller can't access shortcut information")
-        return try {
-            val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
-                ?: return emptyList()
-            val user = android.os.Process.myUserHandle()
-            val query = LauncherApps.ShortcutQuery().apply {
-                setPackage(packageName)
-                setQueryFlags(
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
-                )
-            }
-            (launcherApps.getShortcuts(query, user) ?: emptyList())
-                .map { AppShortcut(it.id, it.shortLabel.toString(), it.longLabel.toString()) }
-        } catch (e: Exception) {
-            FileLog.w(TAG, "Shortcut query failed for $packageName: ${e.message}")
-            emptyList()
-        }
-    }
-
-    /** Parse output from 'cmd shortcut get-shortcuts' shell command. */
-    private fun parseCmdShortcutOutput(output: String, expectedPackage: String): List<AppShortcut> {
-        val shortcuts = mutableListOf<AppShortcut>()
-        var currentId: String? = null
-        var shortLabel = ""
-        var longLabel = ""
-        for (line in output.lines()) {
-            val trimmed = line.trim()
-            if (trimmed.isEmpty()) continue
-
-            val isIndented = line.startsWith(" ") || line.startsWith("\t")
-
-            // Package header line: "com.example.app:" (not indented)
-            if (!isIndented && trimmed.endsWith(":")) {
-                if (currentId != null) {
-                    shortcuts.add(AppShortcut(currentId, shortLabel.ifEmpty { longLabel }, longLabel))
-                }
-                currentId = null; shortLabel = ""; longLabel = ""
-                continue
-            }
-            // Shortcut id line (indented, ends with ":")
-            if (isIndented && trimmed.endsWith(":") && !trimmed.contains(" ")) {
-                if (currentId != null) {
-                    shortcuts.add(AppShortcut(currentId, shortLabel.ifEmpty { longLabel }, longLabel))
-                }
-                currentId = trimmed.removeSuffix(":")
-                shortLabel = ""; longLabel = ""
-                continue
-            }
-            // Label lines
-            if (currentId != null) {
-                if (trimmed.startsWith("ShortLabel:")) {
-                    shortLabel = trimmed.removePrefix("ShortLabel:").trim()
-                } else if (trimmed.startsWith("LongLabel:")) {
-                    longLabel = trimmed.removePrefix("LongLabel:").trim()
-                }
-            }
-        }
-        if (currentId != null) {
-            shortcuts.add(AppShortcut(currentId, shortLabel.ifEmpty { longLabel }, longLabel))
-        }
-        return shortcuts
-    }
-
-    /**
-     * Reads an app's shortcuts.xml resource directly from its APK using AssetManager.
-     * This bypasses the ShortcutService entirely, working on devices where
-     * "cmd shortcut" is unavailable (e.g. Samsung One UI).
-     *
-     * Shortcut labels in XML can be literal strings or resource references
-     * (e.g. @string/wifi_label). We resolve references against the target
-     * app's resources so labels display correctly.
-     */
-    @android.annotation.SuppressLint("BlockedPrivateApi")
-    private fun queryShortcutsFromApkXml(packageName: String): List<AppShortcut> {
-        return try {
-            val ai = packageManager.getApplicationInfo(packageName, 0)
-            val shortcuts = mutableListOf<AppShortcut>()
-
-            // Build an AssetManager pointing at the target APK
-            val am = android.content.res.AssetManager::class.java.newInstance()
-            val addPath = android.content.res.AssetManager::class.java
-                .getDeclaredMethod("addAssetPath", String::class.java).apply { isAccessible = true }
-            val cookie = addPath.invoke(am, ai.publicSourceDir) as Int
-            if (cookie == 0) return emptyList()
-
-            val getResId = android.content.res.AssetManager::class.java
-                .getDeclaredMethod("getResourceIdentifier", String::class.java, String::class.java, String::class.java).apply { isAccessible = true }
-            val resId = getResId.invoke(am, "shortcuts", "xml", ai.packageName) as Int
-            if (resId == 0) return emptyList()
-
-            val res = android.content.res.Resources(am, resources.displayMetrics, resources.configuration)
-
-            // Try to get the target app's context to resolve its string resources
-            val targetContext = try {
-                createPackageContext(packageName, Context.CONTEXT_RESTRICTED)
-            } catch (_: Exception) { null }
-            val targetRes = targetContext?.resources
-
-            val parser = res.getXml(resId)
-
-            var eventType = parser.eventType
-            while (eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
-                if (eventType == org.xmlpull.v1.XmlPullParser.START_TAG && parser.name == "shortcut") {
-                    val id = parser.getAttributeValue(null, "shortcutId")
-                        ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutId")
-                    val rawLabel = parser.getAttributeValue(null, "shortcutShortLabel")
-                        ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutShortLabel")
-                    val rawLongLabel = parser.getAttributeValue(null, "shortcutLongLabel")
-                        ?: parser.getAttributeValue("http://schemas.android.com/apk/res/android", "shortcutLongLabel")
-
-                    if (id != null) {
-                        val displayLabel = resolveResourceRef(rawLabel, targetRes, ai) ?: id
-                        val longLabel = resolveResourceRef(rawLongLabel, targetRes, ai) ?: displayLabel
-                        shortcuts.add(AppShortcut(id, displayLabel, longLabel))
-                    }
-                }
-                eventType = parser.nextToken()
-            }
-            parser.close()
-            FileLog.i(TAG, "APK XML: ${shortcuts.size} shortcuts for $packageName")
-            shortcuts
-        } catch (e: Exception) {
-            FileLog.w(TAG, "APK XML shortcut parse failed for $packageName: ${e.message}")
-            emptyList()
-        }
-    }
-
-    /**
-     * Resolves a possibly resource-referenced string value.
-     * e.g. "@string/wifi_label" → "Wi-Fi", "@2131234567" → "Settings", "Wi-Fi" → "Wi-Fi".
-     * Falls back to [targetRes] (the target package's resources), then to null.
-     */
-    private fun resolveResourceRef(value: String?, targetRes: android.content.res.Resources?, appInfo: android.content.pm.ApplicationInfo): String? {
-        if (value.isNullOrEmpty()) return null
-        // Already a literal string, not a reference
-        if (!value.startsWith("@")) return value
-
-        // Try target package resources first
-        if (targetRes != null) {
-            try {
-                val resId = parseResourceRef(value, targetRes, appInfo.packageName)
-                if (resId != 0) {
-                    val resolved = targetRes.getString(resId)
-                    if (resolved.isNotEmpty() && !resolved.startsWith("@")) return resolved
-                }
-            } catch (_: Exception) {}
-        }
-        // Couldn't resolve — return null so caller falls back to shortcutId
-        return null
-    }
-
-    /** Parse a resource reference like "@string/wifi_label" or "@2131234567" to a resource ID. */
-    private fun parseResourceRef(ref: String, res: android.content.res.Resources, pkg: String): Int {
-        // Strip leading @
-        val clean = ref.removePrefix("@")
-        // Format: "type/name" or just numeric ID
-        if (clean.startsWith("string/") || clean.startsWith("0x") || clean.all { it.isDigit() }) {
-            val (type, name) = if (clean.contains("/")) {
-                val parts = clean.split("/", limit = 2)
-                parts[0] to parts[1]
-            } else {
-                // Numeric ID — convert to hex and try direct lookup
-                val id = clean.toIntOrNull() ?: return 0
-                return id
-            }
-            return res.getIdentifier(name, type, pkg)
-        }
-        return 0
-    }
-
-    private fun launchShortcut(packageName: String, shortcutId: String) {
-        // Route through VD server which runs as shell UID (2000) — bypasses
-        // LauncherApps permission restrictions that prevent normal apps from
-        // starting shortcuts for other packages.
-        val vd = vdClient
-        if (vd != null && vd.isConnected) {
-            vd.executeShortcut(packageName, shortcutId)
-            FileLog.i(TAG, "VD server executing shortcut $shortcutId for $packageName")
-            return
-        }
-
-        // Fallback: try LauncherApps API (may fail on restricted devices)
-        try {
-            val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
-                ?: return
-            val user = android.os.Process.myUserHandle()
-            val displayId = vdClient?.displayId
-            val options = if (displayId != null && displayId >= 0) {
-                android.app.ActivityOptions.makeBasic().apply {
-                    launchDisplayId = displayId
-                }.toBundle()
-            } else {
-                null
-            }
-            launcherApps.startShortcut(packageName, shortcutId, null, options, user)
-            FileLog.i(TAG, "Launched shortcut $shortcutId for $packageName on display $displayId")
-        } catch (e: Exception) {
-            FileLog.w(TAG, "Failed to launch shortcut $shortcutId: ${e.message}")
-        }
-    }
-
-    private fun categorizeApp(pkg: String): AppCategory = when {
-        pkg.contains("map", true) || pkg.contains("navi", true) ||
-        pkg.contains("waze", true) || pkg.contains("amap", true) ||
-        pkg.contains("gaode", true) -> AppCategory.NAVIGATION
-
-        pkg.contains("music", true) || pkg.contains("spotify", true) ||
-        pkg.contains("podcast", true) || pkg.contains("player", true) ||
-        pkg.contains("qqmusic", true) || pkg.contains("netease", true) -> AppCategory.MUSIC
-
-        pkg.contains("whatsapp", true) || pkg.contains("telegram", true) ||
-        pkg.contains("wechat", true) || pkg.contains("tencent.mm", true) ||
-        pkg.contains("messenger", true) || pkg.contains("sms", true) ||
-        pkg.contains("dialer", true) || pkg.contains("phone", true) -> AppCategory.COMMUNICATION
-
-        else -> AppCategory.OTHER
-    }
 
     // ─── Cleanup ───
 
-    private fun cleanupSession() {
-        handshakeJob?.cancel()
-        handshakeJob = null
-        vdWaitJob?.cancel()
-        vdWaitJob = null
-        vdClient?.disconnect()
-        vdClient = null
-        // Clear stuck pointers from any interrupted touch session
-        InputInjectionService.instance?.clearVirtualDisplay()
-        videoConnection?.disconnect()
-        videoConnection = null
-        inputConnection?.disconnect()
-        inputConnection = null
-        controlConnection?.disconnect()
-        controlConnection = null
-        activeConnection = null
-        _serviceState.value = State.WAITING
+    /**
+     * Idempotency guard for [cleanupSession].
+     *
+     * `cleanupSession()` used to be callable from 7 places (two network
+     * callbacks, the listen-loop `finally`, the handshake-failure path,
+     * `stopEverything`, and `onDestroy`) with no guard, so a single disconnect
+     * could run the whole teardown — including the vd-server kill and the
+     * physical-panel restore — several times over. Observed in
+     * `client-20261005-164828.log`: **1** `Car disconnected` produced **9**
+     * `Force-waking physical display` lines. Each repeat raced the previous
+     * one's `pkill`, which is how VDs leaked.
+     *
+     * Two guards now compose: the generation id (a stale teardown from an
+     * already-replaced session is ignored entirely) and this AtomicBoolean (at
+     * most one teardown per generation).
+     */
+    private val cleanupGuard = java.util.concurrent.atomic.AtomicBoolean(false)
 
-        // Force screen on after disconnection. VD server uses SurfaceControl-level
-        // display power-off which regular WakeLocks can't reverse. Launch our own
-        // activity with FLAG_TURN_SCREEN_ON — WindowManager wakes the display.
-        forceWakeScreen()
+    /**
+     * Allow the next [cleanupSession] to execute for [sessionId]. Called when a
+     * new session is established (accept / mid-stream re-handshake) so the next
+     * teardown is allowed to run again.
+     */
+    private fun resetCleanupGuard(sessionId: Int = activeSessionId) {
+        if (sessionId == activeSessionId) cleanupGuard.set(false)
     }
 
     /**
-     * Multi-layered display wake after disconnection. The VD server shuts off the
-     * physical display at the SurfaceControl level (or via cmd display power-off),
-     * which puts it in a deeper off state than normal screen timeout. Regular
-     * WakeLocks can't recover from this — only system-level mechanisms can.
+     * Tear the current session down.
      *
-     * Layers (tried in order, each is independent):
-     * 1. PowerManager.wakeUp() via reflection — system-level wake
-     * 2. FLAG_TURN_SCREEN_ON activity launch — WindowManager triggers display on
-     * 3. WakeLock with ACQUIRE_CAUSES_WAKEUP — framework-level
+     * @param sessionId generation this teardown belongs to; a stale value (an
+     *   already-replaced session's late `finally`) is ignored so it cannot
+     *   consume the active session's guard.
      */
-    @android.annotation.SuppressLint("BlockedPrivateApi")
-    private fun forceWakeScreen() {
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                FileLog.i(TAG, "Force-waking physical display")
-                val pm = getSystemService(POWER_SERVICE) as PowerManager
+    private fun cleanupSession(sessionId: Int = activeSessionId) {
+        if (sessionId != activeSessionId) {
+            FileLog.d(TAG, "cleanupSession: stale session #$sessionId (active #$activeSessionId) — skipping")
+            return
+        }
+        if (!cleanupGuard.compareAndSet(false, true)) {
+            FileLog.d(TAG, "cleanupSession: already cleaned up this session — skipping")
+            return
+        }
+        FileLog.i(TAG, "cleanupSession: tearing down session #$sessionId")
+        handshakeJob?.cancel()
+        handshakeJob = null
+        // Snapshot + clear shared state synchronously so a concurrent handshake
+        // sees the old client gone (the RMW itself is inside vdLock).
+        val client: VirtualDisplayClient?
+        synchronized(vdLock) {
+            client = vdClient
+            vdClient = null
+        }
+        // issue #76：没有 VD 的空会话（对端在握手前就 EOF / 握手超时）不需要
+        // power-reset、IME 恢复、KEYCODE_WAKEUP 和 MainActivity 拉起；这些动作
+        // 反而会在用户没有发起投屏时点亮/打扰物理屏。只有真正创建过 VD 才恢复。
+        val hadVd = client != null
+        val conn = controlConnection
+        controlConnection = null
+        activeConnection = null
+        // issue #151：会话结束清掉上报节流基准，重连后的第一帧立即上屏。
+        phoneBatteryReporter?.onSessionEnded()
+        appListBuilder.resetIconHashes() // Force resend icons on reconnect
+        _serviceState.value = State.WAITING
+        val ime = savedDefaultIme
+        savedDefaultIme = null
+        // issue #180：token 跟会话一起快照——收尾协程可能在下一轮部署之后才跑，
+        // 那时字段里已经是新会话的 token。
+        val vdToken = vdSessionToken
+        vdSessionToken = null
 
-                // Layer 1: PowerManager.wakeUp() — direct system call
-                try {
-                    val wakeUp = PowerManager::class.java.getDeclaredMethod(
-                        "wakeUp", Long::class.javaPrimitiveType,
-                        Int::class.javaPrimitiveType, String::class.java
-                    )
-                    wakeUp.invoke(pm, android.os.SystemClock.uptimeMillis(),
-                        5 /* WAKE_REASON_APPLICATION */, "DiLink:restore")
-                    FileLog.i(TAG, "Display wakeUp() succeeded from cleanupSession")
-                } catch (e: Exception) {
-                    FileLog.d(TAG, "wakeUp() not available from cleanupSession: ${e.message}")
-                }
-
-                // Layer 2: Launch MainActivity with FLAG_TURN_SCREEN_ON.
-                // WindowManager wakes the display as part of bringing the
-                // activity to the foreground, regardless of the display's
-                // current power state.
-                try {
-                    val intent = Intent(this@ConnectionService, Class.forName("com.dilinkauto.client.MainActivity"))
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    intent.addFlags(0x10000000) // FLAG_TURN_SCREEN_ON
-                    startActivity(intent)
-                    FileLog.i(TAG, "Launched MainActivity with FLAG_TURN_SCREEN_ON from cleanupSession")
-                } catch (e: Exception) {
-                    FileLog.d(TAG, "Activity launch for wake failed from cleanupSession: ${e.message}")
-                }
-
-                // Layer 3: WakeLock with ACQUIRE_CAUSES_WAKEUP
-                @Suppress("DEPRECATION")
-                val flags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                    android.os.PowerManager.ON_AFTER_RELEASE
-                val wl = pm.newWakeLock(flags, "DiLink:display:restore2")
-                wl.acquire(3000)
-                wl.release()
-            } catch (e: Exception) {
-                FileLog.w(TAG, "forceWakeScreen error: ${e.message}")
+        // Everything that can block runs on the process-lifetime teardownScope,
+        // never on the caller's thread: cleanupSession is invoked from Main
+        // (loop finally, stopEverything) and from the network callbacks, and
+        // stopVdServer() joins a write worker for up to 1s (audit A-04).
+        //
+        // Order preserved: graceful CMD_STOP → channel close → panel/IME restore.
+        // Runs on process-lifetime scope because onDestroy() cancels serviceScope —
+        // a restore launched there would die before `cmd display power-reset`.
+        teardownScope.launch {
+            // Graceful stop: CMD_STOP first so the engine's readLifecycleCommands()
+            // sets running=false and its finally block runs cleanup() (releases the
+            // VD, restores IME + letterbox + screen settings, re-powers the panel).
+            // Only if that does not take effect do we fall through to the shell kill
+            // inside PhoneDisplayRestorer.
+            try { client?.stopVdServer() } catch (e: Exception) { FileLog.w(TAG, "stopVdServer: ${e.message}") }
+            try { client?.disconnect() } catch (e: Exception) { FileLog.w(TAG, "vdClient disconnect: ${e.message}") }
+            try { conn?.disconnect() } catch (e: Exception) { FileLog.w(TAG, "control disconnect: ${e.message}") }
+            // Runs on PhoneDisplayRestorer's own process-lifetime scope: the two-stage
+            // stop + `cmd display power-reset` cannot be cancelled by onDestroy().
+            if (hadVd) {
+                displayRestorer.restore(ime, vdToken)
+            } else {
+                FileLog.i(TAG, "cleanupSession: empty session — skip physical display restore")
             }
         }
     }
@@ -1521,8 +930,14 @@ class ConnectionService : Service() {
     private fun stopEverything() {
         connectionLoopJob?.cancel()
         connectionLoopJob = null
+        // Explicit user stop / Service teardown must always run the teardown,
+        // even if a network callback already cleaned up this session.
+        resetCleanupGuard()
         cleanupSession()
-        lastSentIconHash.clear()
+        // issue #200：用户主动停止/重开是一条全新的生命周期，不能被上一轮的
+        // 重建冷却窗口挡住。
+        networkRebuildPolicy.reset()
+        appListBuilder.resetIconHashes()
         serviceRegistration?.unregister()
         serviceRegistration = null
         _serviceState.value = State.IDLE
@@ -1530,61 +945,62 @@ class ConnectionService : Service() {
 
     // ─── System ───
 
-    private fun acquireWakeLock() {
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "DiLinkAuto::ConnectionService"
-        ).apply { acquire(4 * 60 * 60 * 1000L) } // 4h auto-release
-    }
+    private fun acquireWakeLock() = notifier.acquireWakeLock()
 
-    private fun buildNotification(messageRes: Int): Notification {
-        val stopPi = PendingIntent.getService(
-            this, 0,
-            Intent(this, ConnectionService::class.java).apply { action = ACTION_STOP },
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        return NotificationCompat.Builder(this, ClientApp.CHANNEL_SERVICE)
-            .setContentTitle(getString(R.string.notification_title))
-            .setContentText(getString(messageRes))
-            .setSmallIcon(android.R.drawable.ic_menu_share)
-            .setOngoing(true)
-            .addAction(android.R.drawable.ic_media_pause, getString(R.string.notification_action_stop), stopPi)
-            .build()
-    }
+    private fun buildNotification(messageRes: Int): Notification =
+        notifier.buildNotification(messageRes)
 
-    private fun updateNotification(messageRes: Int) {
-        try {
-            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-            nm.notify(NOTIFICATION_ID, buildNotification(messageRes))
-        } catch (_: Exception) {}
-    }
+    private fun updateNotification(messageRes: Int) = notifier.updateNotification(messageRes)
 
     override fun onDestroy() {
         stopEverything()
-        networkCallback?.let {
-            try {
-                val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-                cm.unregisterNetworkCallback(it)
-            } catch (_: Exception) {}
-        }
-        networkCallback = null
+        networkMonitor?.stop()
+        networkMonitor = null
+        phoneBatteryReporter?.stop()
+        phoneBatteryReporter = null
         packageRemovedReceiver?.let {
             try { unregisterReceiver(it) } catch (_: Exception) {}
         }
         packageRemovedReceiver = null
-        wakeLock?.release()
+        notifier.releaseWakeLock()
         serviceScope.cancel()
         super.onDestroy()
     }
 
     companion object {
         private const val TAG = "ConnectionService"
-        private const val VD_SERVER_PORT = 19637
+
+        /** Max bytes of a single car→phone CAR_LOG line (audit A-05). */
+        private const val CAR_LOG_LINE_MAX_BYTES = 8 * 1024
+
+        /**
+         * issue #76：从 accept 到首个控制帧的握手窗口。正常握手是毫秒级；
+         * 5s 足够覆盖车机启动/首帧排队，又不会让空连接无限期挂着。
+         */
+        private const val HANDSHAKE_TIMEOUT_MS = 5_000L
+
         const val ACTION_START = "com.dilinkauto.client.START"
         const val ACTION_STOP = "com.dilinkauto.client.STOP"
         const val ACTION_INSTALL_CAR = "com.dilinkauto.client.INSTALL_CAR"
+        const val ACTION_ALLOWLIST_UPDATED = AllowlistRepository.ACTION_ALLOWLIST_UPDATED
+        const val ALLOWLIST_PREFS = AllowlistRepository.PREFS_NAME
+        const val ALLOWLIST_PACKAGES_KEY = AllowlistRepository.KEY_PACKAGES
+        const val ALLOWLIST_CONFIGURED_KEY = AllowlistRepository.KEY_CONFIGURED
         const val NOTIFICATION_ID = 1001
+
+        /** Propagate log toggle to car. Called from settings UI and onCreate. */
+        fun setLogEnabled(context: android.content.Context, enabled: Boolean) {
+            FileLog.enabled = enabled
+            // Persist both the value and the fact that user explicitly set it
+            context.getSharedPreferences(AppPrefs.FILE_NAME, android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean(AppPrefs.LOG_ENABLED, enabled)
+                .putBoolean(AppPrefs.LOG_ENABLED_USER_SET, true).apply()
+            val conn = activeConnection
+            if (conn != null && conn.isConnected) {
+                try { conn.sendData(DataMsg.LOG_TOGGLE, byteArrayOf(if (enabled) 1 else 0)) }
+                catch (_: Exception) {}
+            }
+        }
 
         private val _serviceState = MutableStateFlow(State.IDLE)
         val serviceState: StateFlow<State> = _serviceState.asStateFlow()
@@ -1596,3 +1012,4 @@ class ConnectionService : Service() {
             private set
     }
 }
+
