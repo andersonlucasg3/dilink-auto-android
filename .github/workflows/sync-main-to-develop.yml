@@ -1,36 +1,50 @@
 name: Sync Main → Develop
 
-# git-flow 回灌：main 上发版/热修后，把 main 合回 develop，避免两条线长期分叉。
+# git-flow 回灌：main 上发版/热修后，把 main 回灌到 develop，避免两条线长期分叉。
 #
-# 该 workflow 原先写 `runs-on: self-hosted`，在没有任何自托管 runner 的仓库里
-# 永远 queued，等于没跑。2026-11 统一改为 GitHub 托管 runner（ubuntu-latest）。
+# 注意：本仓库的 ruleset（Default protected branches，id 15567815）对 main 与
+# develop 都启用了 `pull_request` 规则，**禁止直推**。所以这里不能 `git push
+# origin develop`（会被 GH013 拒绝，issue #76），改为自动开一个 main→develop 的
+# 回灌 PR，PR 上照常跑 `Build` 门禁，合并后完成回灌。
+#
+# 幂等：develop 已包含 main 时直接退出；已有 open 的回灌 PR 时不重复开。
 on:
   push:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+  pull-requests: write
 
 jobs:
-  merge-to-develop:
+  open-back-merge-pr:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Merge main into develop
+      - name: Open back-merge PR if develop is behind
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main develop
 
-          git checkout develop --force
-          git reset --hard origin/develop
+          if git merge-base --is-ancestor origin/main origin/develop; then
+            echo "develop 已包含 main，无需回灌"
+            exit 0
+          fi
 
-          git merge main --no-edit
+          existing=$(gh pr list --base develop --head main --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "已有 open 的回灌 PR #$existing，跳过"
+            exit 0
+          fi
 
-          # 合并提交落在 develop 之上，push 天然是 fast-forward；不用 --force，
-          # 万一 develop 上有并发提交，这里会显式失败而不是把别人的提交冲掉。
-          git push origin develop
+          gh pr create \
+            --base develop \
+            --head main \
+            --title "chore: 回灌 main 到 develop（$(date -u +%Y-%m-%d)）" \
+            --body "main 有新提交（$(git rev-parse --short origin/main)），自动回灌到 develop，保持 git-flow 两条线同步。由 .github/workflows/sync-main-to-develop.yml 自动创建。"
