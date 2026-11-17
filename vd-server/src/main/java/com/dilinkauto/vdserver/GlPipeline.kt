@@ -86,7 +86,7 @@ internal class GlPipeline(
 
     // Logging goes straight to the PipeLog singleton — no local alias (audit R3-DRY-22③).
 
-    // Write-loop policy (5s deadline + 100us backoff) now comes from FrameCodec.
+    // Write-loop policy (10s zero-progress deadline + 100us backoff) now comes from NioWriter.
 
     /**
      * IDR 补帧请求闸门状态（issue #75 / #163）：与车机端共用 protocol-core 的 [SyncRequestGate]，
@@ -286,7 +286,7 @@ internal class GlPipeline(
                     }
                 }
                 if (sender.failed) {
-                    // 写线程 5s 无进展已退出：video 链路确实死了，结束管线交给会话层重连。
+                    // 写线程 10s 无进展已退出：video 链路确实死了，结束管线交给会话层重连。
                     PipeLog.err("Pipeline: video send stalled, exiting for reconnect (frames=$frameCount sendDrops=$sendDrops)")
                     break
                 }

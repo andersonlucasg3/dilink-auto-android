@@ -91,7 +91,7 @@
 | 项 | 值 / 规则 |
 |---|---|
 | 版本号唯一来源 | `gradle.properties` 的 `app.versionName`，格式 `YYYYMMDD-HHMM`；`versionCode` 由它派生（`YYMMDDHH`），不再手填（issue #224） |
-| 正式签名证书 | `CN=DiLink Auto`，SHA-256 `84417b25a0ef960efcaa7e787c4779aa38ff1ffb265c345d95135a540e34f36a` |
+| 正式签名证书 | `CN=DiLink-Auto`，SHA-256 `e91b0551d832aa08af964398f644b002f9669031e3426e47075889bb6cdfd726` |
 | keystore 位置 | 发布者本机 `%USERPROFILE%\.dilink-auto\dilink-auto-release.jks`；CI 走 `RELEASE_KEYSTORE_BASE64` secret 解码到 `$RUNNER_TEMP` |
 | 环境变量 | `RELEASE_KEYSTORE_PASSWORD` / `RELEASE_KEY_PASSWORD` 必需，`RELEASE_KEYSTORE_FILE` / `RELEASE_KEY_ALIAS` 可选 |
 | 触发条件 | 日期-时间 tag `vYYYYMMDD-HHMM` → `Build (Release)`；历史 `vX.Y.Z-dev-N` → `Build (Pre-Release)` |
@@ -104,10 +104,10 @@
 git status --porcelain
 # 2. 打 tag（用 merge commit，不要用分支名；tag 必须与 app.versionName 逐字一致）
 git fetch origin main
-git tag v20261117-2247 origin/main
-git push origin v20261117-2247
+git tag v20261117-2315 origin/main
+git push origin v20261117-2315
 # 3. 盯流水线
-gh run list -R ID-VerNe/dilink-auto-android --limit 3
+gh run list -R andersonlucasg3/dilink-auto-android --limit 3
 # 4. 下载资产后校验签名（命令见 docs/release.md §3）
 ```
 
@@ -119,6 +119,6 @@ gh run list -R ID-VerNe/dilink-auto-android --limit 3
 - 正式签名上线后**旧包不能覆盖安装**，手机与车机都要先卸载。
 - `app-client` 的 `embedServerApk` 现在按客户端变体内嵌车机包（issue #37）：release 客户端内嵌正式签名车机包，debug 客户端内嵌 debug 包；`build-release.yml` 有证书摘要比对门禁，别把这条门禁删了。
 - `buildVdServer` 必须同时依赖 `:protocol:bundleLibRuntimeToJarDebug` —— release-only 构建里否则会因找不到 protocol 的 debug `classes.jar` 而 D8 失败。
-- `environment: release` 当前**没有**保护规则（`/environments` 返回 `total_count: 0`），tag 推上去会直接发版，别以为有审批闸门。
+- `environment: release` 已创建但**没有**保护规则（无 required reviewers），tag 推上去会直接发版，别以为有审批闸门。
 - GitHub 的 tag 过滤器里 `+` 表示"前一个字符一次或多次"，不是正则的 `+`。
 - `Leave fork network` 不可逆且无 API；本仓库 2026-11-01 实测脱离后 issues / PR / Release / secrets 均保留（只是 `parent` 变 `null`），但操作前仍建议导出备份。

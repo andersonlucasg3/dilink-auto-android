@@ -190,7 +190,7 @@ Manages handshake, VD lifecycle, car-app install, allowlist filtering, audio fea
 | CarAppInstaller | `service/CarAppInstaller.kt` | Installs the embedded `app-server.apk` onto the car via `dadb` over WiFi (15s connect timeout) |
 | CarIpLocator | `service/CarIpLocator.kt` | Locates the car's ADB-over-WiFi service (port 5555): control-connection remote IP, subnet enumeration, ARP, neighbor cache, parallel /24 scan, gateway |
 | PhoneDisplayRestorer | `service/PhoneDisplayRestorer.kt` | Restores the phone's physical display and IME after the VD server tears down. **Owns a process-lifetime `CoroutineScope(SupervisorJob() + Dispatchers.IO)`** — deliberately not the Service's scope, which `onDestroy()` cancels. `NonCancellable` context ensures `cmd display power-reset` cannot be skipped mid-restore. `inFlight` `AtomicBoolean` collapses concurrent restore requests into one. Layered: Shizuku (graceful stop via `VdDeploy.gracefulStopCommand` + wait + `killCommandForce` fallback, then `cmd display power-reset` + IME restore), then `PowerManager.wakeUp`, then `FLAG_TURN_SCREEN_ON`, then a wake lock |
-| FileLog | `FileLog.kt` | File-based logging to `/sdcard/DiLinkAuto/client.log`, rotation (30 files max), bypasses HyperOS logcat filtering. Defaults to ON for debug/pre-release, OFF for release; user choice persists via `AppPrefs.LOG_ENABLED`. The settings switch reads the *effective* state through `isEnabledIn(prefs)` (issue #72), so a release build shows OFF instead of a misleading ON. Writes drain through a bounded `AsyncLogQueue` and peer-supplied `CAR_LOG` lines are length-capped before they reach it |
+| FileLog | `FileLog.kt` | File-based logging to `/sdcard/DiLinkAuto/client.log`, rotation (30 archived logs + the live file), bypasses HyperOS logcat filtering. Defaults to ON for debug/pre-release, OFF for release; user choice persists via `AppPrefs.LOG_ENABLED`. The settings switch reads the *effective* state through `isEnabledIn(prefs)` (issue #72), so a release build shows OFF instead of a misleading ON. Writes drain through a bounded `AsyncLogQueue` and peer-supplied `CAR_LOG` lines are length-capped before they reach it |
 | MainActivity | `MainActivity.kt` | UI — start/stop, onboarding, settings, allowlist, install-on-car |
 
 ### app-server (Car Application, minSdk 26)
@@ -442,7 +442,7 @@ The BYD head unit runs Android 9 (API 28). Several framework APIs the project us
 | Async | Kotlin Coroutines + Flow (kotlinx-coroutines 1.7.3) |
 | Tests | JUnit 4.13.2 + kotlinx-coroutines-test 1.7.3, no Robolectric/Mockito — Android modules use `isReturnDefaultValues = true` plus hand-written fakes |
 | Min API | 26 (`protocol`, `app-server`); 29 (`app-client`, `vd-server`) |
-| Releases | See [Releases](https://github.com/ID-VerNe/dilink-auto-android/releases/latest) |
+| Releases | See [Releases](https://github.com/andersonlucasg3/dilink-auto-android/releases/latest) |
 | Protocol Version | `PROTOCOL_VERSION = 1` |
 
 ## Port Reference

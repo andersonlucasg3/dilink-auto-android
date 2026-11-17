@@ -1,6 +1,6 @@
 # Progress Tracker
 
-Current state: see [Releases](https://github.com/ID-VerNe/dilink-auto-android/releases/latest).
+Current state: see [Releases](https://github.com/andersonlucasg3/dilink-auto-android/releases/latest).
 
 ## Milestones
 
@@ -329,7 +329,7 @@ Project created. Screen mirroring on emulators.
 
 ## Fork Changes (post v0.18.0-dev)
 
-The upstream repo went quiet after `v0.18.0-dev` (2026-05-09). This fork (`ID-VerNe/dilink-auto-android`) then landed a directed set of changes targeting Chinese ROM phones (Xiaomi HyperOS, Meizu, etc.) paired with BYD DiLink car head units. The reference car is a BYD Qin PLUS DM-i 2023 Champion 55KM Leading trim — DiLink 4.0 low-spec (Snapdragon 439, 8x Cortex-A53, Adreno 505, 4GB RAM, 16GB eMMC, 1280x800, 2.4GHz-only WiFi, Android 9 / API 28, H.264 hardware decode capped at 1080p). All work is on `main` (git-flow develop model dropped). Sections below are newest-first.
+The upstream repo went quiet after `v0.18.0-dev` (2026-05-09). This fork (`ID-VerNe/dilink-auto-android`) then landed a directed set of changes targeting Chinese ROM phones (Xiaomi HyperOS, Meizu, etc.) paired with BYD DiLink car head units. The reference car is a BYD Qin PLUS DM-i 2023 Champion 55KM Leading trim — DiLink 4.0 low-spec (Snapdragon 439, 8x Cortex-A53, Adreno 505, 4GB RAM, 16GB eMMC, 1280x800, 2.4GHz-only WiFi, Android 9 / API 28, H.264 hardware decode capped at 1080p). All work is on `main` (git-flow develop model dropped). 2026-11-17 该 fork 的 252 个提交已合并回原仓库，原仓库恢复 `develop`/`main` 双分支流程。 Sections below are newest-first.
 
 ### v1.0.3 (2026-11-13)
 

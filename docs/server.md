@@ -356,4 +356,4 @@ minSdk 26, compileSdk 34, Kotlin 1.9.22, Android Gradle 8.2.2, JDK 17.
 - From protocol-core (shared with the desktop receiver and tested there without Android): `BlackScreenDetector` (sustained black-screen policy), `H264NalParser` (IDR detection), `SettingsFormat` (settings coercion + manual-entry seeding), `AsyncLogQueue` (bounded log queue), `LogLine`
 - `TcpAdbConnection` (in protocol/) for TCP ADB fallback
 
-See [architecture.md](./architecture.md) for the cross-module diagram, [protocol.md](./protocol.md) for the wire format and port assignments, and [client.md](./client.md) for the phone-side orchestrator. Download from [Releases](https://github.com/ID-VerNe/dilink-auto-android/releases/latest).
+See [architecture.md](./architecture.md) for the cross-module diagram, [protocol.md](./protocol.md) for the wire format and port assignments, and [client.md](./client.md) for the phone-side orchestrator. Download from [Releases](https://github.com/andersonlucasg3/dilink-auto-android/releases/latest).

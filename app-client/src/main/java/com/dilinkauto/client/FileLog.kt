@@ -79,10 +79,6 @@ object FileLog {
     }
 
     /**
-     * Rotate: rename current log with timestamp, start fresh.
-     * Keeps at most 30 log files (29 archived + current). Oldest are deleted.
-     */
-    /**
      * Read enabled state from SharedPreferences. Call on service start.
      * Default: ON for debug/pre-release builds, OFF for release builds.
      * Once user explicitly toggles, that choice persists regardless of build type.
@@ -107,6 +103,11 @@ object FileLog {
             debugBuild = com.dilinkauto.client.BuildConfig.DEBUG
         )
 
+    /**
+     * 轮转：把当前日志重命名为带时间戳的归档，再开新文件。
+     *
+     * 归档保留 30 份 + 当前文件（共 31 个），最旧的先删；见 [LogArchiver]。
+     */
     fun rotate() {
         queue.clear()
         writer?.close()

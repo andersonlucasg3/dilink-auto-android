@@ -17,7 +17,8 @@ import com.dilinkauto.protocol.VideoMsg
  * 引擎退出、车机断连重连。
  *
  * 现在编码线程只 `offer()`：写不进队列就按直播优先策略丢帧，采集与编码节拍不再
- * 被链路吞吐绑定。5s 写超时仍然存在，但它只负责「链路确实死了」这一种情况。
+ * 被链路吞吐绑定。写超时仍然存在（issue #70 起 10s，见 [FrameCodec.WRITE_TIMEOUT_NS]），
+ * 但它只负责「链路确实死了」这一种情况。
  *
  * ## 策略
  *
@@ -26,7 +27,7 @@ import com.dilinkauto.protocol.VideoMsg
  * - 队列满时：入队的是 CONFIG 或关键帧，就从队头驱逐**最老的 P 帧**再入队；
  *   入队的是 P 帧则直接丢弃新帧。丢过帧后参考链会断，由调用方按
  *   [Stats.dropped] 请求下一个 IDR（调用方负责限流）；
- * - 写抛异常（即 [FrameCodec.writeAll] 的 5s 无进展）→ [failed] 置位、队列清空、
+ * - 写抛异常（即 [FrameCodec.writeAll] 的 10s 无进展）→ [failed] 置位、队列清空、
  *   写线程退出；调用方看到 [failed] 后结束本轮管线，交给会话层重连。
  *
  * 纯 JVM 实现，不引用任何 Android 类型，便于单测。委托给 [AsyncSocketSender] 实现通用收敛。

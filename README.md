@@ -2,11 +2,11 @@
 
 把手机上的应用投到汽车车机屏幕上,完整触摸交互。开源,不依赖 Google 服务。
 
-这是 [andersonlucasg3/dilink-auto-android](https://github.com/andersonlucasg3/dilink-auto-android) 的一个 fork,面向**中国手机 ROM + BYD DiLink 车机**的使用场景做了适配,并专门针对 **DiLink 4.0 低配车机**做了性能优化,使其在弱硬件上从"幻灯片"变成可用。
+本仓库是 DiLink-Auto 的原始仓库（[andersonlucasg3/dilink-auto-android](https://github.com/andersonlucasg3/dilink-auto-android)）。2026-11 已把 [ID-VerNe/dilink-auto-android](https://github.com/ID-VerNe/dilink-auto-android) 这条长期 fork 的 252 个提交全部合并回来，继续面向**中国手机 ROM + BYD DiLink 车机**的使用场景做适配，并专门针对 **DiLink 4.0 低配车机**做性能优化，使其在弱硬件上从"幻灯片"变成可用。
 
 实测车型:**比亚迪 秦PLUS DM-i 2023款 冠军版 55KM 领先型**。该款车机是 DiLink 4.0 低配方案 —— 骁龙 439(8x Cortex-A53 全小核、Adreno 505)、4GB RAM、16GB eMMC、1280x800 屏、仅 2.4GHz WiFi、Android 9 / API 28、H.264 硬件解码上限 1080p。本 fork 的性能调优全部围绕这套硬件展开。
 
-当前版本:**20261117-2247**(`versionCode 26111722`,由版本号日期派生)。
+当前版本:**20261117-2315**(`versionCode 26111723`,由版本号日期派生)。
 
 版本号采用 `YYYYMMDD-HHMM` 日期-时间格式(issue #224):日常迭代按天发布,日期时间能直接读出这一包是哪一轮。`versionCode` 由 `app.versionName` 自动派生,不需要手工维护。
 
@@ -14,7 +14,7 @@
 
 ---
 
-## 这个 fork 相对 upstream 走了哪些路
+## 相对 v0.18.0-dev 走了哪些路（含 fork 期间的演进）
 
 下面是从 fork 点(`84df5cb`,upstream/main)到当前 `main` 的关键技术演进,按逻辑分组。每一条都对应实际 commit,不是规划。
 
@@ -216,7 +216,7 @@ app-desktop --probe
 
 ## 安装
 
-下载 [Releases](https://github.com/ID-VerNe/dilink-auto-android/releases/latest) 里的 APK,或自行构建:
+下载 [Releases](https://github.com/andersonlucasg3/dilink-auto-android/releases/latest) 里的 APK,或自行构建:
 
 1. **构建:** `./gradlew :app-client:assembleDebug`
 2. **装手机:** `app-client/build/outputs/apk/debug/app-client-debug.apk`
