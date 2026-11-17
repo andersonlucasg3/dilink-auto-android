@@ -1,0 +1,407 @@
+{
+  "version": 1,
+  "notes": "DiLink-Auto 双手机真机 E2E op 注册表。ids 必须与 scripts/lib/ops.sh list 的输出集合一致（explore.py check-registry 守卫）。权重比只对 normal vs fault 两组校验（internal/manual 不参与），目标 70:30，容差 10pp。",
+  "defaults": {
+    "settle_s": 15,
+    "teardown_settle_s": 30,
+    "round_budget_s": 90,
+    "op_timeout_s": 120
+  },
+  "state_model": {
+    "vector": ["car_state", "phone_state", "engine", "vd", "sentinel"],
+    "car_states": ["IDLE", "CONNECTING", "CONNECTED", "STREAMING", "ERROR", "UNKNOWN"],
+    "phone_states": ["IDLE", "WAITING", "CONNECTED", "STREAMING", "UNKNOWN"],
+    "engine_vd": ["absent", "present"],
+    "sentinel": ["off", "on"],
+    "start_states": [
+      "(IDLE,IDLE,absent,absent,off)",
+      "(STREAMING,STREAMING,present,present,on)"
+    ],
+    "allowed": {
+      "IDLE": ["connect", "reinstall", "adb_revoke", "occupy_9637", "kill_client", "screen_on"],
+      "CONNECTING": ["disconnect", "kill_server", "kill_client", "wifi_off", "reinstall"],
+      "CONNECTED": ["disconnect", "rotate", "wifi_off", "airplane", "kill_engine", "kill_client", "kill_server", "screen_off", "switch_app", "ime_open", "reinstall"],
+      "STREAMING": ["disconnect", "rotate", "wifi_off", "wifi_on", "airplane", "kill_engine", "kill_client", "kill_server", "reinstall", "screen_off", "screen_on", "switch_app", "ime_open", "adb_revoke"]
+    }
+  },
+  "ops": [
+    {
+      "id": "neutral",
+      "target": "both",
+      "desc": "幂等强制中立化（setup/restore 唯一实现）：force-stop 双端 → 兜底强杀引擎（记账到 harness ops.log）→ 删哨兵 → settings 四项基线回写 → WiFi 恢复 → 端口面验证 → 日志归档轮换 → 六项中立核验",
+      "settle_s": 30,
+      "weight": 0,
+      "class": "internal",
+      "impl": "ops.sh",
+      "requires": {},
+      "ops": ["ops.sh run neutral --phone @PHONE@ --car @CAR@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["(IDLE,IDLE,absent,absent,off)"],
+        "invariants": "full",
+        "note": "六项核验任一不过 = 环境坏，编排层 ENV_BROKEN 中止"
+      },
+      "l1_refs": ["ALL"]
+    },
+    {
+      "id": "launch_client",
+      "target": "phone",
+      "desc": "B 上 monkey 拉起 client（进 WAITING，9637 监听）",
+      "settle_s": 15,
+      "weight": 0,
+      "class": "internal",
+      "impl": "ops.sh",
+      "requires": {},
+      "ops": ["ops.sh run launch_client --phone @PHONE@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["WAITING", "CONNECTED", "STREAMING"],
+        "invariants": "light",
+        "note": "9637 应转 LISTEN（WAITING 态判据）"
+      },
+      "l1_refs": ["S01", "S05", "S12"]
+    },
+    {
+      "id": "launch_server",
+      "target": "car",
+      "desc": "A 上 monkey 拉起 server（UI 起到前台）",
+      "settle_s": 10,
+      "weight": 0,
+      "class": "internal",
+      "impl": "ops.sh",
+      "requires": {},
+      "ops": ["ops.sh run launch_server --car @CAR@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["IDLE", "CONNECTING", "CONNECTED", "STREAMING"],
+        "invariants": "light",
+        "note": "只拉起 UI，不建流"
+      },
+      "l1_refs": ["S01", "S21"]
+    },
+    {
+      "id": "connect",
+      "target": "car",
+      "desc": "A 上输入 B 的 IP 并点「连接」（uiautomator 定位 EditText/Connect + input tap/text + 授权框轮询代点）；ManualConnectBox 不可达时降级为重启 app 原语（issue #173 PA）",
+      "settle_s": 15,
+      "weight": 20,
+      "class": "normal",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["IDLE", "ERROR", "UNKNOWN"] },
+      "ops": ["ops.sh run connect --phone @PHONE@ --car @CAR@ --phone-ip @PHONE_IP@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTING"],
+        "invariants": "full",
+        "note": "op_connect 的 rc 只覆盖 UI 驱动链路 + ManualConnectBox 不可达时的重启兜底，产品级成败看 settle 后的状态收敛；settle 结束仍 CONNECTING = settle-timeout 违规；回 ERROR = 产品缺陷。兜底只做重启动作，不在收敛超时后二次重启（避免掩盖产品侧断连）"
+      },
+      "l1_refs": ["S01", "S08", "S21", "S22"]
+    },
+    {
+      "id": "reconnect",
+      "target": "car",
+      "desc": "A 侧重连原语：重启 app（force-stop + monkey）触发启动路径自动连接（手动连接 UI 真机不可达、Eject 后不自动重连——重启是唯一可靠路径）",
+      "settle_s": 15,
+      "weight": 10,
+      "class": "normal",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["IDLE", "CONNECTING", "CONNECTED", "STREAMING", "ERROR", "UNKNOWN"] },
+      "ops": ["ops.sh run reconnect --car @CAR@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["CONNECTING", "IDLE", "STREAMING"],
+        "invariants": "light",
+        "note": "只做重启动作、不等收敛（竞态场景依赖「不等」让新会话部署与旧引擎 teardown 交叠）；产品级收敛由调用方 wait_state_eq 判"
+      },
+      "l1_refs": ["S08", "S19", "S20"]
+    },
+    {
+      "id": "disconnect",
+      "target": "car",
+      "desc": "A 的 nav bar 点 Eject 断开（content-desc 三语言候选 + 文本 + 比例坐标兜底）",
+      "settle_s": 30,
+      "weight": 15,
+      "class": "normal",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING", "CONNECTED", "CONNECTING"] },
+      "ops": ["ops.sh run disconnect --car @CAR@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["IDLE", "WAITING"],
+        "invariants": "full",
+        "note": "优雅收尾判据：引擎 6.1~6.3s 内退出、无强制 kill、9637 释放、哨兵恢复基线"
+      },
+      "l1_refs": ["S03", "S08", "S19"]
+    },
+    {
+      "id": "rotate",
+      "target": "phone",
+      "desc": "B 翻 user_rotation（关 accelerometer + settings put，to= 缺省翻转）",
+      "settle_s": 15,
+      "weight": 10,
+      "class": "normal",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING", "CONNECTED"] },
+      "ops": ["ops.sh run rotate --phone @PHONE@ to=@TO@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTING", "CONNECTED"],
+        "invariants": "full",
+        "note": "旧 VD teardown → 新握手 → 回 STREAMING；新 VD 尺寸 = 新握手下发值"
+      },
+      "l1_refs": ["S04"]
+    },
+    {
+      "id": "switch_app",
+      "target": "car",
+      "desc": "在 VD 上启动另一个 app（Launcher 页签缺失时直接选应用网格磁贴；index=/pkg= 选目标）",
+      "settle_s": 15,
+      "weight": 15,
+      "class": "normal",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING"] },
+      "ops": ["ops.sh run switch_app --car @CAR@ index=@INDEX@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTED"],
+        "invariants": "full",
+        "note": "目标 app 上屏、无 ANR、流仍存活、引擎不双开"
+      },
+      "l1_refs": ["S15", "S16"]
+    },
+    {
+      "id": "ime_open",
+      "target": "car",
+      "desc": "在 VD 上点开带输入框的 app（默认 dialer）触发 IME",
+      "settle_s": 15,
+      "weight": 10,
+      "class": "normal",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING"] },
+      "ops": ["ops.sh run ime_open --car @CAR@ pkg=@PKG@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTED"],
+        "invariants": "full",
+        "note": "IME 在 VD 弹出；退出后恢复默认输入法"
+      },
+      "l1_refs": ["S14"]
+    },
+    {
+      "id": "wifi_off",
+      "target": "phone",
+      "desc": "关闭 B 的 WiFi（svc wifi disable）",
+      "settle_s": 15,
+      "weight": 5,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING", "CONNECTED"] },
+      "ops": ["ops.sh run wifi_off --phone @PHONE@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTED", "WAITING", "IDLE", "UNKNOWN"],
+        "invariants": "light",
+        "note": "断网期间允许停留可重连态；配对的 wifi_on 之后必须回 STREAMING（S05 判据）"
+      },
+      "l1_refs": ["S05", "S06"]
+    },
+    {
+      "id": "wifi_on",
+      "target": "phone",
+      "desc": "恢复 B 的 WiFi（svc wifi enable）",
+      "settle_s": 15,
+      "weight": 3,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING", "CONNECTED", "WAITING", "IDLE", "UNKNOWN"] },
+      "ops": ["ops.sh run wifi_on --phone @PHONE@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTING", "WAITING"],
+        "invariants": "light",
+        "note": "重连收敛：场景级 wait_state_eq STREAMING 60（S05：断 5s 自动重连）"
+      },
+      "l1_refs": ["S05"]
+    },
+    {
+      "id": "airplane",
+      "target": "phone",
+      "desc": "B 飞行模式开关（settings put global airplane_mode_on + 广播双写，to= 缺省翻转）",
+      "settle_s": 15,
+      "weight": 3,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING", "CONNECTED"] },
+      "ops": ["ops.sh run airplane --phone @PHONE@ to=@TO@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTED", "WAITING", "IDLE", "UNKNOWN"],
+        "invariants": "light",
+        "note": "恢复后重连或按设计停留可重连态（S06）"
+      },
+      "l1_refs": ["S06"]
+    },
+    {
+      "id": "kill_engine",
+      "target": "phone",
+      "desc": "kill -9 引擎进程（pgrep -f [P]ipelineServer → kill -9；SIGTERM 对 app_process 无效）",
+      "settle_s": 30,
+      "weight": 4,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "engine": "present" },
+      "ops": ["ops.sh run kill_engine --phone @PHONE@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "WAITING", "IDLE"],
+        "invariants": "full",
+        "note": "按设计检测到并恢复或干净降级；静默挂死（UI 仍 STREAMING 但帧计数不增长）= 违反不变量；引擎双开 = 违反"
+      },
+      "l1_refs": ["S11", "S20"]
+    },
+    {
+      "id": "kill_client",
+      "target": "phone",
+      "desc": "B 上 am force-stop com.dilinkauto.client",
+      "settle_s": 30,
+      "weight": 4,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING", "CONNECTED", "CONNECTING", "WAITING", "IDLE"] },
+      "ops": ["ops.sh run kill_client --phone @PHONE@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["IDLE", "WAITING"],
+        "invariants": "full",
+        "note": "收尾清理全过（同 S03 断言集）；phone 状态回 IDLE（进程死）"
+      },
+      "l1_refs": ["S09", "S20"]
+    },
+    {
+      "id": "kill_server",
+      "target": "car",
+      "desc": "A 上 am force-stop com.dilinkauto.server",
+      "settle_s": 30,
+      "weight": 4,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING", "CONNECTED", "CONNECTING"] },
+      "ops": ["ops.sh run kill_server --car @CAR@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["IDLE"],
+        "invariants": "full",
+        "note": "B 侧回落 WAITING/IDLE、引擎退出、9637 释放、无残留"
+      },
+      "l1_refs": ["S10"]
+    },
+    {
+      "id": "reinstall",
+      "target": "phone",
+      "desc": "PC 侧重装 B 的 client（adb install -r；内部 force-stop 压 START_STICKY + monkey 单次拉起，确定性策略）",
+      "settle_s": 30,
+      "weight": 3,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": {},
+      "ops": ["ops.sh run reinstall --phone @PHONE@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["WAITING", "CONNECTING", "STREAMING", "IDLE"],
+        "invariants": "full",
+        "note": "START_STICKY ~18s 冷启动后可重新建流；install -r 重试 1 次（偶发失败）"
+      },
+      "l1_refs": ["S12"]
+    },
+    {
+      "id": "screen_off",
+      "target": "phone",
+      "desc": "B 物理屏熄灭（cmd display power-off 0，绕过 screen_off_timeout 哨兵）",
+      "settle_s": 15,
+      "weight": 3,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["STREAMING", "CONNECTED"] },
+      "ops": ["ops.sh run screen_off --phone @PHONE@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTED", "WAITING", "IDLE", "UNKNOWN"],
+        "invariants": "light",
+        "note": "Dozing 期间 screencap 恒全黑——VD 存活改看 vdlog 帧计数（D7），禁用 screencap 断言"
+      },
+      "l1_refs": ["S13"]
+    },
+    {
+      "id": "screen_on",
+      "target": "phone",
+      "desc": "B 物理屏点亮（cmd display power-reset 0 + KEYCODE_WAKEUP；power-on 不存在）",
+      "settle_s": 15,
+      "weight": 2,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": {},
+      "ops": ["ops.sh run screen_on --phone @PHONE@"],
+      "expect": {
+        "rc": "ok",
+        "state_after_any": ["STREAMING", "CONNECTED", "WAITING", "IDLE"],
+        "invariants": "full",
+        "note": "按设计恢复；无 tex=0 静止（黑屏回归信号）"
+      },
+      "l1_refs": ["S13"]
+    },
+    {
+      "id": "adb_revoke",
+      "target": "phone",
+      "desc": "B 上撤销 USB 调试授权（开发者选项 UI 驱动，best-effort；找不到返回 2 = SKIPPED(env)）",
+      "settle_s": 30,
+      "weight": 1,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["IDLE", "STREAMING"] },
+      "ops": ["ops.sh run adb_revoke --phone @PHONE@"],
+      "expect": {
+        "rc": "either",
+        "state_after_any": ["IDLE", "STREAMING", "UNKNOWN"],
+        "invariants": "light",
+        "note": "撤销后 PC↔B USB 通道断（需 IP:5555 旁路保 PC 控制）；只能人工恢复授权，脚本禁自动重授"
+      },
+      "l1_refs": ["S22"]
+    },
+    {
+      "id": "occupy_9637",
+      "target": "phone",
+      "desc": "外用进程占 B 的 9637（toybox nc；不可用返回 2 = SKIPPED(env)）",
+      "settle_s": 10,
+      "weight": 1,
+      "class": "fault",
+      "impl": "ops.sh",
+      "requires": { "car_state": ["IDLE"] },
+      "ops": ["ops.sh run occupy_9637 --phone @PHONE@"],
+      "expect": {
+        "rc": "either",
+        "state_after_any": ["IDLE"],
+        "invariants": "light",
+        "note": "S21 前置：占用后建流应按设计失败并给出明确状态；op_neutral 会兜底杀占位进程"
+      },
+      "l1_refs": ["S21"]
+    },
+    {
+      "id": "usb_pull",
+      "target": "pc",
+      "desc": "物理拔 B 的 USB 线（@manual 场景专用；PHYSICAL_OPS != on 返回 2；拔后验证 USB 通道真断）",
+      "settle_s": 30,
+      "weight": 0,
+      "class": "manual",
+      "impl": "ops.sh",
+      "requires": {},
+      "ops": ["ops.sh run usb_pull --phone @PHONE@"],
+      "expect": {
+        "rc": "either",
+        "state_after_any": ["STREAMING", "CONNECTED", "UNKNOWN"],
+        "invariants": "light",
+        "note": "会话应继续（A↔B 走 WiFi，与 PC 无关）；拔线窗口内 PC 拉不到 B 的日志，断言只能靠 A 侧"
+      },
+      "l1_refs": ["S07"]
+    }
+  ]
+}

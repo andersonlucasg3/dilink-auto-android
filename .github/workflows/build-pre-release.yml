@@ -1,5 +1,11 @@
 name: Build (Pre-Release)
 
+# 预发布流水线：dev 形态的语义化 tag（vX.Y.Z-dev-N）。
+#
+# issue #224 把日常发版的版本号换成日期-时间（vYYYYMMDD-HHMM），那条路径走
+# build-release.yml；本条流水线只为历史/特殊情况保留旧形态，因此 tag 过滤
+# 与版本串校验都保持原样。app.versionName 现在只放日期格式，故 TAG_BASE
+# 与 FILE_BASE 的比对在日期版本上必然不等 —— 这是刻意的：日期版本不该从这里出去。
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+-dev*']
@@ -9,7 +15,12 @@ permissions:
 
 jobs:
   pre-release:
-    runs-on: self-hosted
+    # 与 build-release.yml 一样统一走 GitHub 托管 runner（ubuntu-latest），
+    # 否则 tag 发布在无自托管 runner 的仓库会永远 queued。
+    runs-on: ubuntu-latest
+    # Audit B-07: gate publishing behind the protected `release` environment so
+    # a tag push cannot auto-publish without the reviewers configured on it.
+    environment: release
 
     steps:
       - uses: actions/checkout@v4
@@ -43,19 +54,43 @@ jobs:
               > /dev/null
           fi
 
-      - name: Build Debug APK
+      # 主模块在 RELEASE_* 口令齐全时会把正式签名同样应用到 debug 变体
+      # （app-client/build.gradle.kts:83-86），所以这里也必须先落 keystore，
+      # 否则预发布包会因为找不到 storeFile 直接失败。
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "缺少 RELEASE_KEYSTORE_BASE64 secret，签名变体没有 keystore 会直接失败（audit B-12）" >&2
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/dilink-auto-release.jks"
+          echo "RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/dilink-auto-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build Debug APKs
         run: |
           chmod +x gradlew
-          ./gradlew :app-client:assembleDebug
+          ./gradlew :app-server:assembleDebug :app-client:assembleDebug
         env:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+      - name: Rename APKs
+        run: |
+          cp app-client/build/outputs/apk/debug/app-client-debug.apk DiLinkAuto-Phone.apk
+          cp app-server/build/outputs/apk/debug/app-server-debug.apk DiLinkAuto-Car.apk
+
       - name: Generate Release Notes
         id: notes
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          TAG="${{ github.ref_name }}"
+          # Audit B-06: TAG was interpolated straight from github.ref_name into
+          # this shell script; a tag containing `"` or $(...) breaks out of the
+          # assignment and executes on the runner. Pass it through the
+          # environment instead.
           echo "Tag: $TAG"
           VERSION_NAME="${TAG#v}"
 
@@ -68,8 +103,15 @@ jobs:
             exit 1
           fi
 
-          VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
-
+          # issue #224：app.versionCode 已从 gradle.properties 移除，versionCode 由
+          # versionName 派生（YYMMDDHH）。日期版本直接算；非日期版本回退读旧键。
+          FILE_VERSION=$(grep 'app.versionName' gradle.properties | sed 's/.*=//')
+          if printf '%s' "$FILE_VERSION" | grep -Eq '^[0-9]{8}-[0-9]{4}$'; then
+            VERSION_CODE="${FILE_VERSION:2:6}${FILE_VERSION:9:2}"
+          else
+            VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
+            [ -n "$VERSION_CODE" ] || { echo "ERROR: 无法确定 versionCode（issue #224）" >&2; exit 1; }
+          fi
           git fetch --tags origin 2>/dev/null || true
           PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tail -1)
           if [ -n "$PREV_TAG" ]; then
@@ -94,7 +136,9 @@ jobs:
           tag_name: ${{ steps.notes.outputs.tag }}
           name: ${{ steps.notes.outputs.tag }} — Development Build
           body_path: /tmp/release-notes.md
-          files: app-client/build/outputs/apk/debug/app-client-debug.apk
+          files: |
+            DiLinkAuto-Phone.apk
+            DiLinkAuto-Car.apk
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

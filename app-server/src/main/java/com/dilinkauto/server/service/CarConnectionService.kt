@@ -1,159 +1,164 @@
 package com.dilinkauto.server.service
 
 import android.app.Notification
-import android.app.PendingIntent
 import android.app.Service
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Binder
 import android.os.IBinder
-import android.os.PowerManager
-import android.util.Log
-import androidx.core.app.NotificationCompat
+import android.view.Surface
 import com.dilinkauto.protocol.*
+import com.dilinkauto.server.CarCrashHandler
+import com.dilinkauto.server.CarCrashReport
 import com.dilinkauto.server.R
 import com.dilinkauto.server.ServerApp
-import com.dilinkauto.server.CarCrashHandler
 import com.dilinkauto.server.adb.RemoteAdbController
-import com.dilinkauto.protocol.adb.UsbAdbConnection
+import com.dilinkauto.server.decoder.AudioPlayer
 import com.dilinkauto.server.decoder.VideoDecoder
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 /**
- * Car-side service managing the connection to the phone.
+ * 车机端核心前台 Service 与依赖注入根（SRP：纯粹作为宿主与协调中心）。
  *
- * State machine with parallel prerequisites:
- *   IDLE → CONNECTING → CONNECTED → STREAMING
- *
- * CONNECTING runs two independent tracks in parallel:
- *   Track A (WiFi): discovery → TCP connect → handshake → wifiReady=true
- *   Track B (USB):  detect device → USB ADB connect → usbReady=true
- *
- * When BOTH tracks complete → CONNECTED → deploy VD server
- * When video frames arrive → STREAMING
- *
- * checkAndAdvance() is called whenever any prerequisite changes.
+ * 职责分工：
+ *  - [CarSessionCoordinator]：多通道（9636/9638/9639/9640）网络连接生命周期、握手与视口/黑屏自愈重握手状态机；
+ *  - [CarAdbTracker]：USB ADB 与 TCP ADB（Dev Mode）设备发现、权限请求与连接建立；
+ *  - [CarAppListReceiver]：应用列表解析、单图标/聚合图标内存预算安全门控与持久化解码缓存；
+ *  - [CarConnectionService]：Android Service 生命周期承接、通知与 WakeLock 管理、车载传感器/提供者装配。
  */
 class CarConnectionService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    @Volatile private var controlConnection: Connection? = null
-    @Volatile private var videoConnection: Connection? = null
-    @Volatile private var inputConnection: Connection? = null
+    internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
     val videoDecoder = VideoDecoder()
-    @Volatile private var adbController: RemoteAdbController? = null
-    @Volatile private var phoneHost: String? = null
-    private var wakeLock: PowerManager.WakeLock? = null
-    private var consecutiveFailures = 0
-    private var usbAdb: UsbAdbConnection? = null
-    private var userDisconnected: Boolean
-        get() = getSharedPreferences("dilinkauto", MODE_PRIVATE)
-            .getBoolean("user_disconnected", false)
-        set(value) = getSharedPreferences("dilinkauto", MODE_PRIVATE)
-            .edit().putBoolean("user_disconnected", value).apply()
+    val audioPlayer = AudioPlayer()
 
-    var devMode: Boolean
-        get() = getSharedPreferences("dilinkauto", MODE_PRIVATE)
-                    .getBoolean("dev_mode", false)
-        set(value) = getSharedPreferences("dilinkauto", MODE_PRIVATE)
-            .edit().putBoolean("dev_mode", value).apply()
-
-    // ─── Handshake ───
-    private var handshakeVdDpi = VideoConfig.VIRTUAL_DISPLAY_DPI // DPI from phone (may be adjusted for DeX)
-
-    private var vdServerJarPath = "/sdcard/DiLinkAuto/vd-server.jar"
-
-    private val touchExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-        Thread(r, "touch-sender").apply { isDaemon = true }
+    internal val carPrefs: CarPrefs by lazy { CarPrefs(this) }
+    internal val vdDeployer: VdServerDeployer by lazy {
+        VdServerDeployer(
+            resources = resources,
+            scope = scope,
+            carPrefs = carPrefs,
+            adbTrackerProvider = { adbTracker },
+            sessionCoordinatorProvider = { sessionCoordinator },
+            setStatusMessage = { resId, args -> setStatusMessage(resId, *args) },
+            logSink = { msg, lvl -> carLogSend(msg, lvl) },
+        )
     }
 
-    // ─── Parallel prerequisites ───
-    @Volatile private var wifiReady = false       // WiFi TCP handshake completed
-    @Volatile private var usbReady = false        // USB ADB connected to phone
-    private var connectionScope: Job? = null  // Parent job for all discovery/connect coroutines
-    @Volatile private var vdServerStarted = false // VD server process launched
-    @Volatile private var updatingFromPhone = false // Phone is pushing an update — don't reconnect
-    @Volatile private var shizukuMode = false  // Phone handles VD server via Shizuku
-    @Volatile private var handshakeDone = false // Stop gateway retry after handshake completes
-    @Volatile private var lastAdbHost: String? = null // Track which host TCP ADB connected to
-    private var noAdbCount = 0 // Consecutive deploy failures due to no ADB — stops reconnect loop
-    @Volatile private var carLogEnabled = true // Toggled by phone via LOG_TOGGLE data message
-    @Volatile private var tcpAdbConnecting = false // Prevent duplicate TCP ADB attempts
+    internal val appListReceiver: CarAppListReceiver by lazy {
+        CarAppListReceiver(this) { msg, lvl -> carLogSend(msg, lvl) }
+    }
 
+    internal val adbTracker: CarAdbTracker by lazy {
+        CarAdbTracker(
+            context = this,
+            carPrefs = carPrefs,
+            scope = scope,
+            log = { msg, lvl -> carLogSend(msg, lvl) },
+            setStatusMessage = { resId, args -> setStatusMessage(resId, *args) },
+            getPhoneHost = { sessionCoordinator.phoneHost },
+            isHandshakeDone = { sessionCoordinator.handshakeDone },
+            isVdServerStarted = { sessionCoordinator.vdServerStarted },
+            deployVdServer = { vdDeployer.deploy() },
+            deployVdServerDirect = { vdDeployer.deployDirect(it) },
+            onAdbReady = {
+                if (sessionCoordinator.state.value == State.IDLE) {
+                    // issue #201：ADB 就绪是自动入口，交给 startConnection 的单一闸门判定；
+                    // 用户断开后这里会被挡下并打 `[Connect] auto-reconnect suppressed`。
+                    sessionCoordinator.startConnection(ConnectTrigger.AUTO_ADB_READY)
+                } else {
+                    sessionCoordinator.checkAndAdvance()
+                }
+            },
+            onUsbDetachedMidSession = {
+                if (sessionCoordinator.state.value == State.STREAMING || sessionCoordinator.state.value == State.CONNECTED) {
+                    carLogSend("USB ADB detached mid-session — ending session", "W")
+                    scope.launch { sessionCoordinator.handleDisconnect() }
+                }
+            },
+            // issue #201：USB attach / 权限回调 / TCP ADB 重拨统一问同一个闸门。
+            autoReconnectAllowed = { trigger -> sessionCoordinator.allowReconnect(trigger) },
+        )
+    }
+
+    private val touchSender: CarTouchSender by lazy {
+        CarTouchSender(
+            inputConnectionProvider = { sessionCoordinator.inputConnection },
+            stateProvider = { sessionCoordinator.state.value },
+            log = { msg, level -> carLogSend(msg, level) }
+        )
+    }
+
+    private val logWriter: CarLogWriter by lazy {
+        CarLogWriter(TAG) { sessionCoordinator.controlConnection }
+    }
+
+    internal val sessionCoordinator: CarSessionCoordinator by lazy {
+        CarSessionCoordinator(
+            context = this,
+            scope = scope,
+            carPrefs = carPrefs,
+            videoDecoder = videoDecoder,
+            audioPlayer = audioPlayer,
+            touchSender = touchSender,
+            logWriter = logWriter,
+            appListReceiver = appListReceiver,
+            adbTrackerProvider = { adbTracker },
+            deployVdServer = { vdDeployer.deploy() },
+            updateNotification = { updateNotification(it) },
+            // issue #151：手机电量状态。null = 会话结束，让 chip 回到 `—`。
+            onPhoneStatus = { status ->
+                if (status == null) phoneStatusProvider?.clear() else phoneStatusProvider?.onStatus(status)
+            },
+        )
+    }
+
+    private lateinit var notifier: ForegroundNotifier
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private val usbPermissionAction = "com.dilinkauto.server.USB_PERMISSION"
 
-    private val usbReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
-                    if (device != null) onUsbDeviceAttached(device)
-                }
-                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    carLogSend("USB device detached")
-                    usbAdb?.close()
-                    usbAdb = null
-                    usbReady = false
-                }
-                usbPermissionAction -> {
-                    val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                    val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
-                    if (granted && device != null) {
-                        carLogSend("USB permission granted")
-                        connectUsbAdb(device)
-                    } else {
-                        carLogSend("USB permission denied")
-                    }
-                }
-            }
-        }
-    }
+    // ─── Observable StateFlows (Delegated to sub-components) ───
+    val state: StateFlow<State> get() = sessionCoordinator.state
+    val phoneName: StateFlow<String> get() = sessionCoordinator.phoneName
+    val phoneAudioSupported: StateFlow<Boolean> get() = sessionCoordinator.phoneAudioSupported
+    val appList: StateFlow<List<AppInfo>> get() = appListReceiver.appList
+    val mediaMetadata: StateFlow<MediaMetadata?> get() = sessionCoordinator.mediaMetadata
+    val playbackState: StateFlow<PlaybackState?> get() = sessionCoordinator.playbackState
+    val vdStackEmpty: SharedFlow<Unit> get() = sessionCoordinator.vdStackEmpty
+    val videoReady: StateFlow<Boolean> get() = sessionCoordinator.videoReady
+    /** issue #203：解码器实测入帧帧率（0 = 无样本），设置页展示用。 */
+    val measuredFps: StateFlow<Double> get() = sessionCoordinator.measuredFps
+    /** issue #202：手机端回传的实际生效 VD 密度 / 对应视口上限（0 = 尚未握手）。 */
+    val effectiveVdDpi: StateFlow<Int> get() = sessionCoordinator.effectiveVdDpi
+    val effectiveVdSafeMaxDpi: StateFlow<Int> get() = sessionCoordinator.effectiveVdSafeMaxDpi
+    val statusMessage: StateFlow<String> get() = sessionCoordinator.statusMessage
+    val appInfoData: StateFlow<AppInfoDataMessage?> get() = appListReceiver.appInfoData
 
-    private val _state = MutableStateFlow(State.IDLE)
-    val state: StateFlow<State> = _state.asStateFlow()
+    private val _timeState = MutableStateFlow<TimeUiState?>(null)
+    val timeState: StateFlow<TimeUiState?> = _timeState.asStateFlow()
+    private var clockProvider: ClockProvider? = null
 
-    private val _phoneName = MutableStateFlow("")
-    val phoneName: StateFlow<String> = _phoneName.asStateFlow()
+    private val _altitudeState = MutableStateFlow<AltitudeUiState?>(null)
+    val altitudeState: StateFlow<AltitudeUiState?> = _altitudeState.asStateFlow()
+    private var altitudeProvider: AltitudeProvider? = null
 
-    private val _appList = MutableStateFlow<List<AppInfo>>(emptyList())
-    val appList: StateFlow<List<AppInfo>> = _appList.asStateFlow()
+    private val _weatherState = MutableStateFlow<WeatherUiState?>(null)
+    val weatherState: StateFlow<WeatherUiState?> = _weatherState.asStateFlow()
+    private var weatherProvider: WeatherProvider? = null
 
-    private val _notifications = MutableStateFlow<List<NotificationData>>(emptyList())
-    val notifications: StateFlow<List<NotificationData>> = _notifications.asStateFlow()
-
-    private val _mediaMetadata = MutableStateFlow<MediaMetadata?>(null)
-    val mediaMetadata: StateFlow<MediaMetadata?> = _mediaMetadata.asStateFlow()
-
-    private val _playbackState = MutableStateFlow<PlaybackState?>(null)
-    val playbackState: StateFlow<PlaybackState?> = _playbackState.asStateFlow()
-
-    private val _vdStackEmpty = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val vdStackEmpty: SharedFlow<Unit> = _vdStackEmpty.asSharedFlow()
-
-    private val _focusedApp = MutableStateFlow<String?>(null)
-    val focusedApp: StateFlow<String?> = _focusedApp.asStateFlow()
-
-    private val _videoReady = MutableStateFlow(false)
-    val videoReady: StateFlow<Boolean> = _videoReady.asStateFlow()
-
-    private val _statusMessage = MutableStateFlow("")
-    val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
-
-    private val _shortcutsCache = MutableStateFlow<Map<String, List<AppShortcut>>>(emptyMap())
-    val shortcutsCache: StateFlow<Map<String, List<AppShortcut>>> = _shortcutsCache.asStateFlow()
-
-    private val _appInfoData = MutableStateFlow<AppInfoDataMessage?>(null)
-    val appInfoData: StateFlow<AppInfoDataMessage?> = _appInfoData.asStateFlow()
+    /**
+     * 手机电量（issue #151）：由 [PhoneStatusProvider] 持有，数据来自
+     * [CarSessionCoordinator] 解出的 `DataMsg.PHONE_STATUS`，断开时清回 null（chip 显示 `—`）。
+     */
+    private val _phoneStatusState = MutableStateFlow<PhoneStatusUiState?>(null)
+    val phoneStatusState: StateFlow<PhoneStatusUiState?> = _phoneStatusState.asStateFlow()
+    private var phoneStatusProvider: PhoneStatusProvider? = null
 
     enum class State { IDLE, CONNECTING, CONNECTED, STREAMING }
 
@@ -163,19 +168,100 @@ class CarConnectionService : Service() {
     private val binder = LocalBinder()
     override fun onBind(intent: Intent?): IBinder = binder
 
+    // ─── External UI Facade Methods ───
+    fun setStartupFps(value: Int) = sessionCoordinator.setStartupFps(value)
+    fun connectManual(host: String, port: Int = Ports.DEFAULT_PORT) = sessionCoordinator.connectManual(host, port)
+    fun onUsbDeviceFromActivity(device: UsbDevice) = adbTracker.onUsbDeviceFromActivity(device)
+
+    fun onMirrorSurfaceCreated(surface: Surface) = sessionCoordinator.onMirrorSurfaceCreated(surface)
+    fun onMirrorSurfaceDestroyed() = sessionCoordinator.onMirrorSurfaceDestroyed()
+    fun sendTouchEvent(event: TouchEvent) = touchSender.sendTouchEvent(event)
+    fun sendTouchBatch(pointers: List<TouchEvent>) = touchSender.sendTouchBatch(pointers)
+    fun launchApp(packageName: String) = sessionCoordinator.launchApp(packageName)
+    fun goRecent() = sessionCoordinator.goRecent()
+    fun goHome() = sessionCoordinator.goHome()
+    fun goBack() = sessionCoordinator.goBack()
+    fun onCarViewportChanged(widthPx: Int, heightPx: Int, dpi: Int) = sessionCoordinator.onCarViewportChanged(widthPx, heightPx, dpi)
+    fun requestUninstall(packageName: String) = sessionCoordinator.requestUninstall(packageName)
+    fun requestAppInfo(packageName: String) = sessionCoordinator.requestAppInfo(packageName)
+    fun clearAppInfoData() = appListReceiver.clearAppInfoData()
+    fun onLocationPermissionGranted() = altitudeProvider?.onPermissionResult()
+    fun disconnectFromPhone() = sessionCoordinator.disconnectFromPhone()
+
+    /** 用户点「重新连接」（issue #183）：从断开态重新发起发现/连接。 */
+    fun reconnect() = sessionCoordinator.reconnect()
+    fun sendMediaAction(action: MediaAction) = sessionCoordinator.sendMediaAction(action)
+    internal fun carLogSend(msg: String, level: String = "I") = logWriter.send(msg, level)
+    internal fun setStatusMessage(resId: Int, vararg formatArgs: Any) = sessionCoordinator.setStatusMessage(resId, *formatArgs)
+
+    internal fun sanitizePeerDimension(value: Int, fallback: Int): Int =
+        CarSessionCoordinator.sanitizePeerDimension(value, fallback)
+
     // ─── Lifecycle ───
 
     override fun onCreate() {
         super.onCreate()
+        notifier = ForegroundNotifier(
+            context = this,
+            channelId = ServerApp.CHANNEL_SERVICE,
+            notificationId = NOTIFICATION_ID,
+            wakeLockTag = "DiLinkAuto::CarConnectionService",
+            title = getString(R.string.notification_title),
+            text = { ctx, res -> ctx.getString(res) }
+        )
+        sessionCoordinator.targetFps = carPrefs.startupFps
+        logWriter.setEnabled(com.dilinkauto.server.BuildConfig.DEBUG)
+        logWriter.start()
         videoDecoder.logSink = { msg -> carLogSend(msg) }
+        audioPlayer.logSink = { msg -> carLogSend(msg) }
+        // issue #200：把控制连接的静默时长接进解码器。GAP / STALLED 行带上它就能区分
+        // 「链路断」（控制帧一起停，现场 07.29→16.01 断了 ~8.7s）与「编码停」（控制帧
+        // 照常、只有视频不动）。只读快照，不参与任何超时判定。
+        videoDecoder.msSinceControlFrame = {
+            sessionCoordinator.controlConnection?.msSinceLastFrameReceived() ?: -1L
+        }
+        // issue #200 评审：LINK GAP / STALLED 是实车回签要 grep 的证据，release 下
+        // CarLogWriter 默认关闭（BuildConfig.DEBUG=false），必须走 sendUnconditional
+        // 才能保证车上抓得到（接线方式同 #191/#197 的 AudioPlayer.diagSink）。
+        videoDecoder.diagSink = { msg -> logWriter.sendUnconditional(msg) }
+        // issue #181：播放线程因 CONFIG 永不到达 / 解码器创建失败等原因退出时，用
+        // sendUnconditional 上报（release 下 send 会被 enabled=false 丢掉），保证
+        // logcat 与手机侧 client.log 都能 grep 到 `[AudioPlayer][E]`。
+        audioPlayer.onFatal = { reason ->
+            logWriter.sendUnconditional("[AudioPlayer][E] $reason", "E")
+        }
+        // issue #194：AudioDiag 周期诊断行必须绕过 enabled（release 下默认 false），
+        // 否则正式包上车后 `grep AudioDiag` 什么都抓不到。
+        audioPlayer.diagSink = { msg -> logWriter.sendUnconditional(msg) }
 
-        // Wire crash handler to TCP log sink for immediate crash delivery
+        // issue #9 / #75 / #163 / #198：两端共用 protocol-core 的 SyncRequestGate（滑动窗口：
+        // 1s 内最多 2 次）。IDR 请求统一走 sessionCoordinator.requestSyncFrame —— 参考链断裂
+        // 与「Surface 重绑失败后重建解码器」共用同一闸门，任何一方都不能绕过限流。
+        videoDecoder.onNeedsSyncFrame = { reason ->
+            sessionCoordinator.requestSyncFrame(reason)
+        }
+
+        // issue #200：首帧真正上屏后就绪判定必须能被触发一次。喂帧线程只在持有 codecLock
+        // 时回调，协调器内部只做轻量投递；这样「首帧渲染后码流停住」也不会卡在等待遮罩。
+        videoDecoder.onFirstFrameOnSurface = {
+            sessionCoordinator.onFirstFrameRenderedOnSurface()
+        }
+
+        // issue #203：实测入帧帧率（每 30 帧一次，墙钟口径）推给设置页展示。
+        videoDecoder.onMeasuredFps = { fps -> sessionCoordinator.onMeasuredFps(fps) }
+
+        videoDecoder.onContentBlackPersistent = {
+            carLogSend("[BLACK] decode alive but content still black — requesting phone-side display heal", "W")
+            sessionCoordinator.sendCommandToVd(ControlMsg.REQUEST_DISPLAY_HEAL)
+        }
+
+        videoDecoder.onSustainedBlackScreen = {
+            sessionCoordinator.handleSustainedBlackScreen()
+        }
+
         CarCrashHandler.logSink = { msg -> carLogSend(msg) }
+        carLogSend(CarCrashReport.deviceInfo(this))
 
-        // Log device info for diagnostics
-        carLogSend(CarCrashHandler.buildDeviceInfo(this))
-
-        // Send any crash report from the previous run
         val crash = CarCrashHandler.consumePendingCrash()
         if (crash != null) {
             carLogSend("──── PREVIOUS CRASH REPORT ────", "E")
@@ -185,15 +271,25 @@ class CarConnectionService : Service() {
 
         acquireWakeLock()
         registerNetworkCallback()
-        val filter = IntentFilter().apply {
-            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
-            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
-            addAction(usbPermissionAction)
+        adbTracker.registerUsbReceiver()
+
+        ClockProvider(scope, this, _timeState).let {
+            clockProvider = it
+            it.start()
         }
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(usbReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(usbReceiver, filter)
+        AltitudeProvider(scope, this, _altitudeState, log = { carLogSend(it) }).let {
+            altitudeProvider = it
+            it.start()
+        }
+        WeatherProvider(scope, this, carPrefs, _weatherState).let {
+            weatherProvider = it
+            it.start()
+        }
+        // issue #151：手机电量的唯一写入者；数据由 sessionCoordinator 的
+        // DataMsg.PHONE_STATUS 分支回调进来。
+        PhoneStatusProvider(_phoneStatusState).let {
+            phoneStatusProvider = it
+            it.start()
         }
     }
 
@@ -205,8 +301,11 @@ class CarConnectionService : Service() {
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 carLogSend("WiFi network available — retrying WiFi track if needed")
-                if (_state.value == State.CONNECTING && !wifiReady) {
-                    startWifiTrack()
+                // issue #201：网络恢复同样是自动入口，先过闸门（用户断开后不再重开探测）。
+                // TODO(#204)：available 不恢复是另一条独立缺陷，这里只加抑制，不改恢复语义。
+                if (!sessionCoordinator.allowReconnect(ConnectTrigger.AUTO_NETWORK_AVAILABLE)) return
+                if (sessionCoordinator.state.value == State.CONNECTING && !sessionCoordinator.wifiReady) {
+                    sessionCoordinator.startWifiTrack()
                 }
             }
         }
@@ -218,15 +317,27 @@ class CarConnectionService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, buildNotification(R.string.notification_searching))
-                startConnection()
+                // issue #201：MainActivity.onCreate 每次重建都会发 ACTION_START，属于自动入口；
+                // 用户断开后如果这里还无条件 startConnection，系统重建 Activity 就等于自动重连。
+                sessionCoordinator.startConnection(ConnectTrigger.AUTO_SERVICE_START)
             }
             ACTION_CONNECT -> {
-                val host = intent.getStringExtra(EXTRA_HOST) ?: return START_STICKY
-                val port = intent.getIntExtra(EXTRA_PORT, Discovery.DEFAULT_PORT)
                 startForeground(NOTIFICATION_ID, buildNotification(R.string.notification_searching))
-                userDisconnected = false
-                _state.value = State.CONNECTING
-                connectToPhone(host, port)
+                val host = intent.getStringExtra(EXTRA_HOST)?.trim()
+                val port = intent.getIntExtra(EXTRA_PORT, Ports.DEFAULT_PORT)
+                if (host.isNullOrEmpty()) {
+                    carLogSend("ACTION_CONNECT rejected: blank host", "W")
+                    sessionCoordinator.setStatusMessage(R.string.status_blank_host)
+                    return START_STICKY
+                }
+                if (port !in 1..65535) {
+                    carLogSend("ACTION_CONNECT rejected: port $port out of range", "W")
+                    sessionCoordinator.setStatusMessage(R.string.status_bad_port)
+                    return START_STICKY
+                }
+                // 显式携带 host 的 CONNECT 属于用户操作（clearUserDisconnected = true 由
+                // ConnectTrigger.USER_EXPLICIT_CONNECT 决定，不再在这里裸写标志）。
+                sessionCoordinator.beginConnect(host, port, ConnectTrigger.USER_EXPLICIT_CONNECT)
             }
             ACTION_STOP -> {
                 shutdown()
@@ -237,1030 +348,34 @@ class CarConnectionService : Service() {
         return START_STICKY
     }
 
-    fun connectManual(host: String, port: Int = Discovery.DEFAULT_PORT) {
-        userDisconnected = false
-        _state.value = State.CONNECTING
-        connectToPhone(host, port)
-        startUsbTrack()  // dev mode TCP ADB or USB ADB
-    }
-
-    // ─── State Machine Core ───
-
-    /**
-     * Start both tracks in parallel. Called on ACTION_START, reconnect, etc.
-     */
-    private fun startConnection() {
-        if (_state.value == State.STREAMING || _state.value == State.CONNECTED) return
-
-        // Cancel ALL previous connection work before starting fresh
-        connectionScope?.cancel()
-        connectJob?.cancel()
-        connectJob = null
-        disconnectAllConnections()
-
-        // Reset prerequisite flags (keep usbReady if USB is physically connected)
-        wifiReady = false
-        vdServerStarted = false
-        shizukuMode = false
-        vdDeployRetries = 0
-        handshakeDone = false
-        _videoReady.value = false
-        if (usbAdb?.isConnected != true) {
-            usbReady = false
-            if (usbAdb == null) usbConnecting = false // only reset if no ADB instance (auth may be pending)
-        }
-
-        carLogEnabled = true  // Reset to default each session
-        userDisconnected = false
-        _state.value = State.CONNECTING
-        _statusMessage.value = getString(R.string.status_connecting)
-        updateNotification(R.string.notification_searching)
-
-        // Launch both tracks under a single parent job — cancelling connectionScope
-        // kills all child coroutines (discovery, mDNS, USB scan)
-        connectionScope = scope.launch {
-            startWifiTrack()
-            startUsbTrack()
-        }
-    }
-
-    /**
-     * Central state advancement. Called whenever any prerequisite changes.
-     * Evaluates current state and advances if all conditions are met.
-     */
-    @Synchronized
-    private fun checkAndAdvance() {
-        val currentState = _state.value
-        carLogSend("checkAndAdvance: state=$currentState wifi=$wifiReady usb=$usbReady vd=$vdServerStarted video=${_videoReady.value}")
-
-        when (currentState) {
-            State.IDLE -> { /* waiting for user action */ }
-
-            State.CONNECTING -> {
-                // VD server is deployed immediately after handshake (by car via ADB or
-                // by phone via Shizuku). wifiReady is set after video/input connections
-                // are established following VD_PORTS_BOUND.
-                if (wifiReady && (usbReady || shizukuMode)) {
-                    carLogSend("All connections ready — connected")
-                    _state.value = State.CONNECTED
-                    _statusMessage.value = getString(R.string.status_waiting_video)
-                } else if (wifiReady && !usbReady && !shizukuMode) {
-                    _statusMessage.value = getString(R.string.status_waiting_usb)
-                } else if (!wifiReady && usbReady) {
-                    _statusMessage.value = getString(R.string.status_waiting_wifi)
-                } else if (!wifiReady && !usbReady) {
-                    _statusMessage.value = getString(R.string.status_connecting)
-                }
-            }
-
-            State.CONNECTED -> {
-                if (_videoReady.value) {
-                    carLogSend("Video ready — streaming")
-                    _state.value = State.STREAMING
-                    consecutiveFailures = 0
-                }
-            }
-
-            State.STREAMING -> { /* running */ }
-        }
-    }
-
-    // ─── Track A: WiFi ───
-
-    private fun startWifiTrack() {
-        // Strategy 1: Gateway IP retry loop (phone is hotspot)
-        // Retries every 3s until wifiReady or handshakeDone — handles hotspot enabled after USB plug
-        // and Shizuku mode where phone's service may not be listening on first attempt
-        scope.launch(Dispatchers.IO) {
-            delay(500)
-            while (isActive && !wifiReady && !handshakeDone && _state.value == State.CONNECTING) {
-                val gatewayIp = getWifiGatewayIp()
-                if (gatewayIp != null) {
-                    carLogSend("WiFi track: trying gateway $gatewayIp")
-                    connectToPhone(gatewayIp, Discovery.DEFAULT_PORT)
-                }
-                delay(3000)
-            }
-        }
-
-        // Strategy 2: mDNS (runs continuously until wifiReady or handshakeDone)
-        scope.launch {
-            Discovery.discoverServices(this@CarConnectionService).collect { service ->
-                if (!wifiReady && !handshakeDone && _state.value == State.CONNECTING) {
-                    carLogSend("WiFi track: mDNS found ${service.host}")
-                    connectToPhone(service.host, service.port)
-                }
-            }
-        }
-    }
-
-    private var connectJob: Job? = null
-
-    private fun connectToPhone(host: String, port: Int) {
-        // Don't kill an active session — if we already have a working control
-        // connection with handshake completed, any new connect attempt is a race.
-        if (handshakeDone && controlConnection?.isConnected == true) {
-            carLogSend("connectToPhone: session active, skipping ($host:$port)")
-            return
-        }
-
-        // Close old connections BEFORE starting new ones — prevents stale callbacks
-        connectJob?.cancel()
-        disconnectAllConnections()
-
-        connectJob = scope.launch(Dispatchers.IO) {
-            try {
-                // ─── Step 1: Connect control connection (port 9637) ───
-                val ctrl = Connection.connect(host, port, scope)
-                controlConnection = ctrl
-                phoneHost = host
-
-                ctrl.onLog { msg -> carLogSend("ControlConn: $msg") }
-                ctrl.onDisconnect { scope.launch { handleDisconnect() } }
-                ctrl.onFrames(Channel.CONTROL) { handleControlFrame(it) }
-                ctrl.onFrames(Channel.DATA) { handleDataFrame(it) }
-
-                ctrl.start() // heartbeat enabled (default)
-                carLogSend("Control connected to $host:$port — sending handshake")
-
-                val displayMetrics = resources.displayMetrics
-                val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
-                val viewportWidth = displayMetrics.widthPixels - navBarPx
-                val viewportHeight = displayMetrics.heightPixels
-                val handshake = HandshakeRequest(
-                    deviceName = "DiLink-${android.os.Build.MODEL}",
-                    screenWidth = viewportWidth,
-                    screenHeight = viewportHeight,
-                    screenDpi = displayMetrics.densityDpi,
-                    appVersionCode = packageManager.getPackageInfo(packageName, 0).let {
-                        @Suppress("DEPRECATION") it.versionCode
-                    },
-                    targetFps = targetFps,
-                    appVersionName = packageManager.getPackageInfo(packageName, 0).let {
-                        it.versionName ?: ""
-                    }
-                )
-                ctrl.sendControl(ControlMsg.HANDSHAKE_REQUEST, handshake.encode())
-                handshakeDone = true  // Stop gateway/mDNS retry loops immediately
-
-                withContext(Dispatchers.Main) { updateNotification(R.string.notification_connected) }
-
-                // Wait for VD_PORTS_BOUND → connectVideoAndInput → wifiReady.
-                // The watchdog on control connection handles dead connections.
-                // No timeout — VD deployment and port binding can take several seconds.
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                carLogSend("WiFi connect failed: ${e.message}")
-                handleDisconnect()
-            }
-        }
-    }
-
-    /**
-     * Opens video and input connections after handshake succeeds.
-     * Called from handleControlFrame when HANDSHAKE_RESPONSE is received.
-     */
-    private fun connectVideoAndInput(host: String) {
-        if (updatingFromPhone) {
-            carLogSend("Skipping video/input connections — update in progress")
-            return
-        }
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (updatingFromPhone) {
-                    carLogSend("Skipping video/input connections — update flag set during launch")
-                    return@launch
-                }
-                carLogSend("Connecting video (${Discovery.VIDEO_PORT}) and input (${Discovery.INPUT_PORT})...")
-
-                val videoDef = async { Connection.connect(host, Discovery.VIDEO_PORT, scope) }
-                val inputDef = async { Connection.connect(host, Discovery.INPUT_PORT, scope) }
-
-                val video = videoDef.await()
-                videoConnection = video
-                video.onLog { msg -> carLogSend("VideoConn: $msg") }
-                video.onDisconnect { scope.launch { handleDisconnect() } }
-                video.onFrames(Channel.VIDEO) { handleVideoFrame(it) }
-                video.start(enableHeartbeat = false)
-                carLogSend("Video connection established")
-
-                val input = inputDef.await()
-                inputConnection = input
-                input.onLog { msg -> carLogSend("InputConn: $msg") }
-                input.onDisconnect { scope.launch { handleDisconnect() } }
-                input.start(enableHeartbeat = false)
-                carLogSend("Input connection established — all 3 connections ready")
-
-                wifiReady = true
-                checkAndAdvance()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                carLogSend("Failed to connect video/input: ${e.message}")
-                handleDisconnect()
-            }
-        }
-    }
-
-    private fun disconnectAllConnections() {
-        videoConnection?.disconnect()
-        videoConnection = null
-        inputConnection?.disconnect()
-        inputConnection = null
-        controlConnection?.disconnect()
-        controlConnection = null
-    }
-
-    // ─── Track B: USB ───
-
-    private fun startUsbTrack() {
-        if (usbReady) return // Already connected
-        if (devMode) {
-            carLogSend("Development mode active — using TCP ADB instead of USB")
-            startTcpAdbTrack()
-            return
-        }
-        scope.launch(Dispatchers.IO) {
-            // Scan for already-connected USB device
-            val usbManager = getSystemService(USB_SERVICE) as UsbManager
-            for (device in usbManager.deviceList.values) {
-                if (UsbAdbConnection.findAdbInterface(device) != null) {
-                    carLogSend("USB track: found existing device ${device.productName}")
-                    withContext(Dispatchers.Main) { onUsbDeviceAttached(device) }
-                    return@launch
-                }
-            }
-            carLogSend("USB track: no device found, waiting for attach broadcast")
-        }
-    }
-
-    // ─── Dev mode: TCP ADB track (replaces USB track) ───
-
-    private fun startTcpAdbTrack() {
-        if (tcpAdbConnecting) return
-        // Reconnect if phone IP changed since last ADB connection
-        if (adbController?.isConnected == true && lastAdbHost == phoneHost) return
-        if (adbController?.isConnected == true && lastAdbHost != phoneHost && phoneHost != null) {
-            carLogSend("Dev mode: phone IP changed $lastAdbHost -> $phoneHost, reconnecting TCP ADB")
-            adbController?.disconnect()
-            adbController = null
-            lastAdbHost = null
-        }
-        tcpAdbConnecting = true
-        scope.launch(Dispatchers.IO) {
-            try {
-                var attempts = 0
-                while (isActive && !usbReady && _state.value == State.CONNECTING && attempts < 60) {
-                    val host = phoneHost
-                    if (host != null) {
-                        carLogSend("Dev mode: TCP ADB connecting to $host:5555 (attempt ${attempts + 1})")
-                        connectTcpAdb(host)
-                        if (adbController?.isConnected == true) {
-                            lastAdbHost = host
-                        }
-                        return@launch
-                    }
-                    delay(1000)
-                    attempts++
-                }
-                if (!usbReady) {
-                    carLogSend("Dev mode: could not determine phone IP after ${attempts}s")
-                }
-            } finally {
-                tcpAdbConnecting = false
-            }
-        }
-    }
-
-    private suspend fun connectTcpAdb(host: String) {
-        if (usbReady) return
-        if (adbController?.isConnected == true) {
-            carLogSend("Dev mode: TCP ADB already connected, skipping duplicate")
-            return
-        }
-
-        _statusMessage.value = getString(R.string.status_connecting_tcp_adb, host)
-        val keyDir = java.io.File(filesDir, "adb_keys")
-        val controller = RemoteAdbController(
-            phoneHost = host,
-            adbPort = 5555,
-            virtualDisplayId = -1,
-            keyDir = keyDir
-        )
-
-        if (!controller.connect()) {
-            _statusMessage.value = getString(R.string.status_tcp_adb_failed)
-            carLogSend("Dev mode: TCP ADB connection failed to $host:5555")
-            return
-        }
-
-        adbController = controller
-        _statusMessage.value = getString(R.string.status_tcp_adb_connected)
-        carLogSend("Dev mode: TCP ADB connected to $host:5555")
-
-        usbReady = true
-        noAdbCount = 0  // Reset — ADB is available now
-
-        // Deploy VD server IMMEDIATELY using the same Dadb connection
-        if (handshakeDone && !vdServerStarted) {
-            carLogSend("TCP ADB ready — deploying VD server immediately")
-            deployVdServerDirect(controller)
-        }
-
-        // Launch phone app after VD server
-        try { controller.shell("am start -n com.dilinkauto.client/.MainActivity") } catch (_: Exception) {}
-        carLogSend("Dev mode: phone app launched via TCP ADB")
-
-        checkAndAdvance()
-    }
-
-    private fun isAdbAvailable(): Boolean {
-        val tcpOk = adbController?.isConnected == true
-        val usbOk = usbAdb?.isConnected == true
-        if (!tcpOk && !usbOk) {
-            carLogSend("isAdbAvailable: tcp=${adbController != null}.${adbController?.isConnected} usb=${usbAdb != null}.${usbAdb?.isConnected}")
-        }
-        return tcpOk || usbOk
-    }
-
-    private fun executeAdb(command: String, noWait: Boolean): Boolean {
-        return when {
-            adbController?.isConnected == true -> {
-                if (noWait) adbController!!.shellNoWait(command)
-                else adbController!!.shell(command)
-            }
-            usbAdb?.isConnected == true -> {
-                if (noWait) usbAdb!!.shellNoWait(command) >= 0
-                else { usbAdb!!.shell(command); true }
-            }
-            else -> false
-        }
-    }
-
-    private fun onUsbDeviceAttached(device: UsbDevice) {
-        if (UsbAdbConnection.findAdbInterface(device) == null) return
-        userDisconnected = false
-
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        if (usbManager.hasPermission(device)) {
-            carLogSend("USB device with permission: ${device.productName}")
-            connectUsbAdb(device)
-        } else {
-            carLogSend("Requesting USB permission for: ${device.productName}")
-            val pi = PendingIntent.getBroadcast(this, 0,
-                Intent(usbPermissionAction), PendingIntent.FLAG_IMMUTABLE)
-            usbManager.requestPermission(device, pi)
-        }
-    }
-
-    @Volatile private var usbConnecting = false
-
-    private fun connectUsbAdb(device: UsbDevice) {
-        if (usbReady || usbConnecting) {
-            carLogSend("USB ADB already ${if (usbReady) "connected" else "connecting"} — skipping")
-            return
-        }
-        usbConnecting = true
-        scope.launch(Dispatchers.IO) {
-            _statusMessage.value = getString(R.string.status_connecting_usb)
-            val adb = UsbAdbConnection(this@CarConnectionService)
-            adb.setLogSink { msg -> carLogSend(msg) }
-            if (!adb.connect(device)) {
-                usbConnecting = false
-                _statusMessage.value = getString(R.string.status_usb_failed)
-                carLogSend("USB ADB connection failed")
-                return@launch
-            }
-            usbAdb = adb
-            _statusMessage.value = getString(R.string.status_usb_connected)
-            carLogSend("USB ADB connected")
-            noAdbCount = 0  // Reset — ADB is available now
-
-            // Write key diagnostic to phone for debugging USB auth issues
-            val keyInfo = adb.keyDiagnostic()
-            adb.shell("echo '$keyInfo' > /data/local/tmp/car-adb-key.log")
-            carLogSend("ADB key: $keyInfo")
-
-            // Launch phone app (don't clear task — if it's already open, just move on)
-            adb.shell("am start -n com.dilinkauto.client/.MainActivity")
-            carLogSend("Phone app launched via USB ADB")
-
-            usbConnecting = false
-            usbReady = true
-
-            // If we're not in a connecting flow yet, start one
-            if (_state.value == State.IDLE) {
-                withContext(Dispatchers.Main) { startConnection() }
-            } else {
-                checkAndAdvance()
-            }
-        }
-    }
-
-    fun onUsbDeviceFromActivity(device: UsbDevice) {
-        onUsbDeviceAttached(device)
-    }
-
-    // ─── Frame Handlers ───
-
-    private fun handleControlFrame(frame: FrameCodec.Frame) {
-        when (frame.messageType) {
-            ControlMsg.HANDSHAKE_RESPONSE -> {
-                val response = HandshakeResponse.decode(frame.payload)
-                carLogSend("Handshake OK: ${response.deviceName} jarPath=${response.vdServerJarPath} connMethod=${response.connectionMethod} vdDpi=${response.vdDpi}")
-                _phoneName.value = response.deviceName
-                vdWidth = response.displayWidth
-                vdHeight = response.displayHeight
-                handshakeVdDpi = response.vdDpi
-                if (response.vdServerJarPath.isNotEmpty()) {
-                    vdServerJarPath = response.vdServerJarPath
-                }
-
-                handshakeDone = true  // Stop WiFi gateway retry loop
-                if (response.connectionMethod == CONNECTION_METHOD_SHIZUKU) {
-                    shizukuMode = true
-                    carLogSend("Shizuku mode — phone will deploy VD server, waiting for VD_PORTS_BOUND")
-                } else {
-                    // Car deploys VD server via ADB (USB or TCP).
-                    // Don't deploy here — ADB may not be ready yet.
-                    // connectTcpAdb() will call deployVdServer() once ADB connects.
-                    carLogSend("Handshake OK — waiting for ADB to deploy VD server")
-                }
-            }
-            ControlMsg.VD_PORTS_BOUND -> {
-                carLogSend("VD ports bound — connecting video and input directly to VD server")
-                val host = phoneHost
-                if (host != null) {
-                    connectVideoAndInput(host)
-                } else {
-                    carLogSend("ERROR: phoneHost is null when VD_PORTS_BOUND received")
-                }
-            }
-            ControlMsg.APP_STARTED -> {}
-            ControlMsg.UPDATING_CAR -> {
-                carLogSend("Phone is updating car app — waiting for restart")
-                updatingFromPhone = true
-                _statusMessage.value = getString(R.string.status_updating_car)
-            }
-            ControlMsg.VD_STACK_EMPTY -> {
-                carLogSend("VD stack empty — switching to home")
-                _focusedApp.value = null
-                _vdStackEmpty.tryEmit(Unit)
-            }
-            ControlMsg.APP_SHORTCUTS_LIST -> {
-                val msg = AppShortcutsListMessage.decode(frame.payload)
-                carLogSend("Shortcuts received: ${msg.shortcuts.size} for ${msg.packageName}")
-                _shortcutsCache.value = _shortcutsCache.value + (msg.packageName to msg.shortcuts)
-            }
-            ControlMsg.FOCUSED_APP -> {
-                val pkg = String(frame.payload, Charsets.UTF_8)
-                carLogSend("Focused app: $pkg")
-                _focusedApp.value = pkg
-            }
-        }
-    }
-
-    private var videoFrameCount = 0L
-    private var offscreenTexture: android.graphics.SurfaceTexture? = null
-    private var offscreenSurface: android.view.Surface? = null
-
-    private fun handleVideoFrame(frame: FrameCodec.Frame) {
-        val isConfig = frame.messageType == VideoMsg.CONFIG
-        videoFrameCount++
-        if (isConfig || videoFrameCount % 60 == 0L) {
-            carLogSend("Video ${if (isConfig) "CONFIG" else "FRAME"} size=${frame.payload.size} total=$videoFrameCount")
-        }
-
-        // Start decoder immediately on first CONFIG — don't wait for MirrorScreen's TextureView.
-        // Uses an offscreen SurfaceTexture so the decoder can consume frames right away.
-        // MirrorScreen will restart the decoder with the real surface when it appears.
-        if (isConfig && !videoDecoder.isRunning) {
-            carLogSend("Starting decoder with offscreen surface (pre-MirrorScreen)")
-            val tex = android.graphics.SurfaceTexture(0)
-            tex.setDefaultBufferSize(vdWidth, vdHeight)
-            val surf = android.view.Surface(tex)
-            offscreenTexture = tex
-            offscreenSurface = surf
-            videoDecoder.start(surf, vdWidth, vdHeight, targetFps)
-        }
-
-        if (!_videoReady.value && !isConfig) {
-            _videoReady.value = true
-            carLogSend("First video frame — VD stream ready")
-            checkAndAdvance()
-        }
-        videoDecoder.onFrameReceived(isConfig, frame.payload)
-    }
-
-    private fun handleDataFrame(frame: FrameCodec.Frame) {
-        when (frame.messageType) {
-            DataMsg.APP_LIST -> {
-                val apps = AppListMessage.decode(frame.payload).apps
-                _appList.value = apps
-                // Store source PNGs and prepare all icons for instant rendering.
-                var newIcons = 0
-                apps.forEach { app ->
-                    if (app.iconPng.isNotEmpty()) {
-                        ServerApp.iconCache.putSource(app.packageName, app.iconPng)
-                        newIcons++
-                    }
-                }
-                // Decode + resize all icons on a background thread BEFORE the grid
-                // renders. After prepareAll() finishes, getPrepared() is an O(1)
-                // ConcurrentHashMap lookup — zero work during scroll.
-                scope.launch(Dispatchers.IO) {
-                    val density = applicationContext.resources.displayMetrics.density
-                    val gridIconPx = (64 * density).toInt()
-                    val prepared = ServerApp.iconCache.prepareAll(apps, gridIconPx)
-                    carLogSend("App list: ${apps.size} apps, ${prepared} icons prepared @ ${gridIconPx}px")
-                    // Trigger grid recomposition so tiles pick up the prepared icons
-                    if (prepared > 0) {
-                        _appList.value = ArrayList(_appList.value)
-                    }
-                }
-            }
-            DataMsg.NOTIFICATION_POST -> {
-                val n = NotificationData.decode(frame.payload)
-                // Replace existing notification with same ID (handles progress updates)
-                _notifications.value = _notifications.value.filter { it.id != n.id } + n
-            }
-            DataMsg.NOTIFICATION_REMOVE -> {
-                val n = NotificationData.decode(frame.payload)
-                _notifications.value = _notifications.value.filter { it.id != n.id }
-            }
-            DataMsg.MEDIA_METADATA -> { _mediaMetadata.value = MediaMetadata.decode(frame.payload) }
-            DataMsg.MEDIA_PLAYBACK_STATE -> { _playbackState.value = PlaybackState.decode(frame.payload) }
-            DataMsg.APP_UNINSTALLED -> {
-                val pkg = String(frame.payload, Charsets.UTF_8)
-                _appList.value = _appList.value.filter { it.packageName != pkg }
-                carLogSend("App uninstalled: $pkg — removed from grid")
-            }
-            DataMsg.APP_INFO_DATA -> {
-                val info = AppInfoDataMessage.decode(frame.payload)
-                _appInfoData.value = info
-                carLogSend("App info received: ${info.packageName} v${info.versionName}")
-            }
-            DataMsg.LOG_TOGGLE -> {
-                val enabled = frame.payload.isNotEmpty() && frame.payload[0].toInt() == 1
-                carLogEnabled = enabled
-                carLogSend("Logging ${if (enabled) "enabled" else "disabled"} by phone")
-            }
-        }
-    }
-
-    // ─── VD Server Deploy ───
-
-    private var vdDeployRetries = 0
-
-    private fun deployVdServer() {
-        if (vdServerStarted) return
-        if (!isAdbAvailable()) {
-            carLogSend("deployVdServer: no ADB connection (retry=${vdDeployRetries})")
-            // Retry once after short delay — ADB connection may be re-establishing
-            if (vdDeployRetries < 2) {
-                vdDeployRetries++
-                scope.launch(Dispatchers.IO) {
-                    delay(500)
-                    deployVdServer()
-                }
-                return
-            }
-            noAdbCount++
-            // Auto-fallback: try TCP ADB if we have the phone IP
-            val host = phoneHost
-            if (host != null && !devMode) {
-                carLogSend("Auto-fallback: trying TCP ADB to $host:5555")
-                _statusMessage.value = getString(R.string.status_connecting_tcp_adb, host)
-                scope.launch(Dispatchers.IO) {
-                    connectTcpAdb(host)
-                    if (adbController?.isConnected == true) {
-                        carLogSend("Auto-fallback TCP ADB connected — deploying VD server")
-                        deployVdServer()
-                    } else {
-                        _statusMessage.value = getString(R.string.status_no_adb)
-                        carLogSend("Auto-fallback TCP ADB failed — connect phone to car USB", "W")
-                    }
-                }
-            } else if (host == null) {
-                _statusMessage.value = getString(R.string.status_no_phone_ip)
-            } else {
-                _statusMessage.value = getString(R.string.status_no_adb)
-            }
-            return
-        }
-        vdServerStarted = true  // Set early to prevent duplicate deploys
-        scope.launch(Dispatchers.IO) {
-            val displayMetrics = resources.displayMetrics
-            val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
-            val viewportWidth = displayMetrics.widthPixels - navBarPx
-            val viewportHeight = displayMetrics.heightPixels
-            val phoneDpi = handshakeVdDpi
-
-            // VD created at car viewport size — no GPU downscale needed
-            val vdW = viewportWidth and 0x7FFFFFFE.toInt()
-            val vdH = viewportHeight and 0x7FFFFFFE.toInt()
-
-            val jarPath = vdServerJarPath
-
-            val logFile = "/sdcard/DiLinkAuto/vd-server.log"
-            // Args: W H DPI PHONE_HOST EW EH FPS — VD binds 9638/9639 for car, connects to phone on 19647
-            // Use 127.0.0.1: VD server runs on phone (via ADB), same device as ConnectionService
-            val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
-
-            // Kill any existing VD server
-            _statusMessage.value = getString(R.string.status_preparing_vd)
-            executeAdb("pkill -f PipelineServer 2>/dev/null", noWait = false)
-            delay(200)
-
-            // Launch VD server. Uses exec to replace shell with app_process — keeps ADB stream open.
-            // VD server will die on disconnect; car re-deploys on reconnect.
-            _statusMessage.value = getString(R.string.status_starting_vd)
-            carLogSend("VD server: ${vdW}x${vdH}@${phoneDpi}dpi (car-native, no downscale)")
-
-            val cmd = "CLASSPATH=$jarPath app_process / " +
-                    "com.dilinkauto.vdserver.PipelineServer $args" +
-                    " >$logFile 2>&1 &"
-            if (!executeAdb(cmd, noWait = true)) {
-                carLogSend("VD server failed to start", "E")
-                _statusMessage.value = getString(R.string.status_vd_failed)
-                return@launch
-            }
-
-            vdServerStarted = true
-            _statusMessage.value = getString(R.string.status_waiting_video)
-            carLogSend("VD server started, waiting for video")
-        }
-    }
-
-    // ─── Actions from car UI ───
-
-    var vdWidth = 1408
-        private set
-    var vdHeight = 792
-        private set
-    var targetFps: Int = VideoConfig.TARGET_FPS
-        private set
-
-    /** Public log method for UI components (MirrorScreen, etc.) to route logs to phone */
-    fun log(msg: String) = carLogSend(msg)
-
-    fun releaseOffscreenSurface() {
-        offscreenSurface?.release()
-        offscreenSurface = null
-        offscreenTexture?.release()
-        offscreenTexture = null
-    }
-
-    private var touchDropCount = 0L
-    private var touchSendCount = 0L
-
-    fun sendTouchEvent(event: TouchEvent) {
-        val conn = inputConnection
-        if (conn == null) {
-            touchDropCount++
-            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch DROP #$touchDropCount: inputConnection=null state=${_state.value}")
-            }
-            return
-        }
-        if (!conn.isConnected) {
-            touchDropCount++
-            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch DROP #$touchDropCount: inputConnection not connected")
-            }
-            return
-        }
-        val payload = event.encode()
-        touchExecutor.execute {
-            try {
-                conn.sendInput(event.action, payload)
-                touchSendCount++
-                if (touchSendCount <= 5 || touchSendCount % 100 == 0L) {
-                    carLogSend("Touch #$touchSendCount action=${event.action} ptr=${event.pointerId} x=${"%.2f".format(event.x)} y=${"%.2f".format(event.y)}")
-                }
-            }
-            catch (e: Exception) { carLogSend("Touch send failed: ${e.message}", "W") }
-        }
-    }
-
-    fun sendTouchBatch(pointers: List<TouchEvent>) {
-        val conn = inputConnection
-        if (conn == null) {
-            touchDropCount++
-            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch batch DROP #$touchDropCount: inputConnection=null state=${_state.value}")
-            }
-            return
-        }
-        if (!conn.isConnected) {
-            touchDropCount++
-            if (touchDropCount <= 3 || touchDropCount % 100 == 0L) {
-                carLogSend("Touch batch DROP #$touchDropCount: inputConnection not connected")
-            }
-            return
-        }
-        val payload = TouchMoveBatch(pointers).encode()
-        touchExecutor.execute {
-            try {
-                conn.sendInput(InputMsg.TOUCH_MOVE_BATCH, payload)
-                touchSendCount++
-                if (touchSendCount <= 5 || touchSendCount % 100 == 0L) {
-                    carLogSend("Touch batch #$touchSendCount (${pointers.size} pointers)")
-                }
-            }
-            catch (e: Exception) { carLogSend("Touch batch send failed: ${e.message}", "W") }
-        }
-    }
-
-    /** Send a control command to the VD server directly via the input connection (port 9639) */
-    private fun sendCommandToVd(msgType: Byte, payload: ByteArray = ByteArray(0)) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                inputConnection?.sendControl(msgType, payload)
-            } catch (e: Exception) {
-                carLogSend("sendCommandToVd 0x${msgType.toString(16)} failed: ${e.message}", "E")
-            }
-        }
-    }
-
-    fun launchApp(packageName: String) {
-        sendCommandToVd(ControlMsg.LAUNCH_APP, LaunchAppMessage(packageName).encode())
-    }
-
-    fun goHome() {
-        sendCommandToVd(ControlMsg.GO_HOME)
-    }
-
-    fun goBack() {
-        sendCommandToVd(ControlMsg.GO_BACK)
-    }
-
-    fun requestUninstall(packageName: String) {
-        sendCommandToVd(ControlMsg.APP_UNINSTALL, packageName.toByteArray(Charsets.UTF_8))
-        carLogSend("Requested uninstall: $packageName")
-    }
-
-    fun clearAppInfoData() {
-        _appInfoData.value = null
-    }
-
-    fun requestAppInfo(packageName: String) {
-        sendCommandToVd(ControlMsg.APP_INFO, packageName.toByteArray(Charsets.UTF_8))
-        carLogSend("Requested app info: $packageName")
-    }
-
-    fun requestShortcuts(packageName: String) {
-        // Shortcuts still go through phone (request-reply via lifecycle channel 19647)
-        _shortcutsCache.value = _shortcutsCache.value - packageName
-        scope.launch(Dispatchers.IO) {
-            try {
-                controlConnection?.sendControl(ControlMsg.APP_SHORTCUTS, packageName.toByteArray(Charsets.UTF_8))
-                carLogSend("Requested shortcuts: $packageName")
-            } catch (e: Exception) { carLogSend("requestShortcuts failed: ${e.message}", "E") }
-        }
-    }
-
-    fun executeShortcut(packageName: String, shortcutId: String) {
-        val msg = AppShortcutActionMessage(packageName, shortcutId)
-        sendCommandToVd(ControlMsg.APP_SHORTCUT_ACTION, msg.encode())
-        carLogSend("Execute shortcut: $shortcutId for $packageName")
-    }
-
-    fun clearNotification(id: Int, packageName: String) {
-        _notifications.value = _notifications.value.filter { it.id != id || it.packageName != packageName }
-        scope.launch(Dispatchers.IO) {
-            try {
-                val msg = ClearNotificationMessage(id, packageName)
-                controlConnection?.sendData(DataMsg.NOTIFICATION_CLEAR, msg.encode())
-            } catch (e: Exception) { carLogSend("clearNotification failed: ${e.message}", "E") }
-        }
-    }
-
-    fun clearAllNotifications() {
-        _notifications.value = emptyList()
-        scope.launch(Dispatchers.IO) {
-            try { controlConnection?.sendData(DataMsg.NOTIFICATION_CLEAR_ALL, ByteArray(0)) }
-            catch (e: Exception) { carLogSend("clearAllNotifications failed: ${e.message}", "E") }
-        }
-    }
-
-    fun disconnectFromPhone() {
-        carLogSend("User disconnect — will not auto-reconnect")
-        userDisconnected = true
-        scope.launch(Dispatchers.IO) {
-            try { controlConnection?.sendControl(ControlMsg.DISCONNECT) } catch (_: Exception) {}
-            disconnectAllConnections()
-        }
-    }
-
-    fun sendMediaAction(action: MediaAction) {
-        scope.launch(Dispatchers.IO) {
-            try { controlConnection?.sendData(DataMsg.MEDIA_ACTION, byteArrayOf(action.id)) }
-            catch (e: Exception) { carLogSend("mediaAction failed: ${e.message}", "E") }
-        }
-    }
-
-    // ─── Disconnect & Reconnect ───
-
-    private fun handleDisconnect() {
-        carLogSend("handleDisconnect — state=${_state.value} usb=${usbReady} wifi=${wifiReady}")
-        connectionScope?.cancel()
-        connectionScope = null
-        connectJob?.cancel()
-        connectJob = null
-
-        videoDecoder.stop()
-        releaseOffscreenSurface()
-        // Don't disconnect ADB controller on every disconnect — TCP ADB connections
-        // survive WiFi flaps. Only null it if the connection is actually broken.
-        if (adbController?.isConnected != true) {
-            adbController?.disconnect()
-            adbController = null
-        }
-        disconnectAllConnections()
-
-        _phoneName.value = ""
-        _appList.value = emptyList()
-        _videoReady.value = false
-        videoFrameCount = 0
-        touchSendCount = 0
-        touchDropCount = 0
-        wifiReady = false
-        vdServerStarted = false
-        handshakeDone = false
-        if (usbAdb?.isConnected != true) {
-            usbReady = false
-            if (usbAdb == null) usbConnecting = false
-        }
-        // Preserve TCP ADB readiness if controller is still connected
-        if (adbController?.isConnected == true) {
-            usbReady = true
-        }
-
-        if (updatingFromPhone) {
-            _state.value = State.IDLE
-            _statusMessage.value = getString(R.string.status_updating_please_wait)
-            carLogSend("Disconnected during update — waiting for app restart")
-            // Don't reconnect — the phone will install the new APK and restart us
-            return
-        }
-
-        if (userDisconnected) {
-            _state.value = State.IDLE
-            // Don't clear userDisconnected — persisted until USB re-plug or manual START
-            usbReady = false
-            carLogSend("User disconnect — idle (persisted)")
-            scope.launch { updateNotification(R.string.notification_searching) }
-            return
-        }
-
-        _state.value = State.IDLE
-
-        if (noAdbCount >= 3) {
-            _statusMessage.value = getString(R.string.status_no_adb)
-            carLogSend("No ADB after $noAdbCount attempts — stopping reconnect. Plug phone into car USB.")
-            scope.launch { updateNotification(R.string.plug_phone_usb) }
-            return
-        }
-
-        carLogSend("Connection lost — will reconnect")
-
-        scope.launch {
-            consecutiveFailures++
-            val backoffMs = if (consecutiveFailures <= 1) 500L
-                else (500L * (1L shl (consecutiveFailures - 1).coerceAtMost(4))).coerceAtMost(8000L)
-            carLogSend("Reconnect backoff: ${backoffMs}ms (failures=$consecutiveFailures)")
-            delay(backoffMs)
-            if (_state.value == State.IDLE && !userDisconnected) {
-                startConnection()
-            }
-        }
-    }
-
     private fun shutdown() {
-        videoDecoder.stop()
-        adbController?.disconnect()
-        adbController = null
-        disconnectAllConnections()
-        phoneHost = null
-        _state.value = State.IDLE
+        sessionCoordinator.shutdown()
+        adbTracker.destroy()
+        logWriter.shutdown()
         scope.cancel()
     }
 
-    // ─── WiFi helpers ───
-
-    private fun getWifiGatewayIp(): String? {
-        // Dev mode: check for manual phone IP in SharedPreferences first
-        if (devMode) {
-            val devIp = getSharedPreferences("dilinkauto", MODE_PRIVATE)
-                .getString("dev_phone_ip", null)
-            if (!devIp.isNullOrBlank()) return devIp
-        }
-        return try {
-            val wm = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
-            val gw = wm.dhcpInfo.gateway
-            if (gw == 0) null
-            else String.format("%d.%d.%d.%d", gw and 0xFF, (gw shr 8) and 0xFF,
-                (gw shr 16) and 0xFF, (gw shr 24) and 0xFF)
-        } catch (e: Exception) { null }
-    }
-
-    /** Deploy VD server using the Dadb connection directly, bypassing isConnected check */
-    private suspend fun deployVdServerDirect(controller: RemoteAdbController) {
-        if (vdServerStarted) return
-        vdServerStarted = true  // Set early to prevent duplicate deploys
-        val displayMetrics = resources.displayMetrics
-        val navBarPx = navBarWidthPx(displayMetrics.density, displayMetrics.widthPixels)
-        val viewportWidth = displayMetrics.widthPixels - navBarPx
-        val viewportHeight = displayMetrics.heightPixels
-        val phoneDpi = handshakeVdDpi
-        val vdW = viewportWidth and 0x7FFFFFFE.toInt()
-        val vdH = viewportHeight and 0x7FFFFFFE.toInt()
-        val args = "$vdW $vdH $phoneDpi 127.0.0.1 $vdW $vdH $targetFps"
-        _statusMessage.value = getString(R.string.status_preparing_vd)
-        carLogSend("VD server: ${vdW}x${vdH}@${phoneDpi}dpi (car-native, no downscale)")
-        // Use shell (sync) to capture result. pkill old instance first, then start new one.
-        controller.shell("pkill -f PipelineServer 2>/dev/null")
-        val cmd = "CLASSPATH=/sdcard/DiLinkAuto/vd-server.jar app_process / " +
-                "com.dilinkauto.vdserver.PipelineServer $args" +
-                " >/sdcard/DiLinkAuto/vd-server.log 2>&1"
-        // Use shellBackground to keep ADB stream open — prevents shell from killing the process
-        val streamId = controller.shellBackground(cmd)
-        val ok = streamId >= 0
-        _statusMessage.value = getString(R.string.status_starting_vd)
-        if (ok) {
-            carLogSend("VD server started, waiting for video")
-        } else {
-            carLogSend("VD server failed to start", "E")
-            vdServerStarted = false  // Allow retry
-        }
-    }
-
-    // ─── Car Log (sent to phone via protocol, phone writes to file) ───
-
-    private val logBuffer = java.util.concurrent.ConcurrentLinkedQueue<String>()
-
-    private fun carLogSend(msg: String, level: String = "I") {
-        if (!carLogEnabled) return
-        when (level) {
-            "D" -> Log.d(TAG, msg)
-            "W" -> Log.w(TAG, msg)
-            "E" -> Log.e(TAG, msg)
-            else -> Log.i(TAG, msg)
-        }
-        val ts = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US)
-            .format(java.util.Date())
-        val line = "[$ts][$level] $msg"
-        val conn = controlConnection
-        if (conn != null && conn.isConnected) {
-            // Flush any buffered messages first
-            while (true) {
-                val buffered = logBuffer.poll() ?: break
-                try { conn.sendData(DataMsg.CAR_LOG, buffered.toByteArray(Charsets.UTF_8)) }
-                catch (_: Exception) { break }
-            }
-            try { conn.sendData(DataMsg.CAR_LOG, line.toByteArray(Charsets.UTF_8)) }
-            catch (_: Exception) {}
-        } else {
-            // Buffer for later — cap at 10000 lines
-            if (logBuffer.size < 10000) logBuffer.add(line)
-        }
-    }
-
-    // ─── System ───
-
-    private fun acquireWakeLock() {
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DiLinkAuto::CarConnectionService")
-            .apply { acquire(4 * 60 * 60 * 1000L) } // 4h auto-release
-    }
-
-    private fun buildNotification(messageRes: Int): Notification {
-        return NotificationCompat.Builder(this, ServerApp.CHANNEL_SERVICE)
-            .setContentTitle(getString(R.string.notification_title))
-            .setContentText(getString(messageRes))
-            .setSmallIcon(android.R.drawable.ic_menu_share)
-            .setOngoing(true)
-            .build()
-    }
-
-    private fun updateNotification(messageRes: Int) {
-        val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-        nm.notify(NOTIFICATION_ID, buildNotification(messageRes))
-    }
+    private fun acquireWakeLock() = notifier.acquireWakeLock()
+    private fun buildNotification(messageRes: Int): Notification = notifier.buildNotification(messageRes)
+    private fun updateNotification(messageRes: Int) = notifier.updateNotification(messageRes)
 
     override fun onDestroy() {
         shutdown()
-        touchExecutor.shutdownNow()
-        try { unregisterReceiver(usbReceiver) } catch (_: Exception) {}
+        touchSender.shutdown()
+        clockProvider?.stop()
+        clockProvider = null
+        altitudeProvider?.stop()
+        altitudeProvider = null
+        weatherProvider?.stop()
+        weatherProvider = null
+        phoneStatusProvider?.stop()
+        phoneStatusProvider = null
         networkCallback?.let {
             try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) }
             catch (_: Exception) {}
         }
         networkCallback = null
-        usbAdb?.close()
-        wakeLock?.release()
+        notifier.releaseWakeLock()
         super.onDestroy()
     }
 
@@ -1272,12 +387,38 @@ class CarConnectionService : Service() {
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val NOTIFICATION_ID = 2001
-        const val NAV_BAR_TARGET_DP = 76f
 
-        fun navBarWidthPx(density: Float, screenWidthPx: Int): Int {
-            val targetPx = (NAV_BAR_TARGET_DP * density).toInt()
-            val viewport = screenWidthPx - targetPx
-            return if (viewport % 2 != 0) targetPx + 1 else targetPx
-        }
+        internal const val MAX_PEER_DIMENSION = 4096
+        internal const val MIN_PEER_DIMENSION = 2
+
+        /**
+         * 单张图标解码前的宽高上限（audit S-M5, D-M5 对齐）。
+         */
+        const val MAX_ICON_DIM = CarAppListReceiver.MAX_ICON_DIM
+
+        /**
+         * 单张图标的原始 PNG 字节上限（1MB，audit S-M5, D-M5 对齐）。
+         */
+        const val MAX_ICON_BYTES = CarAppListReceiver.MAX_ICON_BYTES
+
+        @Deprecated("Use MAX_ICON_DIM", ReplaceWith("MAX_ICON_DIM"))
+        internal const val MAX_ICON_DIMENSION = MAX_ICON_DIM
+
+        @Deprecated("Use MAX_ICON_BYTES", ReplaceWith("MAX_ICON_BYTES"))
+        internal const val MAX_ICON_PNG_BYTES = MAX_ICON_BYTES
+
+        /**
+         * 单个 APP_LIST 消息的聚合图标字节预算（64MB，audit S-M5）。
+         */
+        const val MAX_APP_LIST_ICON_BYTES = CarAppListReceiver.MAX_APP_LIST_ICON_BYTES
+
+        internal fun reconnectBackoffMs(consecutiveFailures: Int): Long =
+            BackoffPolicy.DEFAULT.compute(consecutiveFailures)
+
+        internal fun iconBudgetAccepts(totalBytes: Long, nextIconBytes: Int): Boolean =
+            CarAppListReceiver.iconBudgetAccepts(totalBytes, nextIconBytes)
+
+        internal const val MAX_BLACK_SCREEN_REBUILDS = 2
+        internal const val VIEWPORT_REHANDSHAKE_DEBOUNCE_MS = CarSessionCoordinator.VIEWPORT_REHANDSHAKE_DEBOUNCE_MS
     }
 }

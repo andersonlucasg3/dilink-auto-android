@@ -1,5 +1,9 @@
 name: Sync Main → Develop
 
+# git-flow 回灌：main 上发版/热修后，把 main 合回 develop，避免两条线长期分叉。
+#
+# 该 workflow 原先写 `runs-on: self-hosted`，在没有任何自托管 runner 的仓库里
+# 永远 queued，等于没跑。2026-11 统一改为 GitHub 托管 runner（ubuntu-latest）。
 on:
   push:
     branches: [main]
@@ -9,7 +13,7 @@ permissions:
 
 jobs:
   merge-to-develop:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -21,11 +25,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git checkout develop --force
 
+          git checkout develop --force
           git reset --hard origin/develop
 
           git merge main --no-edit
 
-          git push origin develop --force
+          # 合并提交落在 develop 之上，push 天然是 fast-forward；不用 --force，
+          # 万一 develop 上有并发提交，这里会显式失败而不是把别人的提交冲掉。
+          git push origin develop

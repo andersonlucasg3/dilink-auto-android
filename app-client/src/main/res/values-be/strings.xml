@@ -9,7 +9,6 @@
     <string name="notification_connected">Падключана да аўтамабіля</string>
     <string name="notification_waiting">Чаканне падключэння аўтамабіля…</string>
     <string name="notification_streaming">Трансляцыя на дысплей аўтамабіля</string>
-    <string name="notification_channel_update">Абнаўленні праграмы</string>
     <string name="accessibility_description">DiLink Auto выкарыстоўвае спецыяльныя магчымасці для перадачы дотыкаў з дысплея аўтамабіля на тэлефон.</string>
 
     <!-- Галоўны экран -->
@@ -42,25 +41,6 @@
     <string name="status_streaming_desc">Віртуальны дысплей актыўны</string>
 
     <!-- Абнаўленні -->
-    <string name="updates_title">Абнаўленні</string>
-    <string name="updates_check_phone">Праверыць абнаўленне тэлефона</string>
-    <string name="updates_checking">Праверка абнаўленняў…</string>
-    <string name="updates_up_to_date">Тэлефон: актуальная версія (v%1$s)</string>
-    <string name="updates_available">Тэлефон: даступна v%1$s</string>
-    <string name="updates_size_mb">%1$.1f МБ</string>
-    <string name="updates_download_btn">Спампаваць абнаўленне</string>
-    <string name="updates_downloading">Спампоўванне… %1$d%%</string>
-    <string name="updates_ready">Тэлефон: v%1$s гатова</string>
-    <string name="updates_install_btn">Усталяваць абнаўленне</string>
-    <string name="updates_retry">Паўтарыць</string>
-    <string name="updates_available_title">Даступна абнаўленне</string>
-    <string name="updates_update_btn">Абнавіць</string>
-    <string name="updates_dismiss_btn">Прапусціць</string>
-    <string name="updates_downloading_title">Загрузка абнаўлення v%1$s</string>
-    <string name="updates_ready_title">Гатова да ўстаноўкі</string>
-    <string name="updates_car_title">Праграма аўто</string>
-    <string name="updates_car_desc">Усталяваць або абнавіць праграму аўто праз WiFi ADB</string>
-    <string name="updates_car_install">Усталяваць</string>
 
     <!-- Налады -->
     <string name="settings_title">Налады</string>
@@ -71,8 +51,6 @@
     <string name="perm_battery_granted">Падтрымлівае трансляцыю, калі экран выключаны</string>
     <string name="perm_accessibility">Спецыяльныя магчымасці</string>
     <string name="perm_accessibility_granted">Уключае сэнсарнае кіраванне з аўтамабіля</string>
-    <string name="perm_notifications">Доступ да апавяшчэнняў</string>
-    <string name="perm_notifications_granted">Перасылае апавяшчэнні на дысплей аўтамабіля</string>
     <string name="perm_granted">Дазволена</string>
     <string name="perm_usb_debugging">Адладка праз USB</string>
     <string name="perm_usb_desc">Патрэбна на тэлефоне і аўтамабілі</string>
@@ -84,10 +62,6 @@
     <string name="perm_shizuku_granted">Shizuku актыўны. Тэлефон можа разгарнуць сервер віртуальнага дысплея без USB ADB.</string>
 
     <!-- Падтрымка -->
-    <string name="support_title">Падтрымка</string>
-    <string name="support_heading">Дапамажыце падтрымліваць DiLink-Auto</string>
-    <string name="support_sponsor_btn">Спансаваць на GitHub</string>
-    <string name="support_pix_btn">Аплаціць праз Pix (Бразілія)</string>
 
     <!-- Пра праграму -->
     <string name="about_title">Пра праграму</string>
@@ -108,8 +82,6 @@
     <string name="onboarding_battery_desc">Падтрымлівае злучэнне, калі экран выключаны. Без гэтага трансляцыя спыняецца, калі тэлефон засынае.</string>
     <string name="onboarding_accessibility_title">Спецыяльныя магчымасці</string>
     <string name="onboarding_accessibility_desc">Дазваляе сэнсарнаму экрану аўтамабіля кіраваць тэлефонам. Без гэтага вы будзеце бачыць экран, але не зможаце націскаць.</string>
-    <string name="onboarding_notification_title">Доступ да апавяшчэнняў</string>
-    <string name="onboarding_notification_desc">Паказвае апавяшчэнні тэлефона на дысплеі аўтамабіля. Без гэтага вы прапусціце званкі і паведамленні падчас кіравання.</string>
     <string name="onboarding_car_setup_title">Перад падключэннем</string>
     <string name="onboarding_car_setup_desc">Пераканайцеся, што ўсё гатова да падключэння:</string>
     <string name="onboarding_car_prereq_wifi_adb">Wi-Fi ADB уключаны на аўто</string>
@@ -141,8 +113,6 @@
     <string name="car_install_ip_label">IP-адрас аўтамабіля</string>
     <string name="car_install_ip_hint">Пакіньце пустым для аўтавызначэння</string>
     <string name="car_install_button">Усталяваць у аўтамабіль</string>
-    <string name="about_dev_credit">Desenvolvido com ❤ por Anderson Lucas de Castro Ramos 🇧🇷</string>
-    <string name="about_dev_github">github.com/andersonlucasg3</string>
 
     <!-- Car App -->
     <string name="car_app_title">Праграма аўто</string>
@@ -151,26 +121,19 @@
     <string name="car_app_retry">Паўтарыць</string>
     <string name="car_app_installed">Праграма аўто ўсталявана</string>
 
-    <!-- Donation -->
-    <string name="donation_title">Падтрымаць распрацоўку</string>
-    <string name="donation_desc">Дапамажыце падтрымліваць DiLink-Auto. Кожны ўклад важны!</string>
-    <string name="donation_github">Спонсар GitHub</string>
-    <string name="donation_pix">Pix (Бразілія)</string>
-
     <!-- Samsung-Specific Warnings -->
     <string name="samsung_warning_title">Знойдзена прылада Samsung</string>
     <string name="samsung_warning_desc">Samsung One UI патрабуе дадатковай налады: адключыце Auto Blocker (блакуе USB ADB), дайце неабмежаваны доступ да батарэі і дазвольце доступ да ўсіх файлаў. Падрабязнасці ў Наладах.</string>
     <string name="samsung_settings_guide">Кіраўніцтва па наладцы Samsung</string>
 
-    <!-- Distribution Channel -->
-    <string name="channel_title">Канал распаўсюджвання</string>
-    <string name="channel_release">Рэліз</string>
-    <string name="channel_prerelease">Прэ-рэліз</string>
-    <string name="channel_release_desc">Стабільныя рэлізы — рэкамендаваны для штодзённага выкарыстання</string>
-    <string name="channel_prerelease_desc">Зборкі для распрацоўшчыкаў — найноўшыя функцыі, могуць быць нестабільнымі</string>
-
     <!-- Settings Sections -->
-    <string name="settings_distribution">Распаўсюджванне</string>
+    <!-- Car App Allowlist -->
+    <string name="allowlist_title">Car app allowlist</string>
+    <string name="allowlist_desc">Choose which apps appear on the car. Unselected apps never reach the car, reducing load.</string>
+    <string name="allowlist_select_all">Select all</string>
+    <string name="allowlist_deselect_all">Deselect all</string>
+    <string name="allowlist_search_hint">Search apps</string>
+    <string name="allowlist_empty">No apps selected — the car home screen will be empty.</string>
 
     <!-- Install on Car Status -->
     <string name="car_install_status_searching">Пошук аўтамабіля</string>
@@ -196,10 +159,6 @@
     <string name="car_install_status_auth_needed">Патрабуецца аўтарызацыя — Прыміце дыялог адладкі USB на экране аўто, затым націсніце Працягнуць для паўтору</string>
 
     <!-- Auto-Update Status -->
-    <string name="status_auto_update">Абнаўленне праграмы аўто (v%1$s → v%2$s)…</string>
-    <string name="status_auto_update_complete">Праграма аўто абноўлена! Перазапуск…</string>
-    <string name="status_update_failed">Памылка абнаўлення: %s</string>
-    <string name="status_auto_update_failed">Памылка аўта-абнаўлення: %s</string>
 
     <!-- Notification Actions -->
     <string name="notification_action_stop">Стоп</string>

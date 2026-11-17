@@ -1,9 +1,10 @@
 # Progress Tracker
 
-Current version: **v0.18.0-dev** (pre-release)
-Last updated: 2026-05-09
+Current state: see [Releases](https://github.com/andersonlucasg3/dilink-auto-android/releases/latest).
 
 ## Milestones
+
+The milestones below are the upstream repo's history, preserved as historical context. They describe what landed in `andersonlucasg3/dilink-auto-android` up to `v0.18.0-dev` (2026-05-09). Everything after that point is this fork's own work — see [Fork Changes (post v0.18.0-dev)](#fork-changes-post-v0180-dev) below.
 
 ### v0.18.0-dev (2026-05-09)
 
@@ -45,8 +46,7 @@ Last updated: 2026-05-09
 
 - **Notification per-item dismiss and Clear All**: Car notification screen now has per-item dismiss buttons with slide-out animations and a "Clear All" header button. New protocol messages: `NOTIFICATION_CLEAR` (0x04) and `NOTIFICATION_CLEAR_ALL` (0x05) on data channel. Per-item icons from phone's `iconPng` payload.
 - **App context actions**: Long-press on app tiles (launcher) and nav bar recent apps shows dropdown menu with Uninstall and App Info. Uninstall propagation via `APP_UNINSTALL` (0x1B) / `APP_UNINSTALLED` (0x06). App Info displays car-side dialog with `APP_INFO_DATA` (0x07) metadata from phone. Context menu actions route through VD server for shell-level access.
-- **App shortcuts infrastructure** (disabled in UI): Protocol messages `APP_SHORTCUTS` (0x18) / `APP_SHORTCUTS_LIST` (0x19) / `APP_SHORTCUT_ACTION` (0x1A) with VD server query + APK XML fallback. Disabled while label resolution is refined (issue #57).
-- **Back button fix**: GO_BACK now closes activities one-by-one before returning to the home menu, using proper stack tracking and `FOCUSED_APP` (0x16) messages.
+- **Back button fix**: GO_BACK now closes activities one-by-one before returning to the home menu, using proper stack tracking via `dumpsys activity activities` on the VD server.
 - **Samsung DeX / Desktop Mode DPI** (reverted): Initial implementation using `UiModeManager.currentModeType` detection and 213dpi was reverted in dev-02. Replaced by VD-level flag removal approach.
 
 ### v0.16.0 (2026-04-29)
@@ -61,23 +61,23 @@ Last updated: 2026-05-09
 
 ### v0.15.0 (2026-04-28)
 
-- **Phone service auto-start**: `ConnectionService` auto-starts when the phone app is opened (e.g. via car USB ADB), removing the need to manually press Start. ✅ Done
-- **Car no longer clears phone task**: Removed `--activity-clear-task` from car's USB ADB phone launch. If the phone app is already open, the car moves forward without disrupting it. ✅ Done
-- **Share Logs button**: "Share Logs" button on the main screen zips all `*.log` files from `/sdcard/DiLinkAuto/` and shares via Android share sheet. `FileLog.zipLogs()` creates a `dilinkauto-logs.zip`. ✅ Done
-- **Encoder configuration**: Adjusted to 8Mbps CBR Main profile for broader device compatibility. Added backpressure (drops non-keyframes when write queue exceeds 6 frames). ✅ Done
-- **VideoDecoder catchup**: Four graduated speedup zones (normal, gentle 1.5x, medium 2x, aggressive 3x) for smoother latency recovery. ✅ Done
-- **French translation**: Added French (fr) to the existing 7 languages (now 8 total). ✅ Done
-- **Update check on app open**: Self-update check runs immediately when the app opens, with update notification and re-check button. ✅ Done
-- **Distribution channel selector**: Settings card to choose between stable releases and dev prereleases for self-update. ✅ Done
-- **CarLaunchScreen redesign**: Two-column layout optimized for wide car displays. ✅ Done
-- **Phone app UI refactor**: Reorganized main screen, fixed install flow bugs. ✅ Done
-- **Onboarding improvements**: Car setup prerequisites, enhanced install progress UI, improved How to Connect card. ✅ Done
-- **Car UI two-mode separation**: Launch screen (full-screen, connection-focused) and streaming mode (nav bar + content). Smooth transition when app list arrives. ✅ Done
-- **Video artifact fixes**: Smart decoder drops + graduated catchup + encoder backpressure eliminate visual artifacts. ✅ Done
-- **Touch input fixes**: Correct coordinate mapping at fixed 480dpi VD server DPI, incremental touch dispatch on MOVE, tap gesture and manual IP fixes. ✅ Done
-- **Screen restore and network stability**: Display restore after USB disconnect, network callback improvements. ✅ Done
-- **Internationalization**: All new UI strings translated to 8 languages (en, pt-BR, ru, be, fr, kk, uk, uz). ✅ Done
-- **CI/CD automation**: 6 dedicated workflows — validation (`build.yml`, `build-develop.yml`), pre-release on `-dev` tags (`build-pre-release.yml`), release on `vX.Y.Z` tags (`build-release.yml`), main→develop back-sync (`sync-main-to-develop.yml`), and autonomous issue-agent (`issue-agent.yml`). ✅ Done
+- **Phone service auto-start**: `ConnectionService` auto-starts when the phone app is opened (e.g. via car USB ADB), removing the need to manually press Start.
+- **Car no longer clears phone task**: Removed `--activity-clear-task` from car's USB ADB phone launch.
+- **Share Logs button**: "Share Logs" button on the main screen zips all `*.log` files from `/sdcard/DiLinkAuto/` and shares via Android share sheet. `FileLog.zipLogs()` creates a `dilinkauto-logs.zip`.
+- **Encoder configuration**: Adjusted to 8Mbps CBR Main profile for broader device compatibility. Added backpressure (drops non-keyframes when write queue exceeds 6 frames).
+- **VideoDecoder catchup**: Four graduated speedup zones (normal, gentle 1.5x, medium 2x, aggressive 3x) for smoother latency recovery.
+- **French translation**: Added French (fr) to the existing 7 languages (now 8 total).
+- **Update check on app open**: Self-update check runs immediately when the app opens, with update notification and re-check button.
+- **Distribution channel selector**: Settings card to choose between stable releases and dev prereleases for self-update.
+- **CarLaunchScreen redesign**: Two-column layout optimized for wide car displays.
+- **Phone app UI refactor**: Reorganized main screen, fixed install flow bugs.
+- **Onboarding improvements**: Car setup prerequisites, enhanced install progress UI, improved How to Connect card.
+- **Car UI two-mode separation**: Launch screen (full-screen, connection-focused) and streaming mode (nav bar + content). Smooth transition when app list arrives.
+- **Video artifact fixes**: Smart decoder drops + graduated catchup + encoder backpressure eliminate visual artifacts.
+- **Touch input fixes**: Correct coordinate mapping at fixed 480dpi VD server DPI, incremental touch dispatch on MOVE, tap gesture and manual IP fixes.
+- **Screen restore and network stability**: Display restore after USB disconnect, network callback improvements.
+- **Internationalization**: All new UI strings translated to 8 languages (en, pt-BR, ru, be, fr, kk, uk, uz).
+- **CI/CD automation**: 6 dedicated workflows — validation (`build.yml`, `build-develop.yml`), pre-release on `-dev` tags (`build-pre-release.yml`), release on `vX.Y.Z` tags (`build-release.yml`), main→develop back-sync (`sync-main-to-develop.yml`), and autonomous issue-agent (`issue-agent.yml`).
 
 ### v0.14.0
 
@@ -327,6 +327,199 @@ Project created. Screen mirroring on emulators.
 
 ---
 
+## Fork Changes (post v0.18.0-dev)
+
+The upstream repo went quiet after `v0.18.0-dev` (2026-05-09). This fork (`ID-VerNe/dilink-auto-android`) then landed a directed set of changes targeting Chinese ROM phones (Xiaomi HyperOS, Meizu, etc.) paired with BYD DiLink car head units. The reference car is a BYD Qin PLUS DM-i 2023 Champion 55KM Leading trim — DiLink 4.0 low-spec (Snapdragon 439, 8x Cortex-A53, Adreno 505, 4GB RAM, 16GB eMMC, 1280x800, 2.4GHz-only WiFi, Android 9 / API 28, H.264 hardware decode capped at 1080p). All work is on `main` (git-flow develop model dropped). 2026-11-17 该 fork 的 252 个提交已合并回原仓库，原仓库恢复 `develop`/`main` 双分支流程。 Sections below are newest-first.
+
+### v1.0.3 (2026-11-13)
+
+- **Complete Audio Mirroring Closed-Loop (issues #67, #70, #72, #73, #79, #84)**:
+  - **Port 9640 & Framing (S1)**: `AUDIO_PORT = 9640` in `Ports.kt`. Dedicated TCP connection independent of video to avoid 1MB video IDRs head-of-line blocking 341B audio frames. Binary framing via `AudioPayload` with out-of-band `CONFIG` (`csd-0`, AAC-LC 48kHz stereo, 128kbps) and `FRAME` (pts timestamp + raw AAC-LC access units).
+  - **Capture, Encoding & Pacing (S2)**: `AudioRecord` with `REMOTE_SUBMIX` captures system audio rendered to the VirtualDisplay. `AudioPipeline` + `AudioEncoderSelector` encode to AAC-LC. Constant 46.875 fps pacing (1024 samples/frame at 48kHz = 21.333ms per frame) with synthetic silence frame injection during audio pauses (`AudioSpec.kt`, `AudioPacing.kt`), preventing jitter buffer underruns and delay accumulation.
+  - **Port Binding & Receiver Playback (S3)**: `PortAcceptor` on `vd-server` binds port 9640 (accepting only pinned `CAR_HOST`). `CarSessionCoordinator` connects to 9640 and hands the stream to `AudioPlayer`. Internal 150ms jitter buffer (configurable 60~200ms) with `AudioTrack` free-running playback.
+  - **Bidirectional Feature Negotiation (S4)**: Dual-sided `FEATURE_AUDIO` negotiation via `isAudioNegotiated(request, response)`. Client provides a persisted audio toggle; car UI dynamically enables or dims the audio switch based on phone capability.
+  - **E2E Scenario & Silence Metrics (S23)**: S23 end-to-end audio mirroring test scenario landed in `e2e-scenarios.md`. Periodic logging in `AudioPlayer` tracks silence frame ratios (`silenceFrames`/`totalFrames`), closing the contract against false-green silent passes (issue #84).
+- **Two Rounds of SRP/DRY Architectural Decoupling (Refs #87, #92)**:
+  - `:protocol-core` & `:protocol`: Extracted `NioWriter` (SocketChannel spin-blocking writes with timeout), `BackoffPolicy` (parameterized exponential backoff with jitter), `DecodeLivenessTracker` (unified decode vitality tracking and baseline management), `ConnectionFactory`, `ConnectionKeepAlive`, `UsbAdbKeyStore`, `Ipv4Validator` (strict/loose), and `AppIconLimits` (max icon dim 512, max bytes 1MB). Cleaned up dead sync/push methods in `UsbAdbConnection` and unified UTF-8 writing in `Messages.kt`.
+  - `:vd-server`: Extracted `AsyncSocketSender` (unified non-blocking socket writer), `AudioEncoderSelector`, `ProcessWatchdog` (watchdog loop separated from stop-sentinel watcher), `VideoEncoderSelector`, `PortAcceptor` (multi-port listener with `CAR_HOST` enforcement), `ActivityDumpParser` (bounds-checked dumpsys window/display parsing), and `VdDisplayHealer`. Migrated `LifecycleWriter` to `AsyncSocketSender`.
+  - `:app-client`: Decoupled `ConnectionService`, extracting `ShizukuVdDeployer`, `ShizukuNav`, `ClientNetworkMonitor`, `CarAppInstallHost`, `AllowlistRepository`, and `SessionState`. Formally marked `InputInjectionService` as `@Deprecated` and severed its call path.
+  - `:app-server`: Substantially slimmed `CarConnectionService` down to 407 lines, extracting `CarSessionCoordinator` (manages 4-channel lifecycle 9637/9638/9639/9640 and re-handshake), `CarAdbTracker` (USB/TCP ADB dual tracks), and `CarAppListReceiver` (`AppIconLimits` security gate).
+  - `:app-desktop`: Aligned with `AppIconLimits`, `DecodeLivenessTracker`, and `BackoffPolicy`.
+- **Stability and Diagnostics Fixes**:
+  - **IDR Request Throttling (#75)**: Unified IDR request throttling thresholds across car server and VD server, eliminating the 500-999ms dead zone during keyframe recovery.
+  - **Dumpsys Display Section Parsing (#77)**: Added upper bounds and task-header checking in display dumpsys parsing, eliminating task duplication and cross-display activity leakage.
+
+### Full-module test coverage — 18 files, 139 cases (commit 8157c86, 2026-10-10)
+
+The repo carried no meaningful unit-test suite (`:protocol` had no unit-test source set at all). One pass filled the gap across all six Gradle modules, and the testability-seam pass below added the rest. Full details — coverage matrix, the cross-module invariants now pinned, and the hazards left to product decisions — live in [IMPLEMENTATION_REPORT_TESTING.md](IMPLEMENTATION_REPORT_TESTING.md).
+
+| Module | New test files | Pinned production objects | Cases |
+|---|---|---|---|
+| `:protocol` | `AdbProtocolTest`, `AdbCryptoTest` | ADB frame header / magic / checksum / round-trip / constants; `bigIntToLEPadded`, `SHA1_DIGEST_INFO`, `fingerprint`, `signAuthToken`, `buildAuthReply` | 25 |
+| `:protocol-core` | `VideoConfigTest`, `VdDeployArgsFormatTest`, `ImeRestoreGuardTest`, `H264NalParserRefIdcTest`, `AsyncLogQueueTest`, `VdDeployConstantsTest`, `WifiGatewayIpTest` | every `calculateOptimalDpi` branch; `VdDeployArgs.format` layout / scaling / bitrate edges; `shouldRestoreIme`; H264 `nal_ref_idc` recovery; `AsyncLogQueue` overflow / FIFO / suspend / close; kill / stop / probe commands locked verbatim; gateway IP byte order | 34 |
+| `:vd-server` | `AdaptiveBitrateEdgeTest`, `DisplayPowerControllerRestoreTest`, `TouchInjectorFallbackTest`, `CarCommandRouterDispatchTest` | adaptive-bitrate threshold edges / truncation / sync latch; the S-M10 sentinel fallback in `restoreIme`; touch normalization scaling + shell fallback; shell-quoted `am` / `pm` / `input` routing + `SET_DISPLAY_POWER` | 28 |
+| `:app-client` | `VersioningTest`, `AppCategorizerTest`, `InstallStatusTest` | version parse / compare (sentinel + SNAPSHOT edges); ordered app-category keywords; install-status string classification + stage index (localization hazard included) | 38 |
+| `:app-server` | `WifiGatewayProbeTest`, `CarCrashReportTest` | gateway lookup fallback; crash-report format contract (header / timestamp / thread / stack / Process State / Caused by / Suppressed) | 8 |
+| `:app-desktop` | `HandshakeFactoryTest`, `DesktopConfigTest` | handshake field mapping + `evenAlign` (floor 2, negative fallback); config defaults must come from protocol constants; `copy` renames only | 6 |
+| **Total** | **18 files** | | **139** |
+
+- **The test stack is the project's existing convention**: JUnit4 + kotlinx-coroutines-test. No Robolectric / Mockito / MockK. Android modules lean on `isReturnDefaultValues = true` plus hand-written fakes (`ContextWrapper(null)`, a capturing `OutputStream`, canned lambdas). `:protocol` gained `testOptions { unitTests.isReturnDefaultValues = true }` + `junit:junit:4.13.2` — it previously had no test source set at all.
+- **Offline verification, all six modules**: `:protocol:test`, `:protocol-core:test`, `:vd-server:test`, `:app-client:testDebugUnitTest`, `:app-server:testDebugUnitTest`, `:app-desktop:test` — every one `BUILD SUCCESSFUL`.
+- **The seam follow-up added 44 more test methods** across 7 files (`TcpAdbConnectionTest`, `ConnectionHeartbeatTest`, `CarConnectionServicePolicyTest`, `AssetDeployerExtractTest`, `CarInstallCoordinatorTest`, `CarAppInstallerParseVersionTest`, `FeedGateVideoStreamPipeIntegrationTest`, plus `AdbCryptoTest` additions), for **183 new tests in total** (next section). Counts are literal `@Test` annotations.
+- `:protocol-core` also gains `ScreenMode` + `CaptureModePolicy` (the VD → screencast auto-fallback ladder) with tests, for the upcoming dual-mode receiver — see [FEATURE_DUAL_MODE_RECEIVER.md](FEATURE_DUAL_MODE_RECEIVER.md).
+- Four defects the audit surfaced are **pinned by characterization tests rather than fixed** — changing them is a product decision, see [Known Issues](#known-issues).
+
+### Testability refactors — behaviour-preserving seams (2026-10-10)
+
+Each item extracts a seam without changing production behaviour, then pins logic that had never been covered. Defaults still point at the previous real values, so existing callers are unaffected.
+
+- **`1b6092c` — ADB seams + a cross-module pipe invariant.** `AdbCrypto.encodePublicKey` switched `android.util.Base64` → `java.util.Base64` (byte-identical, including the single trailing `=`; the 524-byte ANDROID_PUBKEY struct is now assertable on the JVM). `TcpAdbConnection` extracts companion `negotiateMaxPayload(cnxn)` / `readMessageFrom(InputStream)`, so connect negotiation and CRC / bad-magic handling are testable without a socket. Also `FeedGate` ↔ `VideoStreamPipe`: a full pipe's drop-oldest policy can silently evict the CONFIG that `FeedGate` just delivered, and rebuilding the pipe has to replay `initialConfig`.
+- **`fa00527` — injectable heartbeat / watchdog.** `Connection.start()` takes `heartbeatIntervalMs` / `heartbeatTimeoutMs` (default 3s / 10s), threaded into the heartbeat and watchdog loops — the liveness contract (an emitted HEARTBEAT is auto-ACKed, the watchdog drops a peer that goes silent, a live peer is never dropped) is now covered in milliseconds.
+- **`bbd6fe0` — `AssetSource` seam.** `AssetDeployer` depends on an `AssetSource { fun read(name): ByteArray }` (an `AssetManager` is `final` and cannot be subclassed); production wraps it via `AssetManagerAssetSource(assets)`. Covers extract / `ensureCurrent` full branches, the A-L15 fallback to the usable on-disk jar CRC (not `-1`), and `.tmp` never surviving any outcome.
+- **`5d576e8` — `CarInstaller` seam.** New `CarInstaller<S>` interface (connect / readInstalledVersion / pushAndInstall / close), generic over the session handle; `CarAppInstaller` implements `CarInstaller<Dadb>` and owns `close(dadb)`. `CarInstallCoordinator<S>` depends on the interface with injectable `resolveCarIp` / `myVersionName`, plus a null-safe `statusString()` resolver (production `getString` is non-null, so behaviour is identical — only the mockable-jar null is guarded). The whole install state machine is now testable through a fake installer.
+- **`6d25390` — reconnect backoff and icon budget as pure functions.** `CarConnectionService` extracts companion `reconnectBackoffMs(failures)` (500ms → doubling → 8s cap with a shift clamp) and `iconBudgetAccepts(total, next)` against the real 64MB `MAX_APP_LIST_ICON_BYTES`; both call sites delegate.
+
+### Security hardening — full-project audit (2026-10-09)
+
+The shared protocol layer and all three endpoints treated every socket peer as trusted, and several decoders could kill the process with a 6-byte frame. The security hardening fixes landed as one batch:
+
+- **`a7d2b72` — the wire protocol against hostile peers** (`P-*`, `S-02`). Every fixed-size `ByteBuffer.getX()` in `HandshakeRequest` / `HandshakeResponse` / `AppListMessage` / `MediaMetadata` / `AppInfoDataMessage` is now `require()`-guarded, and `Connection`'s reader catches `Throwable` (logs the reason, disconnects) instead of dying — there is no `CoroutineExceptionHandler` anywhere in this repo, and `app-server`'s default handler ends in `killProcess`. `MAX_PAYLOAD_SIZE` 128MB → 16MB, with a hard `NioReader` ceiling and `maybeShrink` back at frame boundaries. ADB `parseHeader` rejects negative / oversized `data_len`, and both the USB and TCP read loops finally verify `data_crc`. Mid-frame `NioReader` stalls fail after 10s (an idle wait at a frame boundary is deliberately *not* timed out). `LaunchAppMessage` / `AppUninstalledMessage` validate package-name shape at the decoder boundary (`requirePackageName` / `requireComponentName` exported for the vd-server call sites). Also: truncated icons now fail the decode instead of caching a garbage `iconHash` under a real key, unknown `AppCategory` / `MediaAction` ids throw instead of coercing to a live default, `requireSupportedProtocolVersion()` is finally enforced, `sendMutex` pins enqueue order under backpressure (`limitedParallelism(1)` serializes dispatch, not suspension), a 10s connect deadline, a 500ms graceful-EOF flush before the writer is cancelled, and shell-quoted + shape-checked IME ids.
+- **`8601fb1` — vd-server channel authentication and process leaks** (`S-01`, `S-06..S-10`). A new trailing `CAR_HOST` argv (sanitized in `VdDeployArgs`) is pinned by `acceptCarChannel`, which refuses any other peer — 9638 / 9639 were bound on `0.0.0.0` with no authentication at all, running as shell UID. `bindAndAccept` closes both listening sockets in one `finally`, the pipeline thread parks in bounded `parkNanos` slices re-checking `running`, is a daemon, and is signalled on every failure path (an unbounded park with nobody to unpark it wedged the process forever). `cleanup()` releases the encoder and *then* `encoderSurface` (the MediaCodec input surface was never released). New `PointerCap` caps active pointers (oldest evicted, never the current frame's), truncates `pts`, range-validates `pointerId` before pool indexing, and replaces the silent `catch(_:Exception){}` that let a peer sending 11 DOWNs jam touch for the rest of the session. fps is coerced through `VideoConfig.MIN/MAX`, `PipeLog` writes are synchronized on the stream, and the shared `SESSION_TIMEOUT_SENTINEL` maps to 60000 instead of being written back.
+- **`1f6836a` — Windows receiver deploy input and adb leaks** (`D-*`). The receiver turned unauthenticated handshake-response fields into an adb deploy command, so a MITM could choose which code ran on the phone via `CLASSPATH`: `AdbDeploy.checkAdbPort` accepts only `Ports.ADB_PORT`, `sanitizeJarPath` whitelists the vd-server.jar location (must equal `VdDeploy.JAR_PATH` or start with `/sdcard/DiLinkAuto/`, `..` rejected), and both gates reject by failing the session with a readable reason. `clampVdDimension` (`DimAlign.evenMin2` + `coerceIn(2, 4096)`) is the single shared implementation — `DimAlign.even` alone maps negatives to ~2^31. `adbDeployer.close()` runs on the session-end path under the same generation guard, so a phone DISCONNECT / EOF reaps the held `adb.exe` (the device-side engine's liveness anchor). Settings mutations funnel through one lifecycle executor (restart and setKeepAwake used to race on a plain var, losing DPI updates), `config.json` writes are atomic (`tmp` + `Files.move`), `deploy()` is a true suspend function serialized by a `deployMutex`, a decode-thread join timeout is counted / logged / escalated, consecutive decoder rebuilds back off 500ms → 8s behind a one-shot escalation latch, PNG icons are header-checked before decoding, timed-out processes are reaped, and `adb.exe` must resolve to an absolute path.
+- **`5eae3e7` — shell-quoted deploy command line.** The generated device-side command line quotes the jar path and the log path (a peer-supplied `vdServerJarPath` could otherwise carry shell metacharacters); embedded single quotes are escaped so a path can never break out.
+- **`bc2634c` — session generations, loopback lifecycle, honest deploy status** (`A-*`, `S-01`). `cleanupSession` is generation-scoped: each accept mints a session id and a teardown only runs when its id is still active, so a cancelled loop's late `finally` can no longer consume the guard belonging to the next session — that race left the fresh 19647 `ServerSocket` open and the stale VD client streaming, i.e. the leaked-VD failure mode. The lifecycle listener binds `127.0.0.1` and refuses non-loopback peers, so displayId injection is no longer reachable from the LAN; the Shizuku deploy passes `CAR_HOST` so the engine pins its 9638 / 9639 accepts. The blocking part of teardown (CMD_STOP join, disconnect, panel / IME restore) moves to a process-lifetime `teardownScope` — it used to block the main thread up to 1s per call, and `serviceScope` was cancelled by `onDestroy` before the restore could run. `handleHandshake` runs on the handshake job instead of stalling every other frame on the reader coroutine. `CAR_LOG` lines are capped at 8KB (truncated, not dropped) and `FileLog`'s queue is bounded at 2048 — a peer could push a 16MB frame into an unbounded queue and OOM the phone. `installCarApp` is single-flight and validates an explicit IPv4, `CarIpLocator` is serialized behind a `Mutex` over a published subnet snapshot, the Shizuku decision is snapshotted once, and `usesCleartextTraffic="false"` is added as defence in depth.
+- **`35d7821` — black-screen self-heal fix** (`S-03..S-M11`). The recovery path called `videoDecoder.stop()` while `CarShell` keeps the streaming layout mounted in CONNECTING, so nothing ever restarted the codec and a triggered recovery left the screen black for the rest of the session; it now resets the black-screen detector state and lets the still-running codec consume the fresh IDR. The WiFi retry loop and the mDNS discovery flow are launched on `trackScope()` (a child of `connectionScope`) so `connectionScope.cancel()` actually stops them, with a `reHandshakeInFlight` guard stopping a callback that lands inside the ~1s re-handshake window from closing the very control connection carrying it. `handleDisconnect` is gated by a `teardownGuard` (it used to re-enter itself into 2-4 concurrent reconnect coroutines). The self-heal gate no longer requires `vdServerStarted` — never set in Shizuku mode, so the primary path got no recovery at all — and instead uses a per-session rebuild budget of 2. `discoveryJob` is cancelled before every relaunch (~450 leaked NsdManager listeners per hour on a flapping link). MediaCodec create / configure / start moves off the main thread onto a `decoderExecutor`. Peer-supplied viewport dims are clamped to 2..4096 before `MediaFormat` (non-positive values crashed the decoder; absurd values suppressed the rotation re-handshake forever). `APP_LIST` icons get a per-icon byte cap and an aggregate budget — a single `APP_LIST` used to be able to OOM a 4GB head unit.
+
+### Windows receiver — `:app-desktop` module (commit 22d3b7a, 2026-10-08)
+
+A desktop receiver that plays the car's role over the same wire protocol, so one phone can be mirrored to either endpoint. The new `:protocol-core` (pure Kotlin/JVM) holds the platform-independent protocol primitives, with `PlatformLog` and `ThreadPriority` as replaceable hooks installed by the three process entry points; `:protocol` depends on it via `api`. The receiver itself is a Compose Desktop application: control connection (9637) → handshake → `VD_PORTS_BOUND` → direct video (9638) and input (9639) to the VD server, JavaCV `FFmpegFrameGrabber` decoding into a reused Swing `Canvas` inside a `SwingPanel`, mouse events mapped through the letterbox content rect into normalized `TouchEvent`s, an app grid over `AppListMessage`, `config.json` in `%APPDATA%\DiLinkAuto\`, and a `jpackage --type app-image` exe with an embedded JRE. Sessions carry a generation so a DPI / hardware-decode change swaps the whole session and rebuilds the video panel with `key(generation)`. The phone's physical panel can be toggled mid-session via the new `SET_DISPLAY_POWER` (0x32) control message on the input port — app-client is unchanged. D3D11VA hardware decode falls back to software on a watchdog, and the sustained-black-screen self-heal is inherited from the shared `BlackScreenDetector`.
+
+- **Verified on device (Shizuku path)**: handshake over 9637, `VD_PORTS_BOUND` sequencing, 24-25fps over 400+ continuous frames, a real-time mirror (the dumped frame hash follows whatever is opened on the phone), and correct teardown (9638 / 9639 closed, 9637 back to listening, no `app_process` left over). Two real bugs surfaced and were fixed here: the Phase-0 d8 input list never gained `protocol-core.jar`, so `app_process` died on `NoClassDefFoundError` with a completely empty `vd-server.log` and the desktop stuck on `WAITING_VD`; and the lock-screen black-frame root cause turned out to be `FLAG_ALWAYS_UNLOCKED` never actually being set (the code tested `0x40`, which is `SUPPORTS_TOUCH`) — flags are now `0x6c49 → 0x7c49`.
+- **Audited and fixed**: 15 `WIN-*` findings from the desktop audit were all closed in `aaf5cd5` / `489944f` / `1f6836a`. The highest was WIN-02 — the local `adb shell` process is the device-side engine's liveness anchor, so closing the deployer right after `deploy()` killed the engine before it bound 9638 / 9639.
+- **Still open**: the `adb.exe` deploy path (taken when the phone has no Shizuku) has **never been verified on a real device** — the todo in `.plan/windows-client-plan.md`. The remaining Phase-5 extras (multi-monitor / fullscreen, hardware decode and its fallback, keep-awake, the manual phone-screen switch) also still need an on-device pass; the phone-screen switch in particular needs a reinstall so the APK carries the 5e / 5f `protocol-core`.
+
+### v0.18.0-dev-13 — VD leak fix, cleanup idempotency, black screen self-heal
+
+A leaked VirtualDisplay per reconnect cycle turned the car screen black after a few cycles. Root cause: `pkill -9` skipped the JVM shutdown hook, so `PipelineServer.cleanup()` never ran — leaking the VD, keeping the physical panel powered off, and losing the `screen_off_timeout` setting (snapshot captured its own `2147483647` sentinel). Fixed across 12 files:
+
+1. **Two-stage VD stop** (`VdDeploy.stopCommand`). SIGTERM → wait 1s → SIGKILL, as a single shell line. A coroutine cancellation cannot land between the two signals. *(Superseded 2026-10-10: ART never runs the shutdown hook on SIGTERM, so this was equivalent to a force kill — replaced by the stop-request sentinel protocol, see the Fix Tracker row below.)*
+2. **Bracket process pattern** (`VdDeploy.PROCESS_PATTERN`). `[P]ipelineServer` prevents `pkill -f` from matching the wrapper shell's own cmdline. *(Boundary measured 2026-10-10: the bracket trick is honoured by `pgrep -f`; `pkill -f` still killed the invoking wrapper shell when run inline — kills now locate with `pgrep` and signal by PID, see the Fix Tracker.)*
+3. **Liveness probes** (`VdDeploy.probeCommand` / `probeExitCodeCommand`). `pkill -0` existence check — no signal delivered. *(Superseded 2026-10-10: toybox rejects `pkill -0` with `bad -L '0'`, so the probe always reported GONE — both probes now use `pgrep -f`.)*
+4. **VD exit wait** (`ShizukuManager.waitForVdServerExit()` / `VdServerDeployer.waitForVdServerExit()`). Polls until the old engine exits before launching the replacement. Two live engines race for the same VirtualDisplay / DTA / 9638-9639 binds and the loser skips `cleanup()` entirely.
+5. **Cleanup idempotency** (`ConnectionService.cleanupGuard`). `AtomicBoolean` guard prevents 7 `cleanupSession()` call sites from firing repeatedly (observed: 1 disconnect → 9 "Force-waking physical display" lines). `resetCleanupGuard()` before each new session.
+6. **Process-lifetime PhoneDisplayRestorer scope**. Owns a `CoroutineScope(SupervisorJob() + Dispatchers.IO)` — deliberately not the Service scope, which `onDestroy()` cancels. `NonCancellable` context ensures `cmd display power-reset` cannot be skipped. `inFlight` `AtomicBoolean` collapses concurrent restore requests into one.
+7. **`stopVdServer()` returns Boolean**. Was void — callers had no way to know if CMD_STOP succeeded or fell back to shell kill.
+8. **`PipelineServer.cleanup()` reorder**. Global window/rotation state reset FIRST (device-wide, not per-display), then move foreground app, then restore panel + IME, then release threads/GL/encoder/VD. Previous order had `virtualDisplay.release()` dead last with nothing after it.
+9. **`saveCurrentIme()` before `VirtualDisplayCreator.create()`**. The snapshot used to run after `create()` had already written `screen_off_timeout=2147483647`, so the restore path treated the sentinel as "already the sentinel, nothing to do" and the user's real timeout was lost forever.
+10. **`VirtualDisplayCreator` split**. `create()` no longer calls `configureDisplayEnvironment()`. New `configureEnvironment()` must be called after the snapshot.
+11. **`DisplayPowerController.restoreSetting()`**. Validates before writing: non-blank, not `null`/`undefined`, numeric > 0. A failed snapshot yields a marker; writing it back would make things worse.
+12. **`VideoDecoder.onSustainedBlackScreen`**. Fires only after `BLACK_SCREEN_SUSTAIN_MS` (5000ms) of continuous tiny keyframes. A 3-frame burst during app/VD warm-up is normal and must not trigger a re-handshake — that is the reconnect storm that leaked VDs in the first place. `resetBlackScreenState()` re-arms per session.
+13. **`CarConnectionService.rehandshakeForBlackScreen()`**. Rebuilds the phone-side VD when the stream is persistently black. `blackScreenRecoveryInFlight` latch ensures at most one rebuild per session.
+14. **`rehandshakeOnExistingControl()` extracted**. Shared by rotation and black-screen paths — tears down video/input on the existing control connection without re-establishing TCP.
+15. **`scripts/verify-blackscreen-fix.sh`**. Automated log verification: VD leak check (start count vs cleanup count), cleanup idempotency (disconnect count vs wake count), black-screen self-heal (sustained detection vs rebuild trigger), stop path audit.
+16. **Reconnect/close cleanup regression automation** (`scripts/e2e-reconnect-cleanup.sh` + `scripts/verify-reconnect-cleanup.sh`, 2026-10-10). The manual on-device verification loop for the stop-path fixes is now one command: build gate (asserts 0 test failures) → APK `assets/vd-server.jar` dex symbol check (`ShellSyncPoint` / `__DILINK_SYNC__` / `awaitIdle` / `pgrep -f` / `stop-request`) → install + relaunch → isolated `DILINK_DESKTOP_HOME` desktop session → UI-driven 「应用并重连」 and window close → live device assertions (timeout sentinel in session, restore to baseline after cleanup, engine gone) → offline log assertions (probe ALIVE→GONE transitions, 「引擎已优雅退出」 with no 「强制 kill」, elapsed < 12s budget, `__DILINK_SYNC__` drain echo, `Cleanup complete`, second handshake). `debug-logs/uitest/win_auto.py` gained a `close` (WM_CLOSE) subcommand as a pointer-click fallback. First live run hardened both sides of the UI coupling: (a) **all polling loops now use real elapsed time** (`SECONDS` deadline) instead of `iteration-count × sleep` — this box forks/execs at ~1s per call (AV real-time scanning), which turned a nominal 150s budget into 626s; (b) `win_auto.py focus` now uses `AttachThreadInput` (the real fix for the Windows foreground lock, verified `attached=True ok=True`) because the old ALT-tap + `SetForegroundWindow` was refused and the injected clicks were being swallowed; the E2E also activates the window by clicking the title bar and verifies each click landed (new 「优雅停止设备侧引擎」 in `desktop.log`) with one automatic retry. **For the UI steps to work, the desktop must be left alone while the script runs.** Final run after hardening: **32 pass / 0 fail in 2m48s** (graceful exits 6462/6499ms < 12s budget; artifacts `debug-logs/e2e/20261010-210104/`). This run doubles as real-device closure evidence for desktop WIN-01/02/04 — `win_auto.py` / `poll_engine.py` were force-added to the repo so a fresh clone can run the E2E.
+
+### Architecture — direct VD streaming (no phone relay)
+
+VD Server binds `9638` (video) and `9639` (input) directly on `0.0.0.0`; the car talks to the VD without the phone app as middleman. Was 4 socket ops + 2 process context switches per frame; now 2 socket ops + 0 context switches. The phone is a pure orchestrator: handshake, VD lifecycle (`VD_PORTS_BOUND` control message), car log routing. `VirtualDisplayClient` simplified to lifecycle-only. The lifecycle channel is on `localhost:19647` (the upstream docs said `19637` — that was wrong; `Discovery.LIFECYCLE_PORT = 19647`). Approximately -356 lines across 7 files.
+
+### DiLink 4.0 low-spec performance (Snapdragon 439, nine fixes)
+
+1. **Encode dims capped to 1920x1080** (`VdDeployArgs.MAX_ENCODE_WIDTH/HEIGHT`). Decoupled from VD dims via the `EW EH` args; the VD stays scaled-up to preserve the IME-crop fix, the encoder uses car-reported dims clamped to 1080p. Without this, >1080p phones trigger software decode on the 439 → single-digit fps.
+2. **Bitrate 8 Mbps → 4 Mbps CBR** (`PipelineServer.BITRATE = 4_000_000`). Adaptive fallback tightened: floor 1.5 Mbps, 2s recovery window, 0.5 Mbps steps (was 2 Mbps / 5s / 1 Mbps).
+3. **Framerate 30 → 24 fps** (`VideoConfig.TARGET_FPS = 24`). Per-frame budget 33ms → 42ms, ~20% lower WiFi/GPU/allocation load.
+4. **MirrorScreen TextureView → SurfaceView** (`MirrorScreen.kt`). Bypasses the Adreno 505 per-frame GL composite (~2-5ms/frame at 1280x800). The `outputSurfaceValid` gate prevents rendering to a destroyed surface across navigation hide/show; `switchSurface` re-attaches the decoder with zero keyframe loss.
+5. **Thread priorities.** `THREAD_PRIORITY_URGENT_DISPLAY` on the encode pipeline (`PipelineServer.kt`), the decode feed thread (`VideoDecoder.kt`), and the socket-drain reader (`Connection.kt`); `THREAD_PRIORITY_BACKGROUND` on the LifeWriter. A53 has no big cores.
+6. **`carLogEnabled` defaults to `BuildConfig.DEBUG`** (`CarConnectionService.onCreate` → `logWriter.setEnabled(BuildConfig.DEBUG)`); `ConcurrentLinkedQueue.size()` (O(n)) replaced by `AtomicInteger` (`CarLogWriter.bufferCount`).
+7. **`AppIconCache.clear()` on disconnect** frees ~5-9MB heap + eMMC PNGs; `prepareAll` parallelized with `Semaphore(4)`, intermediate bitmaps recycled.
+8. **`Debug.getPss()` removed from startup** (deprecated binder call, 100-500ms on A53).
+9. **`@Immutable AppTileData` wrapper** (`HomeScreen.kt`) excludes the unstable `ByteArray` icon from `AppTile` inputs so the icon grid skips recomposition on `appList` reassignment.
+
+### API 28 car compatibility
+
+- **`MediaCodecInfo.isHardwareAccelerated()` (API 29+)** threw `NoSuchMethodError` on the BYD API-28 head unit, killing the process. Fix: removed the speculative hardware-decoder picker; `VideoDecoder.start()` calls `MediaCodec.createDecoderByType(MIMETYPE_VIDEO_AVC)` directly. `REGULAR_CODECS` lists hardware first and selects `OMX.qcom.video.decoder.avc` on the BYD.
+- **`am display move-stack` (API 29+)** gated on `SDK_INT >= 29` in `PipelineServer.moveTopApp`. On older levels the foreground app is left in place rather than a silent shell failure masking as success.
+- **`cmd display power-reset` / `power-off` (API 29+)** is the shell fallback in `DisplayPowerController` (no `power-on` subcommand exists). On API 26-28 a `DisplayControl` reflection failure means the physical panel is not restored — now logged via `logErr`, was silent.
+- **`minSdk` raised to 26** for `protocol` and `app-server` (was 24). Re-arms the NewApi lint gate. `app-client` and `vd-server` stay at 29.
+
+### UI / interaction
+
+- **Nav bar redesigned to three buttons (Eject / Home / Back).** Notifications button, recent-apps rail, clock, network info all removed. Dead code backing them deleted across four modules: car-side `NotificationScreen` and `RecentAppsState` deleted; phone-side `NotificationService` (manifest entry, onboarding step, strings) deleted; `FOCUSED_APP` / `APP_SHORTCUTS` / `NOTIFICATION_*` message types removed from protocol, `ConnectionService`, `VirtualDisplayClient`, and `PipelineServer`.
+- **App pinning.** Long-press an app tile → Pin to Top / Unpin (SharedPreferences `dilinkauto_pinned` / `pinned_apps`). Pinned apps sort to the top of the grid.
+- **App allowlist.** New `AllowlistScreen` (phone-side) lets the user pick which launcher apps reach the car; unselected apps are filtered in `AppListBuilder.sendAppList` before the wire payload is built. Pre-seeded with common map apps (Baidu, AMap, Google Maps, Waze, Sogou, Tencent, Mapabc) on first run. `ACTION_ALLOWLIST_UPDATED` triggers a live re-send so the car grid updates without a reconnect.
+- **Portrait app scaling.** Dynamic DPI via `VideoConfig.calculateOptimalDpi` — caps DPI so portrait-only apps (Amap, WeChat) get >=360dp logical width in a landscape VD. IME auto-restored on session disconnect (was leaving the phone with the linkpc IME). Multi-pointer touch injection index fixed.
+- **Car-side startup DPI override.** `HandshakeRequest.dpiOverride` field (0 = auto, [120, 480] = user value); car-side `startup_dpi` SharedPreferences; wired into both initial WiFi connect and mid-stream rotation re-handshake via `HandshakeFactory.buildHandshakeRequest`. Numeric input in `CarLaunchScreen`'s `ConnectionStatusCard`.
+- **Colors tokenized** (`Color.Gray` / `0xFF888888` / `0xFFCCCCCC` / `0xFF757575` / `0xFFBBBBBB` → `onSurfaceVariant`; merged duplicate error reds `0xFFFF5252` + `0xFFEF5350` → `error`). Labels floored to 14sp (`labelSmall` = 14sp). "WiFi Direct Mode" → "WiFi ADB Mode" in `strings.xml` and all locale variants. Car-screen `adb tcpip 5555` developer workflow text removed (distraction hazard) and replaced with a phone-app pointer.
+- **Rotation black-screen fix.** `onCarViewportChanged` sets state to CONNECTING and tears down the VD for redeploy, but the streaming-layout gate used `isConnected` (false during the ~2s redeploy) → `CarShell` flipped to `CarLaunchScreen` → SurfaceView removed → new surface couldn't restart the decoder. Gate now also accepts `state == CONNECTING && appList.isNotEmpty()` so the video-wait overlay covers the redeploy gap instead.
+
+### Session stability
+
+- **Active sessions are not killed by reconnect attempts.** `connectToPhone` checks `handshakeDone && controlConnection?.isConnected == true` and skips if a session is already live. WiFi gateway retry and mDNS loops stop on handshake send. Reconnect loop stops after 3 consecutive ADB failures (`noAdbCount >= 3`).
+- **TCP ADB reconnects on phone IP change.** Dev mode tracks `lastAdbHost` and reconnects when the phone's IP changes.
+- **Auto-fallback to TCP ADB when USB unavailable.** `VdServerDeployer.deploy` falls back to TCP ADB using the phone-host IP if known.
+- **Reconnect limit 3.** `noAdbCount >= 3` stops the reconnect loop; user is told to plug the phone into car USB.
+
+### PipelineServer stabilization (commit efced8b)
+
+- **EGL/GL texture context fix.** GL texture was created in a temporary EGL context (then destroyed) and the pipeline thread bound texture 0 (black screen). All EGL/GL init moved to the pipeline thread with `CountDownLatch` synchronization.
+- **Single-connection ADB.** `RemoteAdbController` simplified to use `TcpAdbConnection` (single socket, reused for all shell commands); Dadb dependency removed from the car → phone path (Dadb is still used by the phone → car `CarAppInstaller`).
+- **VD deployment fix.** `app_process` was killed when the ADB shell process exited (non-interactive shells kill background jobs). Fixed via `shellBackground` — keeps the ADB stream open so the VD server process survives.
+- **Phone screen restore order.** Reordered `PipelineServer` cleanup to restore the physical display BEFORE destroying the persistent shell process (was calling `input keyevent 224` after shell was already closed).
+- **Log toggle.** Settings → Debug → Diagnostic logs switch. Off = zero disk writes. Propagated to car via `LOG_TOGGLE` data message, and re-sent after every handshake so a reconnect no longer resets the car side to OFF (issue #72). The switch shows the effective state (release builds correctly start OFF). Defaults: ON for debug/pre-release (`BuildConfig.DEBUG`), OFF for release; user choice persists via `AppPrefs.LOG_ENABLED` + `LOG_ENABLED_USER_SET`.
+- **Port 19637 → 19647.** The lifecycle channel port was wrong in the upstream docs. `Discovery.LIFECYCLE_PORT = 19647`.
+
+### Direct VD streaming refactor (commit 1c28d71 / fd89f0b)
+
+VD Server binds `9638` (video) and `9639` (input) directly; the car talks to the VD without the phone app as middleman. Phone is a pure orchestrator: handshake, VD lifecycle (`VD_PORTS_BOUND`), car log routing. `VirtualDisplayClient` simplified to lifecycle-only. The `VD_PORTS_BOUND` control message tells the car when the VD server has bound 9638/9639 so the car can connect video/input directly without a connect race.
+
+### PipelineServer — single-threaded streaming (commit 1c28d71)
+
+Single pipeline thread: frame clock → GL render → encoder drain → TCP write. 0 queues between stages. Natural flow control — a TCP stall blocks the next `eglSwapBuffers`, slowing the encoder. Uses `System.nanoTime()` + `LockSupport.parkNanos()` for drift-free 24fps timing. Adaptive bitrate 2-8 Mbps (later capped to 4 Mbps for the Snapdragon 439 — see DiLink 4.0 perf above). Total: 3 threads (Pipeline at `THREAD_PRIORITY_URGENT_DISPLAY`, TouchReader, Lifecycle/LifeWriter at `THREAD_PRIORITY_BACKGROUND`) vs 9 in the previous version.
+
+### Car-native VD resolution, encoder, decoder
+
+- **Car-native VD resolution.** VD created at car viewport dimensions (e.g., 1280x800) instead of phone DPI. Eliminates GPU downscale — SurfaceScaler removed. VD surface → SurfaceTexture → GL passthrough → encoder.
+- **Encoder: Main Profile, I-frame 1s, latency 0, no B-frames.** `KEY_OPERATING_RATE` and `KEY_MAX_B_FRAMES=0` for predictable latency. CBR 4 Mbps.
+- **Decoder: 4-frame queue, keyframe priority.** `ArrayBlockingQueue(4)`. Keyframes always accepted (evict P-frames). No catchup logic — frames arrive on time or get dropped. `drainOutput()` before `feedBuffer()` to free decoder buffers first. Post-flush IDR resync skips P-frames until a keyframe arrives.
+
+### Car app auto-update
+
+Phone compares `appVersionName` (semver, via `Versioning.compareVersions`) with the car's reported version; if the car sends no `appVersionName` (pre-0.17.0 peers), falls back to `versionCode` on both sides. On mismatch, sends `UPDATING_CAR` and pushes the embedded `app-server.apk` via `CarAppInstaller` (dadb over WiFi, 15s connect timeout). Car shows "Updating car app..." status and does not reconnect.
+
+### VD server log in Share Logs
+
+`FileLog.zipLogs()` includes `/data/local/tmp/vd-server.log` (written by `PipeLog`) when available, alongside the rotated `client.log` files.
+
+### TcpAdbConnection — persistent single-connection ADB
+
+`TcpAdbConnection` (protocol module) maintains a single TCP socket for all shell commands. Handles CNXN/AUTH/SIGNATURE/RSAPUBLICKEY with correct ANDROID_PUBKEY format and PEM key storage. Replaces the Dadb library for the car → phone path (Dadb opened a new TCP connection per command, causing `ECONNREFUSED` on Xiaomi/HyperOS). Shared between car and phone apps via the protocol module.
+
+### i18n
+
+Simplified Chinese (`values-zh-rCN` / `values-zh`) added to both `app-client` and `app-server`. Plus the 8 upstream languages (en, pt-BR, ru, be, fr, kk, uk, uz).
+
+### DPI input correctness and re-handshake race (issue #1, commit 8e78671)
+
+- **Car-side DPI coerce range now matches the phone-side [120, 480]** with 0 = Auto. Previously the car used `coerceIn(0, 480)` while the phone used `coerceIn(120, 480)`, so values 1-119 were silently lifted to 120 by the phone while the input field kept showing the typed value.
+- **DPI input field bound directly to `startupDpi`** (single source of truth) instead of a separate `dpiText` state keyed on `startupDpi`. The old `remember(startupDpi)` didn't recompose when the coerced value equaled the current state, so the field drifted from the persisted value.
+- **ASCII digit filter.** `Char.isDigit()` (accepts Unicode Nd: Arabic-Indic, Devanagari) replaced with `it in '0'..'9'`. Non-ASCII digits passed the old filter but were rejected by `toIntOrNull()`, causing silent Auto fallback while the field showed the non-ASCII char.
+- **`onCarViewportChanged` cancels `connectionScope` and `connectJob` before the re-handshake teardown**, mirroring `startConnection`'s pattern. Previously the WiFi gateway retry loop saw `state=CONNECTING` + `handshakeDone=false` + `wifiReady=false` (set by the teardown) and called `connectToPhone`, whose `handshakeDone` guard was now false, disconnecting the live control connection mid-re-handshake.
+
+### Clear icon hash on disconnect and sync connection teardown (commit 1c144ea)
+
+- **`AppListBuilder.resetIconHashes()`** (clears `lastSentIconHash`) called from `ConnectionService.cleanupSession` so icons are resent to the car on reconnection — fixes the default-icon fallback after a reconnect.
+- **Connection teardown and state resets execute synchronously** in `CarConnectionService` before the IO coroutine is launched, preventing race conditions during mid-stream rotation.
+- `AppIconCache.clear()` on disconnect frees ~5-9MB heap + eMMC PNGs.
+
+### Code health — DRY/SRP pass (commits 628d80e + 56b18ae)
+
+- **Cross-module shared constants.** `AppPrefs`, `AppTargets`, `VdDeploy`, `VdDeployArgs`, `WifiGatewayIp` (ports 5555/9637/9638/9639/19647, prefs keys, `am start` components, `pkill`/`app_process` command builders, gateway IP formatter, DPI range 120..480) now live in the protocol module.
+- **Collaborators extracted.** `app-client`: `ApkInstaller`, `AppListBuilder`, `AppVersion`, `InstallStatus`, `PhoneDisplayRestorer`, `VdDimensions`, `Versioning`. `app-server`: `CarLogWriter`, `CarTouchSender`, `HandshakeFactory`, `VdServerDeployer`, `CarShell`, `ConnectionStatusScreen`, `NowPlayingBar`. `vd-server`: `GlPipeline`, `TouchInjector`, `DisplayPowerController`, `PipeLog`, `VirtualDisplayCreator`.
+- **DRY consolidation (commit 56b18ae).** `AdbCrypto` unifies Tcp/Usb auth signing, pubkey encoding, and fingerprint (was duplicated ~150 lines with a silent SHA-1 vs SHA-256 divergence and a `\0` vs ` ` suffix divergence — the TcpAdb suffix was corrected to `" DiLinkAuto@car\0"` per the ADB spec). `VdDeploy.DeployPlan` assembles the vd-server launch command once. `DeviceInfo.buildDeviceInfoBlock` shared by `ConnectionService.logDeviceInfo` and `CarCrashHandler.buildDeviceInfo`. `ImeRestore` shared across `ConnectionService`, `PhoneDisplayRestorer`, `DisplayPowerController`. `AdbKeyUtil` shared between `CarAppInstaller` and `ApkInstaller`. `NetUtil.localIpv4Addresses` shared between `NetworkInfo` and `CarIpLocator`. `AppCategorizer` extracts package→`AppCategory` rules from `AppListBuilder`. `H264NalParser` extracts the IDR (NAL type 5) scan from `VideoDecoder`. `CarIpLocator` merges three near-identical port probes into one `probePortBlocking`. `FrameCodec` extracts `encodeHeaderInto` + `validatePayloadSize`. `NioReader` extracts `growIfNeeded`. `GlPipeline` names `WRITE_TIMEOUT_NS` / `WRITE_BACKOFF_NS`. `CarTouchSender` extracts `checkConn(label)`. `PersistentNavBar` extracts `rememberNavBarSize` + `NavActionButtons`. `Connection` / `PipelineServer` name `SOCKET_BUF_BYTES` (was inline 262144).
+- **`CarConnectionService` 1237 → 1137 lines** (commit 628d80e); further to 1133 after the DRY pass (commit 56b18ae). VD deploy/retry/TCP-fallback moved to `VdServerDeployer`.
+
+---
+
 ## Fix Tracker
 
 Comprehensive review performed 2026-04-23 covering performance, stability, and flow-continuity.
@@ -368,7 +561,7 @@ Comprehensive review performed 2026-04-23 covering performance, stability, and f
 | M3 | Perf | Multi-touch sends N separate frames per MOVE — should batch all pointers | **v0.8.3** |
 | M4 | Perf | MotionEvent PointerProperties/Coords allocated per injection — pool these | **v0.8.1** |
 | M5 | Perf | Decoder frame queue 6 deep (200ms) — reduce to 2-3 for lower latency | **v0.8.1** |
-| M6 | Perf | `execFast("cmd display power-off 0")` on touch thread — move to timer | **v0.8.1** |
+| M6 | Perf | ~~`execFast("cmd display power-off 0")` on touch thread — move to timer~~ — `execFast` removed (Phase B6), display power now managed via `execShell` on a dedicated thread | **v0.8.1** |
 | M7 | Stability | Double `cleanup()` in VD server — handleClient finally + run both call it | **v0.7.2** |
 | M8 | Stability | `cleanupSession()` doesn't reset `_serviceState` — stale UI during delay | **v0.7.2** |
 | M9 | Stability | Static MutableStateFlow in companion survives service restarts — stale activeConnection | **v0.7.2** |
@@ -388,6 +581,30 @@ Comprehensive review performed 2026-04-23 covering performance, stability, and f
 | L6 | Stability | SurfaceScaler HandlerThread never quit | **v0.8.2** |
 | L7 | Flow | App icons 48x48px — blurry on car displays, need 96-128px | **v0.8.2** |
 
+### Phase 5 — Security hardening (full-project audit, 2026-10-09)
+
+The 2026-10-09 full-project security audit re-reviewed the codebase treating every socket peer as hostile. Its `P-` / `S-` / `A-` / `D-` ids are a **separate numbering scheme** from the 2026-04-23 `C1..L7` above. All findings listed here are closed.
+
+| ID | Category | Finding | Status |
+|----|----------|---------|--------|
+| P-01 | Security/Stability | Decoders used raw fixed-size `getX()` on truncated payloads; a throwing frame listener escaped the reader coroutine and killed the process (there is no `CoroutineExceptionHandler` in the repo, and `app-server`'s default handler ends in `killProcess`) | **a7d2b72** |
+| P-02 | Security/DoS | `MAX_PAYLOAD_SIZE` 128MB — a 7-byte header forced ~256MB of allocation on the phone and the shell-UID vd-server; `NioReader` only ever grew | **a7d2b72** — cap 16MB, hard ceiling, `maybeShrink` at frame boundaries |
+| P-03 | Security | ADB `parseHeader` accepted negative / oversized `data_len` (an `OutOfMemoryError` is an `Error`, so it escaped the catch), and `data_crc` was parsed but never verified | **a7d2b72** |
+| P-04 | Stability | `NioReader` stalled forever mid-frame on a half-open peer | **a7d2b72** — 10s deadline at frame boundaries only; an idle touch link is deliberately not timed out |
+| S-01 | Security | vd-server bound 9638 / 9639 on `0.0.0.0` with no authentication at all, and the phone's lifecycle listener was world-readable (displayId injection reachable from the LAN) | **8601fb1 + bc2634c + a7d2b72** — sanitized `CAR_HOST` argv pinning, loopback bind, non-loopback peers refused |
+| S-02 | Security | Peer-supplied package names were interpolated into `am start` / `pm uninstall` shell lines running as shell UID | **a7d2b72 + 8601fb1** — shape validation at the decoder plus `shellQuote` at every call site. The `dispatch` try/catch is still missing, see [Known Issues](#known-issues) |
+| S-03 | Flow | Black-screen self-heal called `videoDecoder.stop()`, so the codec was never restarted and a triggered recovery left the screen black for the rest of the session | **35d7821** |
+| S-04 | Stability | `connectionScope.cancel()` did not stop the WiFi retry / mDNS loops, and a callback landing inside the ~1s re-handshake window closed the very control connection carrying it | **35d7821** — loops on `trackScope()` + `reHandshakeInFlight` guard |
+| S-05 | Stability | `handleDisconnect` re-entered itself into 2-4 concurrent reconnect coroutines | **35d7821** — `teardownGuard` + listeners cleared on the intentional teardown path |
+| S-06 | Stability | A `bindAndAccept` failure parked the pipeline thread with nobody to unpark it — the process wedged forever | **8601fb1** — sockets closed in one `finally`, bounded `parkNanos` re-checking `running`, daemon thread, `signalPipelineStop` on every failure path |
+| S-09 | Stability | TouchInjector accepted unbounded pointers, indexed the pool with an unvalidated `pointerId`, and swallowed the failure silently — a peer sending 11 DOWNs jammed touch for the rest of the session | **8601fb1** — new `PointerCap` (evict oldest, truncate `pts`, range-validate, `logErr` instead of silence) |
+| A-01 | Stability | `cleanupGuard` raced across session generations — a cancelled loop's late teardown consumed the next session's guard, leaking the 19647 socket and the VD | **bc2634c** — session generations (`AtomicInteger` + id check) |
+| A-04 | Perf/Stability | `cleanupSession` blocked the main thread up to 1s per call and ran the restore on a scope `onDestroy()` cancels | **bc2634c** — process-lifetime `teardownScope` |
+| A-05 | Security/DoS | Unbounded log queue — a peer could push a 16MB frame into `CAR_LOG` and OOM the phone | **bc2634c** — 8KB line truncation + bounded queue (2048) |
+| D-01 | Security | The Windows receiver turned unauthenticated handshake-response fields into an adb deploy command — a MITM could choose which code ran on the phone via `CLASSPATH` | **1f6836a** — `checkAdbPort` (5555 only) + `sanitizeJarPath` whitelist + `clampVdDimension`; rejection fails the session with a readable reason |
+| D-03 | Stability | A normal disconnect left the held `adb.exe` — the device engine's liveness anchor — running forever | **1f6836a** — `adbDeployer.close()` on the session-end path under the generation guard |
+| — | Security | The generated device-side deploy command line interpolated a peer-supplied `vdServerJarPath` unquoted | **5eae3e7** |
+
 ---
 
 ## Known Issues
@@ -395,78 +612,149 @@ Comprehensive review performed 2026-04-23 covering performance, stability, and f
 | Issue | Impact | Status |
 |-------|--------|--------|
 | USB ADB auth dialog on replug | Phone asked "Allow USB debugging?" each time | **FIXED v0.13.1** — was double-hashing AUTH_TOKEN with SHA1withRSA. Now uses NONEwithRSA + prehashed SHA-1 DigestInfo. "Always allow" persists. |
-| VD server dies on USB disconnect | Stream stops if USB unplugged | Accepted — `setsid`/`nohup` detachment broke localhost connectivity. Car re-deploys on reconnect. |
-| Touch injection wakes physical display | Screen turns on briefly during interaction | Mitigated with throttled re-power-off (1s, on background thread) |
-| Portrait apps letterboxed on landscape VD | Petal Maps home screen narrow | Android limitation |
+| VD leak on reconnect | Each reconnect leaked one VirtualDisplay; panel stayed off | **FIXED v0.18.0-dev-13**, **re-fixed 2026-10-10** — the dev-13 mechanisms rested on two assumptions that are false on real devices: (1) ART's `app_process` does **not** run the JVM shutdown hook on SIGTERM, so the "two-stage stop" was a plain force kill and `cleanup()` never ran; the stop is now a **stop-request sentinel file** the engine's watchdog consumes (normal exit path → full cleanup), with `killCommandForce` only as a 10s timeout fallback. (2) toybox rejects `pkill -0`, so both liveness probes silently reported GONE and the "VD exit wait" never waited; probes now use `pgrep -f`. Verified end-to-end on MI 9 (2026-10-10) |
+| Cleanup non-idempotent | 1 disconnect triggered 9 duplicate restore calls | **FIXED v0.18.0-dev-13** — `cleanupGuard` `AtomicBoolean` |
+| Screen timeout lost on teardown | `screen_off_timeout=2147483647` persisted after session | **FIXED v0.18.0-dev-13** — `saveCurrentIme()` now runs before `configureEnvironment()`; `restoreSetting()` validates values |
+| Black screen after reconnect | Car stuck on black screen, no recovery | **FIXED v0.18.0-dev-13** — `onSustainedBlackScreen` callback triggers VD rebuild after 3s (`BlackScreenDetector.BLACK_SCREEN_SUSTAIN_MS`, protocol-core; was 5s in app-server before the e1674f8 extraction). The self-heal itself then had a defect: **FIXED `35d7821`** — the recovery path called `videoDecoder.stop()` while `CarShell` keeps the streaming layout mounted, so nothing ever restarted the codec and a triggered recovery left the screen black for the rest of the session. It now resets the detector state and lets the live codec consume the fresh IDR. |
+| Portrait apps letterboxed on landscape VD | Petal Maps home screen narrow | Mitigated — `VideoConfig.calculateOptimalDpi` caps DPI so portrait apps get >=360dp; user can override via `startup_dpi`. |
 | Hotspot must be enabled manually | User enables before plugging in | Android 16 limitation |
+| Audio streaming | **FIXED / IMPLEMENTED in v1.0.3** | Full loop operational on port 9640 (AAC-LC 48kHz stereo, synthetic silence pacing at 46.875 fps, 150ms jitter buffer, bidirectional capability negotiation, silence metric audit). |
+| Media controls / navigation widgets | Not implemented | `NowPlayingBar` exists in the source tree but is only composed when `MediaMetadata` is present, which the phone never sends. |
+| `Versioning` zero-version sentinel (testing-audit C-5) | With nothing installed, `readInstalledVersion` returns `"0"`, which compares equal to `versionName` `"0"` / `"0.0"` / `"0.0.0"` — so the car app is judged "already up to date" and the **first install is skipped**. `-SNAPSHOT` also compares equal to its release | **OPEN** — product decision, pinned by a hazard test in `VersioningTest` (commit 8157c86). Fix: an explicit "not installed" state that can never compare equal, instead of a `"0"` sentinel |
+| `InstallStatus` classifies by English substring (testing-audit C-6) | Status strings come from `context.getString`, so every non-English `values-*` locale falls into `IDLE` — no progress and no error UI at all. `"not reachable"` / `"Invalid IP"` are not classified as ERROR either | **OPEN** — product decision, pinned by a hazard test in `InstallStatusTest` (8157c86). Fix: classify on a structured state enum rather than localized copy |
+| `CarCommandRouter.dispatch` decode unprotected (testing-audit S-02 residual) | `LAUNCH_APP` / `APP_UNINSTALL` call their decoders outside any try/catch (only `APP_INFO` has one), so a rejected package name escapes into the vd-server's frame-read thread instead of being logged and dropped | **OPEN** — the package-name shape check itself landed (`a7d2b72`, `8601fb1`); only the call-site guard is missing. Fix: wrap the two `decode` calls the way `APP_INFO` does. Pinned by `CarCommandRouterDispatchTest` |
+| `AppCategorizer` common apps land in OTHER | e.g. `com.google.android.youtube` matches no keyword, so the car grid cannot group it | **OPEN** — UX gap, not a crash. Pinned by `AppCategorizerTest` (8157c86) |
+| Occasional garbled frame | One corrupted frame from a decoder-restart race; the next keyframe restores the picture (~1s) | **KNOWN** — accepted; the car path deliberately keeps the codec alive across restarts (`switchSurface` re-attach, `35d7821`), which trades this for the black-screen bugs that re-fixing it reintroduced |
+| `app-desktop` ADB deploy path unverified | When the phone has no Shizuku, the Windows receiver deploys the VD server via `adb.exe`; that path has never been exercised on a real device, and the audit missed its defects because of it | **OPEN** — todo in `.plan/windows-client-plan.md`. The rest of Phase 5 (multi-monitor / fullscreen, hardware decode and its fallback, keep-awake, the manual phone-screen switch) also awaits an on-device pass |
 
 ---
 
 ## Architecture (Current)
 
 ```
-Phone (Xiaomi 17 Pro Max, HyperOS 3, Android 16)
-├── DiLink Auto Client App
-│   ├── ConnectionService (3-port accept: 9637/9638/9639)
-│   │   ├── Control (9637): handshake, heartbeat, commands, data, car logs
-│   │   ├── Video (9638): H.264 relay from VD server to car
-│   │   ├── Input (9639): touch events from car, dispatched on Dispatchers.IO
-│   │   ├── VD JAR deploy to /sdcard/DiLinkAuto/ (CRC32 checked)
-│   │   ├── Car auto-update: sends UPDATING_CAR, then dadb push+install
-│   │   ├── Smart network callback (ignores unrelated network drops)
-│   │   ├── Battery exemption (REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+Phone (Chinese ROM — Xiaomi HyperOS / Meizu etc., Android 14+)
+├── DiLink Auto Client App (app-client, minSdk 29)
+│   ├── ConnectionService — pure orchestrator (FEATURE_AUDIO negotiation, Shizuku deploy delegation)
+│   │   ├── Control (9637): accept → handshake → VD_PORTS_BOUND → car logs
+│   │   ├── Collaborators: ShizukuVdDeployer, ShizukuNav, ClientNetworkMonitor, CarAppInstallHost, AllowlistRepository
+│   │   ├── Car auto-update: UPDATING_CAR → CarAppInstaller (dadb) push+install
+│   │   ├── App allowlist filter (AppListBuilder.sendAppList)
+│   │   ├── Smart network callback (ClientNetworkMonitor, TRANSPORT_WIFI only)
 │   │   └── FileLog: /sdcard/DiLinkAuto/client.log (rotation, 10 max)
-│   ├── VirtualDisplayClient (videoConnection + controlConnection)
-│   │   ├── startListening() — synchronous ServerSocket on localhost:19637
+│   ├── VirtualDisplayClient — lifecycle-only
+│   │   ├── startListening() — synchronous ServerSocket on 127.0.0.1:19647 (loopback; non-loopback peers refused)
 │   │   ├── acceptConnection() — NIO non-blocking accept
-│   │   ├── NioReader (Selector-based, FRAME_INTERVAL_MS timeout)
-│   │   └── Video relay via videoConnection, stack empty via controlConnection
-│   └── NotificationService (captures phone notifications with progress)
+│   │   ├── Reads MSG_DISPLAY_READY (displayId + direct-injection flag)
+│   │   ├── Sends VD_PORTS_BOUND to car on display ready
+│   │   └── Sends CMD_STOP on teardown
+│   ├── PhoneDisplayRestorer — Shizuku → wakeUp → FLAG_TURN_SCREEN_ON → wake lock
+│   └── AllowlistScreen / ApkInstaller / AppVersion / Versioning / UpdateManager
 │
-├── VD Server (app_process, shell UID 2000)
-│   ├── NIO write queue (ConcurrentLinkedQueue) + Selector-based command reader
-│   ├── IInputManager injection (ServiceManager → injectInputEvent)
-│   ├── Multi-touch: pre-allocated PointerProperties/Coords pools (10 slots)
-│   ├── VirtualDisplay (TRUSTED + OWN_DISPLAY_GROUP + OWN_FOCUS)
-│   ├── SurfaceScaler (EGL/GLES GPU downscale, skips GL work on idle, encoder repeat-previous-frame)
-│   ├── H.264 encoder (8Mbps CBR, Main profile, configurable FPS, backpressure at 6 frames)
-│   ├── Screen power-off (background thread, proximity/lift disabled)
-│   └── Reverse NIO connection to phone on localhost:19637
+├── VD Server (app_process, shell UID 2000, vd-server.jar)
+│   ├── PipelineServer — process entry point + lifecycle owner
+│   │   ├── Binds 9638 (video), 9639 (input), and 9640 (audio) on 0.0.0.0 via PortAcceptor
+│   │   ├── Accepts car's video, input, and audio connections directly (CAR_HOST pinned)
+│   │   ├── Reverse-connects lifecycle to phone localhost:19647
+│   │   ├── VideoEncoderSelector: candidate-ordered pick (Codec2 before legacy OMX), CBR 4Mbps Main, I-frame 1s
+│   │   ├── AudioPipeline: REMOTE_SUBMIX capture, AudioEncoderSelector AAC-LC, 46.875 fps synthetic silence pacing
+│   │   ├── ProcessWatchdog: forces cleanup() if pipeline hangs in native MediaCodec, watches stop-sentinel
+│   │   └── Cleanup: am display move-stack → restore panel → restore IME → kill shell
+│   ├── GlPipeline — EGL14 + GLES20 on the pipeline thread
+│   │   ├── parkNanos pace → updateTexImage → fullscreen quad → eglSwapBuffers
+│   │   ├── Encoder drain → TCP write (no queues)
+│   │   └── Adaptive bitrate: floor 1.5Mbps, 2s recovery, 0.5Mbps steps
+│   ├── TouchInjector — InputManager reflection, multi-touch, TOUCH_MOVE_BATCH
+│   ├── DisplayPowerController — DisplayControl reflection; cmd display power-reset/off fallback (API 29+)
+│   ├── VirtualDisplayCreator — trust flag 0x6c49, 12L letterbox style
+│   └── PipeLog — vd-server.log
 │
-Car (BYD DiLink 3.0, Android 10)
-├── DiLink Auto Server App
-│   ├── CarConnectionService — 3 connections + parallel USB track
-│   │   ├── controlConnection (9637): heartbeat, commands, data
-│   │   ├── videoConnection (9638): video frames → VideoDecoder
-│   │   ├── inputConnection (9639): touch events from MirrorScreen
-│   │   ├── Track B (USB): UsbAdbConnection with logSink → carLogSend
-│   │   ├── UPDATING_CAR handling: shows status, skips reconnect
-│   │   ├── Early decoder start: offscreen surface on first CONFIG
-│   │   ├── carLogSend() + logSink callbacks → phone FileLog
-│   │   └── Eject state persisted to SharedPreferences
-│   ├── VideoDecoder (queue=15, early start, logSink, 4-zone catchup)
-│   ├── PersistentNavBar (76dp, 40dp icons, 14sp text, recent apps pruned)
-│   ├── LauncherScreen (64dp icons, 160dp grid, imePadding search)
-│   ├── NotificationScreen (progress bars, tap-to-launch, dedup by ID)
-│   └── MirrorScreen (TextureView + touch forwarding, decoder restart)
+Car (BYD DiLink 4.0, Snapdragon 439, Android 9 / API 28, 1280x800)
+├── DiLink Auto Server App (app-server, minSdk 26)
+│   ├── CarConnectionService — parallel WiFi + USB/TCP ADB tracks (slimmed to 407 lines)
+│   │   ├── CarSessionCoordinator: manages 9637 (control), 9638 (video), 9639 (input), 9640 (audio)
+│   │   ├── CarAdbTracker: USB host ADB and TCP ADB dual tracks, reconnect bounds (noAdbCount >= 3)
+│   │   ├── CarAppListReceiver: app list parsing with AppIconLimits enforcement
+│   │   ├── AudioPlayer: MediaCodec AAC-LC decode, 150ms jitter buffer, AudioTrack, silence frame metrics
+│   │   ├── VdServerDeployer: shellBackground launchCommand
+│   │   ├── HandshakeFactory.buildHandshakeRequest (initial + rotation re-handshake)
+│   │   └── startup_dpi SharedPreferences (0 = auto, [120, 480] = override)
+│   ├── VideoDecoder — createDecoderByType, 4-frame queue, keyframe priority, DecodeLivenessTracker
+│   │   ├── outputSurfaceValid gate (SurfaceView destroy/re-create across navigation)
+│   │   ├── switchSurface re-attaches decoder with zero keyframe loss
+│   │   ├── post-flush IDR resync (skips P-frames until keyframe)
+│   │   ├── Feed thread at THREAD_PRIORITY_URGENT_DISPLAY
+│   │   └── debugFrameStats (decode time, queue depth) gated on LOG_TOGGLE
+│   ├── AppIconCache — prepareAll (Semaphore(4)), getPrepared (O(1)), clear() on disconnect
+│   ├── CarShell — streaming layout accepts CONNECTING && appList.isNotEmpty()
+│   ├── MirrorScreen — SurfaceView (not TextureView)
+│   ├── CarLaunchScreen — startup_dpi numeric input, dev-mode toggle, manual IP
+│   ├── HomeScreen — @Immutable AppTileData, Pin-to-Top, long-press context menu
+│   ├── PersistentNavBar — three buttons only: Eject / Home / Back
+│   ├── CarLogWriter — AtomicInteger bufferCount, 10k cap, BuildConfig.DEBUG default
+│   ├── CarTouchSender — TOUCH_MOVE_BATCH on input connection
+│   ├── RemoteAdbController — TcpAdbConnection (single socket)
+│   ├── CarCrashHandler — crash-pending.log → carLogSend on next connect
+│   └── CarTheme — tokenized colors, labels floored to 14sp
+│
+Windows (x64, no JDK required — jpackage app-image bundles a JRE)
+└── DiLink Auto Desktop Receiver (app-desktop, Kotlin/JVM + Compose Desktop)
+    ├── DesktopConnectionService — same state machine as the car
+    │   ├── controlConnection (9637) → HandshakeFactory (viewport + evenAlign + dpiOverride)
+    │   ├── videoConnection (9638) / inputConnection (9639) direct to the VD server
+    │   └── SET_DISPLAY_POWER (0x32) over the input port's Channel.CONTROL
+    ├── VideoDecodePipeline — JavaCV FFmpegFrameGrabber over a custom InputStream,
+    │   d3d11va hardware decode with a software-fallback watchdog + rebuild backoff
+    ├── FeedGate / H264NalParser — CONFIG before IDR, skip P-frames after a rebuild
+    ├── SwingVideoView / Letterbox — double-buffered letterbox paint + mouse → TouchEvent
+    ├── AppIconStore / AppCatalog / AppGridView — APP_LIST icons + launch
+    ├── DesktopApp — session generations (DPI / hardware-decode change replaces the session)
+    ├── AdbDeployer / ProcessAdbRunner — adb.exe deploy when the phone has no Shizuku
+    └── DesktopPaths / JsonConfig / DesktopLog — %APPDATA%\DiLinkAuto\, jpackage exe
 ```
 
 ## Connection Flow
 
 ```
-1. Phone app starts → deploys VD JAR, rotates FileLog, requests battery exemption
-2. Phone plugged into car USB → car detects USB_DEVICE_ATTACHED
-3. Track A (WiFi): car discovers phone via gateway IP (3s retry) or mDNS
-4. Track B (USB): car connects USB ADB (logSink for diagnostics), launches phone app
-5. Control (9637): TCP connect → handshake (viewport + DPI + version + targetFps)
-6. Phone: checks version → if mismatch, sends UPDATING_CAR → auto-updates via dadb
-7. Video (9638) + Input (9639): car connects in parallel after handshake
-8. Phone: accepts both, opens VD ServerSocket on localhost:19637
-9. USB: car starts VD server (shellNoWait + exec app_process, FPS as arg)
-10. VD server: VD + SurfaceScaler (periodic re-draw) + encoder → NIO connect localhost:19637
-11. Car: starts VideoDecoder on offscreen surface on first CONFIG frame
-12. MirrorScreen shows → decoder restarts with real TextureView surface
-13. Video: VD → SurfaceScaler → encoder → NIO write queue → localhost → phone NioReader → videoConnection → WiFi TCP → car NioReader → VideoDecoder → TextureView
-14. Touch: car TextureView → inputConnection → WiFi TCP → phone (Dispatchers.IO) → VD server NIO Selector → IInputManager injection
-15. Car logs: carLogSend() + logSink callbacks → DATA CAR_LOG → phone FileLog
+1. Phone and car on the same network (or phone plugged into car USB)
+2. Car app launches, starts parallel WiFi + USB/TCP ADB tracks
+
+   Track A (WiFi control):
+   a. Gateway IP discovery + mDNS lookup
+   b. NIO connect to phone control port (9637)
+   c. Handshake: car sends viewport + DPI + appVersionCode + appVersionName
+                 + targetFps + dpiOverride + supportedFeatures (FEATURE_AUDIO)
+   d. Phone responds with device info + vdServerJarPath + vdDpi + supportedFeatures
+   e. Phone checks version — if mismatch, sends UPDATING_CAR, auto-updates
+      car APK via dadb, disconnects to wait for car restart
+   f. Phone opens lifecycle ServerSocket on 127.0.0.1:19647 (loopback only)
+   g. If Shizuku available: phone deploys VD server directly.
+      Else car deploys via ADB (USB or TCP).
+   h. VD server starts: CLASSPATH=jar app_process / PipelineServer
+                          W H DPI PHONE_HOST EW EH FPS BITRATE [CAR_HOST]
+   i. VD server reverse-connects to phone localhost:19647 (NIO)
+   j. Phone reads MSG_DISPLAY_READY (displayId + direct-injection flag)
+   k. Phone sends VD_PORTS_BOUND to car on the control connection
+   l. Car connects video (9638), input (9639), and audio (9640, when negotiated) directly to VD server
+   m. VD server accepts connections — session fully established
+
+   Track B (USB ADB / TCP ADB):
+   a. USB: scan USB devices for ADB interface → CNXN → AUTH → connected
+      TCP: dev-mode phone-IP lookup, connect to phone:5555 via TcpAdbConnection
+   b. shellBackground(launchCommand) — keeps ADB stream open so app_process survives
+   c. Launch phone app via am start (AppTargets.PHONE_MAIN_ACTIVITY)
+
+3. VD server creates VirtualDisplay (car viewport + auto-calibrated DPI)
+4. VD server powers off the phone's physical panel via DisplayControl
+5. VD server saves the original IME and sets the VD's IME policy
+6. Pipeline thread: EGL/GL init → SurfaceTexture → encoder → bind 9638/9639/9640
+7. Car starts VideoDecoder on the SurfaceView surface when MirrorScreen creates it
+8. Video: VD → SurfaceTexture → GL → encoder → TCP 9638 → car VideoDecoder → SurfaceView
+9. Audio: VD → AudioRecord (REMOTE_SUBMIX) → AAC-LC encoder (synthetic silence pacing) → TCP 9640 → car AudioPlayer (150ms buffer) → AudioTrack
+10. Touch: car SurfaceView onTouch → TouchEvent encode → TCP 9639 → VD TouchInjector
+          → InputManager.injectInputEvent
+11. Car logs: carLogSend() + logSink callbacks → DATA CAR_LOG → phone FileLog
 ```
+
+States: `IDLE → CONNECTING → CONNECTED → STREAMING`
+
+A mid-stream car-panel rotation reuses the control TCP connection. `MainActivity.onConfigurationChanged` calls `CarConnectionService.onCarViewportChanged`, which cancels `connectionScope` + `connectJob`, tears down video/input + the old VD server, and re-sends a `HandshakeRequest` at the new dims. The phone deploys a fresh VD server and re-sends `VD_PORTS_BOUND`. The streaming-layout gate accepts `state == CONNECTING && appList.isNotEmpty()` so the video-wait overlay covers the ~2s redeploy gap instead of flashing `CarLaunchScreen` (which would destroy the SurfaceView and lose the decoder state).

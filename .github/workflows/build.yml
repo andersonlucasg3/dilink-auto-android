@@ -1,17 +1,23 @@
-name: Build (Main)
+name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: self-hosted
+    # 纯门禁 workflow：push 与 pull_request 跑同一条 debug 编译 + 单测。
+    # 统一走 GitHub 托管 runner（ubuntu-latest）：本仓库没有 self-hosted
+    # runner，写成 self-hosted 会让分支/tag 的 job 永远 queued（见 issue #70
+    # 之前的 "发了没反应"）。发布 APK 是 tag 触发的 build-release.yml /
+    # build-pre-release.yml 的职责，这里不跑 assembleRelease，也不注入任何
+    # 签名 secret。Audit B-03 的 cache 投毒防护仍保留：PR 只读缓存，push 可写。
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +38,7 @@ jobs:
           export ANDROID_HOME=$HOME/android-sdk
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           if [ ! -f "$ANDROID_HOME/platforms/android-34/build.prop" ]; then
             wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/cmdline-tools.zip
             mkdir -p $ANDROID_HOME/cmdline-tools/latest
@@ -45,17 +51,18 @@ jobs:
               > /dev/null
           fi
 
-      - name: Build Release APK
+      # 门禁命令与 docs/PR_GUIDE.md「开 PR 前自查」对齐：debug 编译 + 单测。
+      # 不注入任何签名 secret —— 这条 job 不产发布产物，audit B-09/F-09 的
+      # 「secrets 不进 PR」要求在这里升级为「secrets 不进 build.yml」。
+      # :protocol-core:test 必须进 CI：FrameCodecWriteTimeoutTest 是 #70 的
+      # 回归用例，之前只在人肉单测里跑，Linux 上的假红没人发现。
+      - name: Build and test
         run: |
           chmod +x gradlew
-          ./gradlew :app-client:assembleRelease
-        env:
-          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          ./gradlew :app-client:assembleDebug :app-client:testDebugUnitTest :protocol-core:test
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dilink-auto-client-release
-          path: app-client/build/outputs/apk/release/app-client-release.apk
+          name: dilink-auto-client-debug
+          path: app-client/build/outputs/apk/debug/app-client-*.apk

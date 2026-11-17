@@ -1,25 +1,53 @@
 name: Bug Fix
-description: Report a bug to be fixed by the development agent
-labels: [bug, agent]
+description: 报告一个缺陷，交给开发 Agent 修复（流程见 docs/ISSUE_GUIDE.md）
+labels: [bug]
 body:
-  - type: textarea
-    id: description
+  - type: markdown
     attributes:
-      label: Description
-      placeholder: Describe the bug and what needs to be fixed. Be specific.
+      value: |
+        正文四要素缺一不可：现象 / 证据链 / 影响面 / 修复候选。
+        行为类问题必须给一条可直接粘贴进 PowerShell 的复现命令，给不出就说明原因并等维护者贴 `needs-repro`。
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 现象
+      description: 复现命令、期望输出、实际输出（贴原文）、触发条件/频率
+      placeholder: |
+        - 复现命令：`adb ...` 或 `.\gradlew.bat ...`
+        - 期望输出：
+        - 实际输出：
+        - 触发条件 / 频率：
     validations:
       required: true
   - type: textarea
-    id: acceptance
+    id: evidence
     attributes:
-      label: Acceptance Criteria
-      placeholder: '- [ ] The bug no longer occurs'
+      label: 证据链
+      description: 每条判断都要有 `文件:行号` 或可复现命令；日志给路径与关键行
+      placeholder: |
+        - `vd-server/src/main/java/.../GlPipeline.kt:186`：...
+        - 日志：`/sdcard/DiLinkAuto/vd-server.log` 关键行 ...
     validations:
-      required: false
+      required: true
   - type: textarea
-    id: context
+    id: impact
     attributes:
-      label: Additional Context
-      placeholder: Logs, screenshots, steps to reproduce, or anything that helps.
+      label: 影响面
+      description: 谁受影响、什么条件触发、严重度 P0/P1/P2
+    validations:
+      required: true
+  - type: textarea
+    id: candidates
+    attributes:
+      label: 修复候选
+      description: 建议方向、明确不做的部分、用什么测试钉住复发
+    validations:
+      required: true
+  - type: input
+    id: scope
+    attributes:
+      label: 建议 scope
+      description: 用于标题 type(scope)，如 vd-server / app-server / protocol / ci
+      placeholder: vd-server
     validations:
       required: false

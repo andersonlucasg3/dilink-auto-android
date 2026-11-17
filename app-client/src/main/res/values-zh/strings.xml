@@ -2,6 +2,11 @@
 <resources>
     <string name="app_name">DiLink Auto</string>
 
+    <!-- Shared actions / accessible names -->
+    <string name="action_back">返回</string>
+    <string name="action_settings">设置</string>
+    <string name="clear_search">清除搜索</string>
+
     <!-- Notifications -->
     <string name="notification_channel_name">DiLink Auto 服务</string>
     <string name="notification_channel_description">保持 DiLink Auto 运行以维持车机连接</string>
@@ -9,7 +14,6 @@
     <string name="notification_connected">已连接至车机</string>
     <string name="notification_waiting">正在等待车机连接…</string>
     <string name="notification_streaming">正在投屏至车机屏幕</string>
-    <string name="notification_channel_update">应用更新</string>
     <string name="accessibility_description">DiLink Auto 使用无障碍服务将车机屏幕的触摸操作转发至您的手机。</string>
 
     <!-- Main Screen -->
@@ -41,29 +45,6 @@
     <string name="status_streaming">正在投屏</string>
     <string name="status_streaming_desc">虚拟显示器已激活</string>
 
-    <!-- Updates -->
-    <string name="updates_title">更新</string>
-    <string name="updates_check_phone">检查手机端更新</string>
-    <string name="updates_checking">正在检查更新…</string>
-    <string name="updates_up_to_date">手机端已是最新版本 (v%1$s)</string>
-    <string name="updates_available">手机端有新版本可用：v%1$s</string>
-    <string name="updates_size_mb">%1$.1f MB</string>
-    <string name="updates_download_btn">下载更新</string>
-    <string name="updates_downloading">正在下载… %1$d%%</string>
-    <string name="updates_ready">手机端：v%1$s 已就绪</string>
-    <string name="updates_install_btn">安装更新</string>
-    <string name="updates_installing">正在通过 Shizuku 安装 v%1$s…</string>
-    <string name="updates_installed">手机端更新完成！请重启应用生效。</string>
-    <string name="updates_retry">重试</string>
-    <string name="updates_available_title">发现新版本</string>
-    <string name="updates_update_btn">更新</string>
-    <string name="updates_dismiss_btn">忽略</string>
-    <string name="updates_downloading_title">正在下载更新 v%1$s</string>
-    <string name="updates_ready_title">准备安装</string>
-    <string name="updates_car_title">车机端应用</string>
-    <string name="updates_car_desc">通过 Wi-Fi ADB 安装或更新车机端应用</string>
-    <string name="updates_car_install">安装</string>
-
     <!-- Settings -->
     <string name="settings_title">设置</string>
     <string name="settings_permissions">权限管理</string>
@@ -73,25 +54,18 @@
     <string name="perm_battery_granted">熄屏时保持投屏后台常驻</string>
     <string name="perm_accessibility">无障碍服务</string>
     <string name="perm_accessibility_granted">支持车机屏幕反向触控操作手机</string>
-    <string name="perm_notifications">通知使用权</string>
-    <string name="perm_notifications_granted">将手机通知实时流转至车机屏幕</string>
     <string name="perm_granted">已授权</string>
     <string name="perm_usb_debugging">USB 调试</string>
     <string name="perm_usb_desc">手机与车机端均需开启</string>
     <string name="perm_shizuku">Shizuku</string>
-    <string name="perm_shizuku_desc">安装 Shizuku 即可实现免 ADB 无线连接。通过 ADB 启动一次 Shizuku 后在此授权。</string>
+    <string name="perm_shizuku_desc">未检测到 Shizuku。安装后即可免 USB ADB 部署虚拟显示器 —— 点击打开安装页面。</string>
     <string name="perm_shizuku_needs_permission">Shizuku — 需要授权</string>
     <string name="perm_shizuku_permission_desc">Shizuku 正在运行，点击以授予 DiLink-Auto 权限。</string>
     <string name="perm_shizuku_available">Shizuku — 已连接</string>
     <string name="perm_shizuku_granted">Shizuku 已激活。手机可自行部署虚拟显示器，无需依赖 USB ADB。</string>
+    <string name="value_unknown">未知</string>
 
     <!-- Support -->
-    <string name="support_title">支持项目</string>
-    <string name="support_heading">支持 DiLink-Auto 的持续开发</string>
-    <string name="support_sponsor_btn">在 GitHub 上赞助</string>
-    <string name="support_pix_btn">通过 Pix 赞助（巴西）</string>
-    <string name="support_pix_key">https://nubank.com.br/cobrar/5gf35/69ed4939-b2c0-4071-b75d-3b430ab70a5d</string>
-    <string name="support_sponsor_url">https://github.com/sponsors/andersonlucasg3</string>
 
     <!-- About -->
     <string name="about_title">关于</string>
@@ -102,8 +76,6 @@
     <string name="about_lib_compose">Jetpack Compose — Apache 2.0</string>
     <string name="about_lib_coroutines">kotlinx-coroutines — Apache 2.0</string>
     <string name="about_lib_scrcpy">scrcpy（FakeContext/SurfaceScaler 概念）— Apache 2.0</string>
-    <string name="about_dev_credit">由 Anderson Lucas de Castro Ramos 倾情开发 🇧🇷</string>
-    <string name="about_dev_github">github.com/andersonlucasg3</string>
 
     <!-- Onboarding -->
     <string name="onboarding_welcome_title">欢迎使用 DiLink-Auto</string>
@@ -114,8 +86,6 @@
     <string name="onboarding_battery_desc">确保手机在熄屏休眠时依然维持网络串流。若缺少该权限，手机锁屏时投屏将中断。</string>
     <string name="onboarding_accessibility_title">无障碍服务</string>
     <string name="onboarding_accessibility_desc">允许车机触摸屏反向控制手机。若缺少该权限，车机上只能看画面而无法点击交互。</string>
-    <string name="onboarding_notification_title">通知使用权</string>
-    <string name="onboarding_notification_desc">在车机屏幕上显示手机通知。开启后，行车途中不再错过重要来电与消息。</string>
     <string name="onboarding_car_setup_title">连接前准备</string>
     <string name="onboarding_car_setup_desc">连接前请确认以下事项已就绪：</string>
     <string name="onboarding_car_prereq_wifi_adb">车机已开启网络 ADB 调试</string>
@@ -155,27 +125,22 @@
     <string name="car_app_retry">重试</string>
     <string name="car_app_installed">车机端已安装</string>
 
-    <!-- Donation -->
-    <string name="donation_title">支持开发</string>
-    <string name="donation_desc">感谢支持 DiLink-Auto 的持续迭代。每一份赞助都弥足珍贵！</string>
-    <string name="donation_github">GitHub 赞助</string>
-    <string name="donation_pix">Pix 赞助（巴西）</string>
-
     <!-- Samsung-Specific Warnings -->
     <string name="samsung_warning_title">检测到三星设备</string>
     <string name="samsung_warning_desc">三星 One UI 需要额外设置：关闭自动拦截器（Auto Blocker，会拦截 USB ADB）、设置电池为无限制，并允许所有文件访问权限。详情请查看设置指南。</string>
     <string name="samsung_settings_guide">三星机型设置指南</string>
 
-    <!-- Distribution Channel -->
-    <string name="channel_title">更新分发通道</string>
-    <string name="channel_release">正式版 (Release)</string>
-    <string name="channel_prerelease">预发布版 (Pre-release)</string>
-    <string name="channel_release_desc">稳定发布版本 — 推荐日常使用</string>
-    <string name="channel_prerelease_desc">开发测试构建 — 包含最新功能，可能不够稳定</string>
-
     <!-- Settings Sections -->
-    <string name="settings_distribution">分发通道</string>
     <string name="settings_debug">调试</string>
+
+    <!-- Car App Allowlist -->
+    <string name="allowlist_title">车机应用白名单</string>
+    <string name="allowlist_desc">选择哪些应用可以出现在车机上。未选中的应用不会推送到车机，以降低负载。</string>
+    <string name="allowlist_select_all">全选</string>
+    <string name="allowlist_deselect_all">全不选</string>
+    <string name="allowlist_search_hint">搜索应用</string>
+    <string name="allowlist_empty">未选择任何应用 — 车机主屏幕将为空。</string>
+    <string name="allowlist_no_match">没有匹配“%1$s”的应用</string>
     <string name="log_enabled">诊断日志</string>
     <string name="log_enabled_desc">将运行日志保存至本地文件以便排查故障。关闭可获得更佳性能。</string>
 
@@ -203,10 +168,6 @@
     <string name="car_install_status_auth_needed">需要授权 — 请在车机屏幕上点击接受 USB 调试授权弹窗，然后点击继续重试</string>
 
     <!-- Auto-Update Status -->
-    <string name="status_auto_update">正在更新车机端应用 (v%1$s → v%2$s)…</string>
-    <string name="status_auto_update_complete">车机端应用已更新！正在重启…</string>
-    <string name="status_update_failed">更新失败：%s</string>
-    <string name="status_auto_update_failed">自动更新失败：%s</string>
 
     <!-- Notification Actions -->
     <string name="notification_action_stop">停止</string>

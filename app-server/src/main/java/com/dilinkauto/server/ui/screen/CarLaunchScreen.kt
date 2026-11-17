@@ -1,22 +1,55 @@
 package com.dilinkauto.server.ui.screen
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.dilinkauto.protocol.SettingsFormat
+import com.dilinkauto.protocol.VdAreaTier
 import com.dilinkauto.server.R
+import com.dilinkauto.server.service.AudioSwitchBlockReason
 import com.dilinkauto.server.service.CarConnectionService
+import com.dilinkauto.server.service.audioSwitchState
+import com.dilinkauto.server.ui.InfoBar
+import com.dilinkauto.server.ui.InfoChip
+import com.dilinkauto.server.ui.theme.SuccessColor
+import com.dilinkauto.server.ui.theme.WarningColor
 
 /**
  * Full-screen launch / connection screen — no nav bar, connection-focused.
@@ -26,20 +59,72 @@ import com.dilinkauto.server.service.CarConnectionService
  * transitions to the streaming mode with nav bar, home, and apps.
  */
 @Composable
-fun CarLaunchScreen(service: CarConnectionService) {
+fun CarLaunchScreen(service: CarConnectionService, infoChips: List<InfoChip> = emptyList()) {
     val state by service.state.collectAsState()
     val phoneName by service.phoneName.collectAsState()
     val statusMessage by service.statusMessage.collectAsState()
-    var devMode by remember { mutableStateOf(service.devMode) }
+    // Observed, not shadowed — CarPrefs owns the persisted values (SRP-06).
+    val devMode by service.carPrefs.devModeFlow.collectAsState()
+    val startupDpi by service.carPrefs.startupDpiFlow.collectAsState()
+    // issue #202 评审第 2 条：DPI 输入框下方要显示"实际生效值 / 视口上限"，
+    // 两个数都来自现有握手响应（0 = 还没握手，退化为静态提示）。
+    val effectiveVdDpi by service.effectiveVdDpi.collectAsState()
+    val effectiveVdSafeMaxDpi by service.effectiveVdSafeMaxDpi.collectAsState()
+    val startupFps by service.carPrefs.startupFpsFlow.collectAsState()
+    // issue #203：解码器实测入帧帧率（0 = 还没有样本），只用于在设置页展示实际值。
+    val measuredFps by service.measuredFps.collectAsState()
+    val startupBitrate by service.carPrefs.startupBitrateFlow.collectAsState()
+    // VD 合成面积档位（issue #153 PB）：与上面三项同为启动设置，握手构造时读取。
+    val vdAreaTier by service.carPrefs.vdAreaTierFlow.collectAsState()
+    // 音频镜像（issue #72）：开关值来自 CarPrefs，置灰依据是手机端握手响应回传的
+    // 能力位（service.phoneAudioSupported），不是车机自身 SDK。
+    val audioEnabled by service.carPrefs.audioEnabledFlow.collectAsState()
+    val phoneAudioSupported by service.phoneAudioSupported.collectAsState()
+    // issue #201：用户主动断开是**持久化**状态，进程重启后重新打开 App 也不会自动连，
+    // 只能点「重新连接」。IDLE 态必须据此换文案，否则「就绪，等待连接」会被当成故障。
+    // 普通读取即可：进入/离开 IDLE 都由上面被观察的 state 触发重组。
+    val disconnectedByUser = service.carPrefs.userDisconnected
+
+    // Both layouts below render the very same card; hoisting the wiring here
+    // keeps the 11-argument call and its callbacks in one place.
+    val statusCard: @Composable () -> Unit = {
+        ConnectionStatusCard(
+            state = state,
+            phoneName = phoneName,
+            statusMessage = statusMessage,
+            disconnectedByUser = disconnectedByUser,
+            devMode = devMode,
+            onDevModeChange = { service.carPrefs.devMode = it },
+            audioEnabled = audioEnabled,
+            phoneAudioSupported = phoneAudioSupported,
+            onAudioEnabledChange = { service.carPrefs.audioEnabled = it },
+            startupDpi = startupDpi,
+            onStartupDpiChange = { service.carPrefs.startupDpi = it },
+            dpiNote = dpiHintText(DpiHint.of(startupDpi, effectiveVdDpi, effectiveVdSafeMaxDpi)),
+            startupFps = startupFps,
+            onStartupFpsChange = { service.setStartupFps(it) },
+            measuredFps = measuredFps,
+            startupBitrate = startupBitrate,
+            onStartupBitrateChange = { service.carPrefs.startupBitrate = it },
+            vdAreaTier = vdAreaTier,
+            onVdAreaTierChange = { service.carPrefs.vdAreaTier = it },
+            onReconnect = { service.reconnect() }
+        )
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D1117))
+            .background(MaterialTheme.colorScheme.background)
     ) {
+        // issue #39：连接页顶部信息条（时间）。与主屏 InfoBar 同容器；
+        // 镜像页不进本函数（CarShell 在 showStreamingMode 分支处理），满足验收标准 5。
+        InfoBar(infoChips)
         BoxWithConstraints(
             modifier = Modifier.fillMaxSize().padding(40.dp),
-            contentAlignment = Alignment.Center
+            // issue #173 PA：窄屏内容列可滚动后，长列表必须从顶部起排；继续居中会在
+            // 超高竖屏上把开头/结尾裁掉。宽屏 Row 是 fillMaxSize，对齐方式不影响它。
+            contentAlignment = Alignment.TopCenter
         ) {
             val isWide = maxWidth > 700.dp
 
@@ -65,20 +150,21 @@ fun CarLaunchScreen(service: CarConnectionService) {
                     }
 
                     // Right: status + action
+                    // issue #182：横屏右列原先只有 weight(1f)，高度 wrap-content 且没有
+                    // 滚动容器；1204x660 上 statusCard（3 个 SettingSection + 3 个 Switch）
+                    // + 可选 WifiAdbSetupCard + ManualConnectBox 远超一屏，底部选项恒被裁
+                    // 到屏幕外点不到。Row 给了有界 maxHeight，直接挂 verticalScroll 即可：
+                    // 不足一屏时 Column 高度=内容高、由 Row.CenterVertically 居中（原观感），
+                    // 超一屏时被夹到视口高度独立滚动。imePadding 与窄屏一致，保证键盘
+                    // 弹出时底部输入框仍可滚到。
                     Column(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .imePadding()
+                            .verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        ConnectionStatusCard(
-                            state = state,
-                            phoneName = phoneName,
-                            statusMessage = statusMessage,
-                            devMode = devMode,
-                            onDevModeChange = { newValue ->
-                                devMode = newValue
-                                service.devMode = newValue
-                            }
-                        )
+                        statusCard()
 
                         if (devMode && (state == CarConnectionService.State.IDLE ||
                                     state == CarConnectionService.State.CONNECTING)) {
@@ -95,22 +181,24 @@ fun CarLaunchScreen(service: CarConnectionService) {
                 }
             } else {
                 // Single-column layout for narrow screens
+                // issue #173 PA：MI 9 竖屏 1080x2152 上，Branding + statusCard(3 个
+                // SettingSection + 3 个 Switch) + [WifiAdbSetupCard] 已占满到 y≈2048，
+                // 末尾的 HowToConnect / ManualConnectBox 恒被挤出屏幕外且原先无滚动容器
+                // （scripts/lib/ops.sh 的 S19 实证）。只给窄屏内容列加滚动：
+                //   - imePadding() 让软键盘弹出时「连接」按钮仍在可滚到的范围内；
+                //   - 宽屏 Row 的 weight(1f)/CenterVertically 与无限高滚动约束耦合，
+                //     且本 issue 实证阻塞只在竖屏，无真机验证前不动横屏主形态；
+                //   - InfoBar 在 Box 叠加层，不会被卷进滚动内容。
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.widthIn(max = 560.dp)
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .imePadding()
+                        .verticalScroll(rememberScrollState())
                 ) {
                     BrandingSection()
                     Spacer(Modifier.height(32.dp))
-                    ConnectionStatusCard(
-                        state = state,
-                        phoneName = phoneName,
-                        statusMessage = statusMessage,
-                        devMode = devMode,
-                        onDevModeChange = { newValue ->
-                            devMode = newValue
-                            service.devMode = newValue
-                        }
-                    )
+                    statusCard()
 
                     if (devMode && (state == CarConnectionService.State.IDLE ||
                                 state == CarConnectionService.State.CONNECTING)) {
@@ -151,7 +239,7 @@ private fun BrandingSection() {
     Text(
         stringResource(R.string.branding_tagline),
         style = MaterialTheme.typography.bodyMedium,
-        color = Color.Gray
+        color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }
 
@@ -165,13 +253,31 @@ private fun ConnectionStatusCard(
     state: CarConnectionService.State,
     phoneName: String,
     statusMessage: String,
+    /** issue #201：用户主动断开且标志仍持久化 —— IDLE 文案与按钮要据此改写。 */
+    disconnectedByUser: Boolean,
     devMode: Boolean,
-    onDevModeChange: (Boolean) -> Unit
+    onDevModeChange: (Boolean) -> Unit,
+    audioEnabled: Boolean,
+    phoneAudioSupported: Boolean,
+    onAudioEnabledChange: (Boolean) -> Unit,
+    startupDpi: Int,
+    onStartupDpiChange: (Int) -> Unit,
+    /** issue #202：DPI 输入框下方的"实际生效值 / 视口上限"提示（[DpiHint] + `stringResource`）。 */
+    dpiNote: String,
+    startupFps: Int,
+    onStartupFpsChange: (Int) -> Unit,
+    /** 解码器实测入帧帧率（issue #203），0 = 无样本。 */
+    measuredFps: Double,
+    startupBitrate: Int,
+    onStartupBitrateChange: (Int) -> Unit,
+    vdAreaTier: Int,
+    onVdAreaTierChange: (Int) -> Unit,
+    onReconnect: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(
@@ -184,10 +290,10 @@ private fun ConnectionStatusCard(
                         .size(12.dp)
                         .background(
                             when (state) {
-                                CarConnectionService.State.STREAMING -> Color(0xFF4CAF50)
-                                CarConnectionService.State.CONNECTED -> Color(0xFFFFA726)
-                                CarConnectionService.State.CONNECTING -> Color(0xFFFFA726)
-                                else -> Color(0xFF757575)
+                                CarConnectionService.State.STREAMING -> SuccessColor
+                                CarConnectionService.State.CONNECTED -> WarningColor
+                                CarConnectionService.State.CONNECTING -> WarningColor
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
                             RoundedCornerShape(6.dp)
                         )
@@ -196,7 +302,13 @@ private fun ConnectionStatusCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         when (state) {
-                            CarConnectionService.State.IDLE -> stringResource(R.string.status_ready_to_connect)
+                            // issue #201：IDLE 有两种含义 —— 从未连接 / 用户主动断开。
+                            // 后者是持久化的，必须明确告诉用户「要点重新连接才会连上」。
+                            CarConnectionService.State.IDLE ->
+                                stringResource(
+                                    if (disconnectedByUser) R.string.status_disconnected_by_user
+                                    else R.string.status_ready_to_connect
+                                )
                             CarConnectionService.State.CONNECTING -> stringResource(R.string.status_connecting)
                             CarConnectionService.State.CONNECTED -> stringResource(R.string.status_connected)
                             CarConnectionService.State.STREAMING -> stringResource(R.string.status_streaming)
@@ -204,22 +316,45 @@ private fun ConnectionStatusCard(
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White
                     )
-                    if (statusMessage.isNotEmpty()) {
+                    // issue #201：主动断开的 IDLE 态下，statusMessage 还是上一个会话的值
+                    // （「正在连接…」「等待视频流…」），与上方文案冲突，直接不显示。
+                    if (statusMessage.isNotEmpty() &&
+                        !(state == CarConnectionService.State.IDLE && disconnectedByUser)
+                    ) {
                         Spacer(Modifier.height(4.dp))
                         Text(
                             if (phoneName.isNotEmpty()) phoneName else statusMessage,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-                if (state == CarConnectionService.State.CONNECTING ||
-                    state == CarConnectionService.State.IDLE
-                ) {
+                // issue #183：IDLE 下不再转圈 —— 该状态现在有显式的「重新连接」按钮，
+                // 「就绪」却一直转圈会让人误以为仍在连接中。
+                if (state == CarConnectionService.State.CONNECTING) {
                     CircularProgressIndicator(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp),
                         strokeWidth = 2.dp
+                    )
+                }
+            }
+
+            // issue #183：断开后（IDLE）给一个显式重连入口。此前 userDisconnected 抑制了
+            // 自动重连，UI 只剩需要手输 IP 的 ManualConnectBox，用户被迫「杀后台再打开」。
+            // 横屏右列与竖屏单列共用本卡片，两套布局一次覆盖。
+            if (state == CarConnectionService.State.IDLE) {
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = onReconnect,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        stringResource(
+                            // issue #201：主动断开时按钮文案与上方状态文案对齐，明确这是唯一入口。
+                            if (disconnectedByUser) R.string.reconnect_button_after_disconnect
+                            else R.string.reconnect_button
+                        )
                     )
                 }
             }
@@ -249,7 +384,7 @@ private fun ConnectionStatusCard(
                         Text(
                             if (devMode) stringResource(R.string.dev_mode_desc_on)
                             else stringResource(R.string.dev_mode_desc_off),
-                            color = if (devMode) Color(0xFFFFA726) else Color.Gray,
+                            color = if (devMode) WarningColor else MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -257,8 +392,167 @@ private fun ConnectionStatusCard(
                         checked = devMode,
                         onCheckedChange = onDevModeChange,
                         colors = SwitchDefaults.colors(
-                            checkedTrackColor = Color(0xFFFFA726)
+                            checkedTrackColor = WarningColor
                         )
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // 音频镜像开关（issue #72, Refs #13）。置灰与原因文案由纯函数
+                // [audioSwitchState] 决定：手机端握手响应没回传音频位时置灰，
+                // 文案说明原因；否则显示「镜像期间手机自身静音」的预期行为说明。
+                val audioSwitch = audioSwitchState(
+                    phoneSupported = phoneAudioSupported,
+                    audioEnabled = audioEnabled
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.audio_mirror_title),
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            when (audioSwitch.blockReason) {
+                                AudioSwitchBlockReason.PHONE_UNSUPPORTED ->
+                                    stringResource(R.string.audio_mirror_unsupported)
+                                AudioSwitchBlockReason.NONE ->
+                                    if (audioSwitch.checked) stringResource(R.string.audio_mirror_desc_on)
+                                    else stringResource(R.string.audio_mirror_desc_off)
+                            },
+                            color = when {
+                                audioSwitch.blockReason == AudioSwitchBlockReason.PHONE_UNSUPPORTED ->
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                audioSwitch.checked -> SuccessColor
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = audioSwitch.checked,
+                        onCheckedChange = onAudioEnabledChange,
+                        enabled = audioSwitch.clickable,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = SuccessColor
+                        )
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+                // DPI Settings & Presets
+                SettingSection(
+                    title = stringResource(R.string.startup_dpi_title),
+                    subtitle = stringResource(R.string.startup_dpi_desc),
+                    hint = stringResource(R.string.startup_dpi_hint),
+                    currentValueText = if (startupDpi > 0) startupDpi.toString() else stringResource(R.string.preset_auto),
+                    manualSeed = SettingsFormat.manualSeed(startupDpi, SettingsFormat.DPI_PRESETS),
+                    presets = listOf(
+                        stringResource(R.string.preset_auto) to SettingsFormat.DPI_AUTO,
+                        "140" to 140,
+                        stringResource(R.string.preset_dpi_160) to 160,
+                        "180" to 180,
+                        "200" to 200
+                    ),
+                    selectedPresetValue = startupDpi,
+                    onValueChange = onStartupDpiChange,
+                    coerceManualValue = { text ->
+                        SettingsFormat.coerceDpi(text.toIntOrNull() ?: SettingsFormat.DPI_AUTO)
+                    },
+                    note = dpiNote
+                )
+
+                Spacer(Modifier.height(16.dp))
+                // Bitrate Settings & Presets
+                SettingSection(
+                    title = stringResource(R.string.video_bitrate_title),
+                    subtitle = stringResource(R.string.video_bitrate_desc),
+                    hint = stringResource(R.string.video_bitrate_hint),
+                    currentValueText = SettingsFormat.formatBitrateMbps(startupBitrate),
+                    manualSeed = SettingsFormat.manualSeed(
+                        startupBitrate, SettingsFormat.BITRATE_PRESETS, divisor = 1_000_000
+                    ),
+                    presets = listOf(
+                        stringResource(R.string.preset_bitrate_2m) to 2_000_000,
+                        stringResource(R.string.preset_bitrate_2_5m) to 2_500_000,
+                        stringResource(R.string.preset_bitrate_3m) to 3_000_000,
+                        stringResource(R.string.preset_bitrate_4m) to 4_000_000,
+                        stringResource(R.string.preset_bitrate_6m) to 6_000_000
+                    ),
+                    selectedPresetValue = startupBitrate,
+                    onValueChange = onStartupBitrateChange,
+                    coerceManualValue = { text ->
+                        SettingsFormat.coerceBitrate((text.toIntOrNull() ?: 4) * 1_000_000)
+                    },
+                    manualSuffix = "Mbps"
+                )
+
+                Spacer(Modifier.height(16.dp))
+                // FPS Settings & Presets
+                //
+                // issue #203：不禁用任何档位（30/60 是否可达要由实车回签判定，提前禁用会让
+                // 手机端真正生效的刷新率永远失去验证机会）。这里只把解码器**实测**帧率
+                // 显示出来，让用户自己看到「设了 30 实际拿到多少」。
+                SettingSection(
+                    title = stringResource(R.string.video_fps_title),
+                    subtitle = stringResource(R.string.video_fps_desc),
+                    hint = if (measuredFps > 0.0) {
+                        stringResource(
+                            R.string.video_fps_hint_measured,
+                            String.format(java.util.Locale.US, "%.1f", measuredFps),
+                            startupFps,
+                        )
+                    } else stringResource(R.string.video_fps_hint),
+                    currentValueText = stringResource(R.string.fps_value, startupFps),
+                    manualSeed = SettingsFormat.manualSeed(startupFps, SettingsFormat.FPS_PRESETS),
+                    presets = listOf(
+                        stringResource(R.string.preset_fps_20) to 20,
+                        stringResource(R.string.preset_fps_24) to 24,
+                        stringResource(R.string.preset_fps_30) to 30,
+                        stringResource(R.string.preset_fps_60) to 60
+                    ),
+                    selectedPresetValue = startupFps,
+                    onValueChange = onStartupFpsChange,
+                    coerceManualValue = { text ->
+                        SettingsFormat.coerceFps(text.toIntOrNull() ?: 24)
+                    },
+                    manualSuffix = "FPS"
+                )
+
+                Spacer(Modifier.height(12.dp))
+                // VD 合成面积档位（issue #153 分节 PB）。开 = 键盘兼容档 2560（issue #71 原行为），
+                // 关 = 默认档 max(车机宽*1.6, 1600)。只在下次握手生效，不 resize 当前 VD。
+                val compatTier = vdAreaTier == VdAreaTier.COMPAT_2560
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.vd_area_tier_title),
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            if (compatTier) stringResource(R.string.vd_area_tier_desc_on)
+                            else stringResource(R.string.vd_area_tier_desc_off),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    // 不传 colors：material3 1.1.2 只给 containerColor 时 contentColor
+                    // 会默认 onPrimary，这里用主题默认色更安全。
+                    Switch(
+                        checked = compatTier,
+                        onCheckedChange = { enabled ->
+                            onVdAreaTierChange(
+                                if (enabled) VdAreaTier.COMPAT_2560 else VdAreaTier.AUTO
+                            )
+                        }
                     )
                 }
             }
@@ -266,36 +560,13 @@ private fun ConnectionStatusCard(
     }
 }
 
-@Composable
-private fun WifiAdbSetupCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                stringResource(R.string.wifi_adb_setup_title),
-                color = Color(0xFFFFA726),
-                style = MaterialTheme.typography.titleSmall
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.wifi_adb_setup_desc),
-                color = Color(0xFFBBBBBB),
-                style = MaterialTheme.typography.bodySmall,
-                lineHeight = 20.sp
-            )
-        }
-    }
-}
 
 @Composable
 private fun HowToConnect() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
@@ -330,7 +601,7 @@ private fun ConnectStep(number: String, text: String) {
             Text(
                 number,
                 color = MaterialTheme.colorScheme.primary,
-                fontSize = 14.sp,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -338,7 +609,7 @@ private fun ConnectStep(number: String, text: String) {
         Text(
             text,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFFBBBBBB)
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
