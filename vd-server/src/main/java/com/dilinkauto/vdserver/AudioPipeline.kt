@@ -95,6 +95,10 @@ internal class AudioPipeline(
     /**
      * issue #194：发送侧诊断统计（编码前 PCM 是否全 0、编码后单帧字节数）。
      * 只由采集线程访问；每 100 帧打一行 `AudioDiag tx ...`。
+     *
+     * 2026-11-17：`allZeroPcm` 把「`read()==0` 补的静音」与「`read()>0` 但整帧全 0」
+     * 混成一个数，79.4% 的窗口无法定性。这里再拆 `readZeroPad` / `realZero` /
+     * `readBytes` 三个独立计数，`allZeroPcm` 语义保持不变以兼容既有脚本。
      */
     private val txDiag = AudioTxDiag()
 
@@ -202,11 +206,17 @@ internal class AudioPipeline(
         // safeRelease 内部已经 runCatching { stop() }，无需再补一次 stop()。
         codec?.safeRelease()
         codec = null
-        // issue #194：累计 allZeroPcm 追加在右括号**之后**，避免打断 S23 场景在
+        // issue #194：累计口径追加在右括号**之后**，避免打断 S23 场景在
         // `scripts/scenarios/s23-audio-stream.sh:63` 用的 `Audio: capture stopped \(frames=…, silence=…\)` 正则。
         log(
-            "Audio: capture stopped (frames=${frames.get()}, silence=${silenceFrames.get()}) " +
-                "allZeroPcm=${txDiag.allZeroPcmTotal}"
+            audioTxStoppedLine(
+                frames = frames.get(),
+                silence = silenceFrames.get(),
+                allZeroPcm = txDiag.allZeroPcmTotal,
+                readZeroPad = txDiag.readZeroPadTotal,
+                realZero = txDiag.realZeroTotal,
+                readBytes = txDiag.readBytesTotal,
+            )
         )
     }
 
@@ -279,6 +289,9 @@ internal class AudioPipeline(
 
                 when {
                     read > 0 -> {
+                        // issue #194：readBytes 是「本窗口实际读到的字节数」——它是
+                        // 「读不到」与「读到 0」的分水岭，按读取时刻归属窗口。
+                        txDiag.onRead(read)
                         // 凑满一整帧再喂：非阻塞读可能只给半帧。
                         var offset = 0
                         while (offset < read) {
@@ -287,7 +300,7 @@ internal class AudioPipeline(
                             accLen += take
                             offset += take
                             if (accLen == spec.frameBytes) {
-                                queuePcm(enc, acc, accLen, frameIndex)
+                                queuePcm(enc, acc, accLen, frameIndex, pacingSilence = false)
                                 frameIndex++
                                 accLen = 0
                                 didWork = true
@@ -300,7 +313,7 @@ internal class AudioPipeline(
                         // 无数据（所有 player 消失）：按 21.333 ms 节拍补静音帧（R10）。
                         val due = pacing.silenceFramesDue(clockNanos())
                         repeat(due) {
-                            queuePcm(enc, silence, silence.size, frameIndex)
+                            queuePcm(enc, silence, silence.size, frameIndex, pacingSilence = true)
                             frameIndex++
                             silenceFrames.incrementAndGet()
                             didWork = true
@@ -331,8 +344,19 @@ internal class AudioPipeline(
         }
     }
 
-    /** 把一整帧 PCM 喂给编码器；输入缓冲暂时不可用时计数并丢这一帧。 */
-    private fun queuePcm(enc: MediaCodec, pcm: ByteArray, len: Int, frameIndex: Long) {
+    /**
+     * 把一整帧 PCM 喂给编码器；输入缓冲暂时不可用时计数并丢这一帧。
+     *
+     * [pacingSilence] 为 true 表示这一帧是 `read()==0` 时 pacing 补的静音帧，
+     * 用于把诊断里的 `readZeroPad` 与 `realZero` 分开（issue #194）。
+     */
+    private fun queuePcm(
+        enc: MediaCodec,
+        pcm: ByteArray,
+        len: Int,
+        frameIndex: Long,
+        pacingSilence: Boolean
+    ) {
         val inputId = try {
             enc.dequeueInputBuffer(0)
         } catch (e: Exception) {
@@ -367,7 +391,12 @@ internal class AudioPipeline(
         try {
             enc.queueInputBuffer(inputId, 0, len, ptsUsForFrame(frameIndex, spec), 0)
             // issue #194：只统计真正喂进编码器的 PCM，保证分母与编码输出一一对应。
-            txDiag.onPcm(pcm, len)
+            // 补静音帧与真实帧分开计：前者说明 read() 拿不到数据，后者说明采集被清零。
+            if (pacingSilence) {
+                txDiag.onPaddedSilence(pcm, len)
+            } else {
+                txDiag.onRealPcm(pcm, len)
+            }
         } catch (e: Exception) {
             logErr("Audio: queueInputBuffer failed: ${e.describe()}")
         }
@@ -518,12 +547,25 @@ internal fun isPcmAllZero(pcm: ByteArray, len: Int = pcm.size): Boolean {
  * issue #194 发送侧诊断统计（纯 JVM 可测）。
  *
  * 现场三种可能里，发送侧只能回答第一种：**编码前的 PCM 是不是本来就全 0**。
- * - [onPcm]：每帧喂给编码器后调用，统计全零帧数（含 `AudioPacing` 补的静音帧——
- *   它们本来就是 0，正常会话里占比应与 `silence` 对得上）；
+ *
+ * 2026-11-17 实车 79.4% 的窗口 `allZeroPcm` 接近满窗，但 `allZeroPcm` 把两类完全不同的
+ * 情况混在一起，无法定性：
+ * 1. [onPaddedSilence]：`AudioRecord.read() == 0`，pacing 主动补的静音帧
+ *    （采集侧拿不到数据，见 `AudioPipeline.captureLoop` 的 `read == 0` 分支）；
+ * 2. [onRealPcm]：`read() > 0` 确实读回了数据，但整帧全 0（采集被 ROM 静音/清空）。
+ *
+ * 因此拆成三个**独立**计数：
+ * - `readZeroPad`：补静音帧数；
+ * - `realZero`：真实读回但整帧全零的帧数；
+ * - `readBytes`：本窗口从 [AudioRecord.read] 实际读到的字节总数（由 [onRead] 累计）。
+ *
+ * `allZeroPcm` 语义**保持不变**（仍是「喂进编码器的全零帧数」），且恒有
+ * `allZeroPcm == readZeroPad + realZero`，旧日志与脚本口径不受影响。
+ *
  * - [onEncoded]：每帧编码输出后调用，记单帧字节数的 min/avg/max；
  * - 编码输出累计满 [windowFrames] 帧时返回一行 `AudioDiag tx ...`（**窗口值**，
- *   便于直接算 `allZeroPcm / frames` 的比例），然后窗口计数归零；
- * - [allZeroPcmTotal] 跨窗口累计，供 `close()` 收尾行使用。
+ *   便于直接算比例），然后窗口计数归零；
+ * - `*Total` 跨窗口累计，供 `close()` 收尾行使用。
  *
  * 为什么用编码输出帧数做窗口边界：编码器一进一出，而 PCM 可能因输入缓冲不可用被丢，
  * 用输出侧计数才能保证「每个窗口都能打出一行」。
@@ -532,6 +574,9 @@ internal class AudioTxDiag(
     private val windowFrames: Int = AUDIO_DIAG_TX_WINDOW_FRAMES,
 ) {
     private var windowAllZero = 0L
+    private var windowReadZeroPad = 0L
+    private var windowRealZero = 0L
+    private var windowReadBytes = 0L
     private var windowEncoded = 0L
     private var windowEncMin = Int.MAX_VALUE
     private var windowEncMax = 0
@@ -542,18 +587,55 @@ internal class AudioTxDiag(
         private set
 
     /**
-     * 编码前全零 PCM 的累计帧数（跨窗口，`close()` 收尾行用）。
+     * 跨窗口累计值（`close()` 收尾行用）。
      *
      * `close()` 可能在采集线程 join 超时后仍读取（`AudioPipeline.close()` 的 1.5 s 有界
      * join），所以这里用 AtomicLong，保证读到的是一个完整累计值。
      */
     private val allZeroPcmTotalValue = AtomicLong(0)
+    private val readZeroPadTotalValue = AtomicLong(0)
+    private val realZeroTotalValue = AtomicLong(0)
+    private val readBytesTotalValue = AtomicLong(0)
 
     /** 编码前全零 PCM 的累计帧数（跨窗口）。 */
     val allZeroPcmTotal: Long get() = allZeroPcmTotalValue.get()
 
-    /** 记录一帧真正喂进编码器的 PCM。 */
-    fun onPcm(pcm: ByteArray, len: Int = pcm.size) {
+    /** `read()==0` 补静音帧的累计数（跨窗口）。 */
+    val readZeroPadTotal: Long get() = readZeroPadTotalValue.get()
+
+    /** `read()>0` 但整帧全零的累计帧数（跨窗口）。 */
+    val realZeroTotal: Long get() = realZeroTotalValue.get()
+
+    /** 从 `AudioRecord` 实际读到的累计字节数（跨窗口）。 */
+    val readBytesTotal: Long get() = readBytesTotalValue.get()
+
+    /** 记录一次 `read() > 0` 实际读到的字节数（窗口内水位）。 */
+    fun onRead(bytes: Int) {
+        if (bytes > 0) {
+            windowReadBytes += bytes
+            readBytesTotalValue.addAndGet(bytes.toLong())
+        }
+    }
+
+    /** 记录一帧真正读回并喂进编码器的 PCM。 */
+    fun onRealPcm(pcm: ByteArray, len: Int = pcm.size) {
+        if (isPcmAllZero(pcm, len)) {
+            windowAllZero++
+            windowRealZero++
+            allZeroPcmTotalValue.incrementAndGet()
+            realZeroTotalValue.incrementAndGet()
+        }
+    }
+
+    /**
+     * 记录一帧 `read()==0` 时 pacing 补的静音帧。
+     *
+     * `allZeroPcm` 仍走 `isPcmAllZero` 判定，保持与拆分前逐帧同口径（补静音帧恒为全零，
+     * 两者结果一致，但不用假设）。
+     */
+    fun onPaddedSilence(pcm: ByteArray, len: Int = pcm.size) {
+        windowReadZeroPad++
+        readZeroPadTotalValue.incrementAndGet()
         if (isPcmAllZero(pcm, len)) {
             windowAllZero++
             allZeroPcmTotalValue.incrementAndGet()
@@ -572,22 +654,67 @@ internal class AudioTxDiag(
             windowEncSum += size
         }
         if (windowEncoded < windowFrames) return null
-        val min = if (windowEncMin == Int.MAX_VALUE) 0 else windowEncMin
-        val avg = if (windowEncoded > 0) windowEncSum / windowEncoded else 0L
-        val line = "AudioDiag tx frames=$windowEncoded allZeroPcm=$windowAllZero " +
-            "encMin=$min encAvg=$avg encMax=$windowEncMax"
+        val line = audioTxDiagWindowLine(
+            frames = windowEncoded,
+            allZeroPcm = windowAllZero,
+            encMin = if (windowEncMin == Int.MAX_VALUE) 0 else windowEncMin,
+            encAvg = if (windowEncoded > 0) windowEncSum / windowEncoded else 0L,
+            encMax = windowEncMax,
+            readZeroPad = windowReadZeroPad,
+            realZero = windowRealZero,
+            readBytes = windowReadBytes,
+        )
         resetWindow()
         return line
     }
 
     private fun resetWindow() {
         windowAllZero = 0
+        windowReadZeroPad = 0
+        windowRealZero = 0
+        windowReadBytes = 0
         windowEncoded = 0
         windowEncMin = Int.MAX_VALUE
         windowEncMax = 0
         windowEncSum = 0
     }
 }
+
+/**
+ * `AudioDiag tx` 窗口行（issue #194）。
+ *
+ * 旧字段 `frames= allZeroPcm= encMin= encAvg= encMax=` 的**位置与顺序不变**，
+ * 新字段 `readZeroPad= realZero= readBytes=` 一律追加在行尾 —— 既有按 `encMax=` 结尾
+ * 或按固定前缀解析的脚本不会被打断。
+ */
+internal fun audioTxDiagWindowLine(
+    frames: Long,
+    allZeroPcm: Long,
+    encMin: Int,
+    encAvg: Long,
+    encMax: Int,
+    readZeroPad: Long,
+    realZero: Long,
+    readBytes: Long,
+): String = "AudioDiag tx frames=$frames allZeroPcm=$allZeroPcm " +
+    "encMin=$encMin encAvg=$encAvg encMax=$encMax " +
+    "readZeroPad=$readZeroPad realZero=$realZero readBytes=$readBytes"
+
+/**
+ * `Audio: capture stopped (...)` 收尾行（issue #194）。
+ *
+ * `(frames=…, silence=…)` 的形态与顺序保持原样（`scripts/scenarios/s23-audio-stream.sh:63`
+ * 的正则依赖它），累计口径全部追加在右括号之后。
+ */
+internal fun audioTxStoppedLine(
+    frames: Long,
+    silence: Long,
+    allZeroPcm: Long,
+    readZeroPad: Long,
+    realZero: Long,
+    readBytes: Long,
+): String = "Audio: capture stopped (frames=$frames, silence=$silence) " +
+    "allZeroPcm=$allZeroPcm readZeroPad=$readZeroPad realZero=$realZero readBytes=$readBytes"
 
 /** 释放 `AudioRecord`，任何异常都不穿透。 */
 private fun AudioRecord.safeRelease() {
