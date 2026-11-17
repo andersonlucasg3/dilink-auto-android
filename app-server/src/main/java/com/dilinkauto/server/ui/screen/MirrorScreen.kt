@@ -32,14 +32,13 @@ import com.dilinkauto.server.service.CarConnectionService
  * rendering with zero keyframe loss. handleDisconnect/shutdown owns the final
  * decoder stop.
  *
- * issue #217: the touch entry point is deliberately NOT the SurfaceView. An
- * INVISIBLE View does not take part in hit testing, so binding the touch listener
- * to the SurfaceView lost touch for the whole HOME<->APP switch (exactly the
- * window in which the surface is also destroyed and rebuilt). The SurfaceView and
- * a transparent touch proxy now live in a FrameLayout: the surface keeps its old
- * visibility/lifecycle, while the proxy always receives MotionEvents. The proxy
- * only consumes them on the APP screen ([MirrorTouchPolicy]); on HOME it returns
- * false and lets Compose's tiles/scroll/search handle the gesture.
+ * issue #217：触摸入口刻意不再挂在 SurfaceView 上。INVISIBLE 的 View 不参与命中测试，
+ * 把 OnTouchListener 绑在 SurfaceView 上会让 HOME<->APP 切换期间（恰好也是 surface
+ * 销毁重建的窗口）整段收不到事件。现在 SurfaceView 与一层透明触摸代理同住
+ * FrameLayout：surface 保持原有可见性与生命周期，触摸代理始终接收 MotionEvent；
+ * 是否转发由 [MirrorTouchGate] 的状态机判定，一旦在 APP 页按下，MOVE/UP/CANCEL
+ * 会继续转发到手势结束。HOME 页的磁贴与控件由 Compose 命中测试优先处理，代理只会
+ * 接到它们之间空白区域的按下事件，且不消费。
  *
  * Both surface callbacks are deliberately thin (audit S-M3): they forward to
  * `CarConnectionService.onMirrorSurfaceCreated/Destroyed`, which hand the work
@@ -53,15 +52,15 @@ import com.dilinkauto.server.service.CarConnectionService
  */
 @Composable
 fun MirrorContent(service: CarConnectionService, visible: Boolean = true) {
-    // update 与触摸回调之间共享的运行时状态；两者都在主线程，不需要额外同步。
+    // update 与触摸回调之间共享的页面状态；两者都在主线程，不需要额外同步。
     val touchState = remember { MirrorTouchState() }
 
     AndroidView(
         factory = { context -> createMirrorContainer(context, service, touchState) },
         update = { container ->
-            touchState.visible = visible
+            touchState.onAppScreen = visible
             // 只切 SurfaceView 的可见性；容器与透明触摸代理始终在场，触摸链路不断。
-            surfaceViewOf(container).visibility = if (visible) View.VISIBLE else View.INVISIBLE
+            container.surfaceView.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         },
         modifier = Modifier
             .fillMaxSize()
@@ -69,29 +68,48 @@ fun MirrorContent(service: CarConnectionService, visible: Boolean = true) {
 }
 
 /**
- * 触摸代理层与 Compose 之间共享的状态。
+ * update 与触摸回调之间共享的页面状态。
  *
- * `visible` 由 [AndroidView] 的 update 写入（APP 页为 true），触摸回调只读；
- * `surfaceReady` 只用于诊断/策略签名，**不参与转发判定**（issue #217）。
+ * `onAppScreen` 由 [AndroidView] 的 update 写入（APP 页为 true），触摸回调只读；
+ * 两者都在主线程，不需要额外同步。
  */
 private class MirrorTouchState {
-    var visible: Boolean = false
-    var surfaceReady: Boolean = false
+    var onAppScreen: Boolean = false
 }
 
-/** 容器约定：0 号子 View 是 SurfaceView，1 号是透明触摸代理（见 [createMirrorContainer]）。 */
-private fun surfaceViewOf(container: FrameLayout): SurfaceView =
-    container.getChildAt(0) as SurfaceView
+/** 镜像容器：直接持有 SurfaceView 引用，update 里不必按子 View 下标去取。 */
+private class MirrorContainer(
+    context: Context,
+    val surfaceView: SurfaceView,
+    touchProxy: View
+) : FrameLayout(context) {
+
+    init {
+        addView(
+            surfaceView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        addView(
+            touchProxy,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+    }
+}
 
 private fun createMirrorContainer(
     context: Context,
     service: CarConnectionService,
     touchState: MirrorTouchState
-): FrameLayout {
+): MirrorContainer {
     val surfaceView = SurfaceView(context).apply {
         holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
-                touchState.surfaceReady = true
                 // Deliberately thin (audit S-M3): the callback fires on the
                 // main thread and MediaCodec create/configure is expensive
                 // enough to be visible as jank on the 8x A53 head unit.
@@ -111,7 +129,6 @@ private fun createMirrorContainer(
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
-                touchState.surfaceReady = false
                 // Surface is gone (view went INVISIBLE or activity teardown).
                 // Do NOT stop the decoder — navigation between HOME and APP
                 // toggles visibility, and stopping/restarting the codec would
@@ -125,32 +142,20 @@ private fun createMirrorContainer(
 
     // issue #217：透明触摸代理，始终覆盖在 SurfaceView 之上。SurfaceView 因切页变
     // INVISIBLE 时它仍然接收 MotionEvent，因此 surface 重建期间触摸也不会断。
+    val gate = MirrorTouchGate()
     val touchProxy = View(context).apply {
         setOnTouchListener { view, event ->
-            if (!MirrorTouchPolicy.shouldForwardTouch(touchState.visible, touchState.surfaceReady)) {
-                // HOME 页放行：事件继续交给 Compose 的磁贴/滚动/搜索框，不吞事件。
+            if (!gate.shouldForward(event.actionMasked, touchState.onAppScreen)) {
+                // 不接管这次手势，返回 false 不消费。HOME 页的磁贴/滚动/搜索框由
+                // Compose 命中测试优先处理，事件不会到达代理；代理只会接到这些控件
+                // 之间空白区域的按下事件，此时同样保持不消费。
                 return@setOnTouchListener false
             }
             forwardTouch(view, event, service)
         }
     }
 
-    return FrameLayout(context).apply {
-        addView(
-            surfaceView,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        )
-        addView(
-            touchProxy,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        )
-    }
+    return MirrorContainer(context, surfaceView, touchProxy)
 }
 
 /**
