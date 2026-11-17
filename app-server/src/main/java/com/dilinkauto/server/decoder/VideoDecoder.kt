@@ -131,18 +131,14 @@ class VideoDecoder {
     @Volatile
     private var configData: ByteArray? = null
     /**
-     * 停播期缓存的 IDR 及其所属 codec 代次（issue #216）。
+     * 停播期缓存的 IDR（带 codec 代次，issue #216）。
      *
      * 以前只有裸字节，换代后的新 codec 会把它当作冷启动参考帧喂进去，把 `awaitingIdr`
-     * 骗过去；现在代次不同的缓存一律作废，冷启动只喂 CONFIG 并等新 IDR。
+     * 骗过去；现在代次不同的缓存一律作废，冷启动只喂 CONFIG 并主动请求一个新 IDR。
+     * 读-清-记账都收在 [CachedKeyFrameStore] 的锁里，CONFIG 与喂帧线程并发清缓存时
+     * 不会双重销账（issue #205 遗留竞态）。
      */
-    private data class CachedKeyFrame(val generation: Int, val data: ByteArray)
-
-    // 最近一个在解码器停止期间收到的 IDR。只有与当前 codec 同一代次（同一实例）时
-    // 才能复用；停播期入缓存时没有活着的 codec，代次为 0（或在 stop 卡死时残留旧代次），
-    // 新 codec 起来后必然不同代 → 不再当参考帧（issue #216）。
-    @Volatile
-    private var cachedKeyFrame: CachedKeyFrame? = null
+    private val cachedKeyFrameStore = CachedKeyFrameStore()
 
     /**
      * 参考链断裂后的重同步状态机（issue #9）。
@@ -178,7 +174,7 @@ class VideoDecoder {
      * 收帧 / 喂帧 / 丢弃的唯一账本（issue #205）。
      *
      * 以前 `receiveCount / frameCount / dropCount / keyFrames*` 是五个各自 `++` 的散字段：
-     * 冷启动补喂 `cachedKeyFrame` 没记 fed、`stop()` 清队列与缓存不记账、`!configFed` 早退
+     * 冷启动补喂缓存 IDR 没记 fed、`stop()` 清队列与缓存不记账、`!configFed` 早退
      * 直接 `return` —— 现场 `keys_recv=123 keys_fed=118 keys_drop=0` 的「差 5」就是这么来的。
      * 现在四个数是同一台账的四项，不变式 `received == fed + dropped + pending` 每行统计都校验。
      * `internal` 供行为级单测直接判决账目。
@@ -326,11 +322,15 @@ class VideoDecoder {
      * 记录一次参考链缺口；只有首次进入重同步时才向上游索要 IDR。
      *
      * 缺口点分布在网络线程（队列丢弃）与喂帧线程（输入缓冲失败），[resync] 内部互斥。
+     *
+     * @return 本次调用是否真的发出了 IDR 请求（首次缺口）。冷启动依赖这个返回值区分
+     *   「我请求了」与「已经在等 IDR」，避免重复占用 `SyncRequestGate` 名额。
      */
-    internal fun noteGap() {
-        if (!resync.onGap()) return
+    internal fun noteGap(): Boolean {
+        if (!resync.onGap()) return false
         logW("Reference chain broken — waiting for next IDR (${intake.snapshot().dropped} drops, ${inputFailCount} inputFails)")
         onNeedsSyncFrame?.invoke()
+        return true
     }
 
     /**
@@ -444,7 +444,7 @@ class VideoDecoder {
             // issue #205：停播期缓存下来的 IDR 对本会话而言是「已接收、待补喂」——先播种，
             // 冷启动补喂时再由 onFed 销账。否则 fed 会凭空多出一帧，收/喂/丢三本账永远差 1
             // （现场 5 次会话差 5 正是这么来的）。
-            if (cachedKeyFrame != null) intake.onReceived(isKey = true)
+            if (cachedKeyFrameStore.hasEntry()) intake.onReceived(isKey = true)
             // issue #203：新解码器实例重新起算实测帧率窗口。
             fpsWindowStartMs = 0L
             measuredFps = 0.0
@@ -473,45 +473,51 @@ class VideoDecoder {
                     // issue #216：缓存 IDR 只有在**同一个 codec 实例**（代次相同）时才能当参考帧。
                     // 换代后旧帧对应的编码器会话已经不存在，喂进去只会把 awaitingIdr 骗过去，
                     // 随后到来的 P 帧全部解成空帧/花屏，直到新 IDR 到达（现场约 9s）。
-                    val reusedCachedKeyFrame = cachedKeyFrame?.let { cached ->
-                        val sameGeneration = shouldReuseCachedKeyFrame(cached.generation, generation)
-                        val fed = if (sameGeneration) {
+                    //
+                    // 说明：缓存只在 !running 时写入，而 start() 必然领取新 codec 代号，因此
+                    // 当前调用路径下 Reusable 分支实际不可达；保留它是「不换 codec、只重绑
+                    // Surface」的防御性语义，并让「跨代拒绝」成为可单测的生产代码
+                    // （CachedKeyFrameStore + CachedKeyFrameGenerationTest）。
+                    val reusedCachedKeyFrame = when (val cached = cachedKeyFrameStore.take(generation)) {
+                        is CachedKeyFrameStore.TakeResult.Reusable -> {
                             log(
                                 "Feeding cached KEYFRAME for cold-start reference " +
-                                    "(${cached.data.size} bytes, codec generation=${cached.generation})"
+                                    "(${cached.entry.data.size} bytes, codec generation=${cached.entry.generation})"
                             )
                             // issue #205：补喂的是「已接收」的帧（start() 里播种），成功记 fed、
                             // 失败记 drop。以前这里既不记 fed 也不记 drop，正是差 5 的来源。
-                            if (feedBuffer(decoder, cached.data, 0)) {
+                            if (feedBuffer(decoder, cached.entry.data, 0)) {
                                 intake.onFed(isKey = true)
                                 true
                             } else {
                                 intake.onDropped(isKey = true)
                                 false
                             }
-                        } else {
+                        }
+
+                        is CachedKeyFrameStore.TakeResult.Discarded -> {
                             // 新 CONFIG 已经就位，但参考帧属于另一代 codec：直接作废并平账。
                             logW(
-                                "Discarding cached KEYFRAME from codec generation=${cached.generation} " +
+                                "Discarding cached KEYFRAME from codec generation=${cached.entry.generation} " +
                                     "(current generation=$generation) — waiting for a new IDR"
                             )
                             intake.onDropped(isKey = true)
                             false
                         }
-                        cachedKeyFrame = null
-                        fed
-                    } ?: false
+
+                        CachedKeyFrameStore.TakeResult.Empty -> false
+                    }
 
                     // 冷启动没有可用参考帧（跨代缓存 / 缓存喂入失败 / 本来就没有缓存）：
                     // P 帧在坏参考链上只会产空帧，统一交给 awaitingIdr 路径 —— 接收入口与
                     // 喂帧循环都会拒喂 P 帧，只放行新 IDR（issue #216）。
                     //
-                    // 这里只置重同步、不额外索要 IDR：`recreateDecoder()` 已有唯一的补偿请求点
-                    // （issue #207），从这里再请求会让一次重建占两个闸门名额；连接冷启动则等
-                    // 手机侧自然的首个 IDR，不新增协议流量。
-                    if (!reusedCachedKeyFrame) {
-                        resync.onGap()
-                        logW("Cold start without a usable reference frame — waiting for a new IDR")
+                    // 必须在冷启动这里就调 noteGap() 主动请求一次 IDR：如果只置 awaitingIdr，
+                    // 1.5s 后 GAP 升级走的 noteGap() 会因 resync.onGap() 返回 false 而把请求
+                    // 吞掉，整条会话一次 IDR 请求都不发（实车重连不走 recreateDecoder，手机
+                    // 侧不会主动补帧）。请求仍经 onNeedsSyncFrame → SyncRequestGate 限流。
+                    if (!reusedCachedKeyFrame && noteGap()) {
+                        log("requesting IDR (reason=cold start without a usable reference frame)")
                     }
 
                     // issue #55：原实现每 1000/fps 毫秒只取 1 帧，消费速率被硬限在 30fps，
@@ -817,21 +823,19 @@ class VideoDecoder {
         if (isConfig) {
             configData = data
             // 被新码流边界作废的缓存 IDR 从此再也不会喂入，必须记丢（issue #205）。
-            if (cachedKeyFrame != null) {
-                cachedKeyFrame = null
-                intake.onDropped(isKey = true)
-            }
+            if (cachedKeyFrameStore.clear()) intake.onDropped(isKey = true)
         }
-        // When stopped, cache the most recent IDR so start() can feed it as a
-        // reference frame. P-frames are dropped (no codec to decode them).
+        // When stopped, cache the most recent IDR so start() can decide whether it is
+        // usable as a reference frame. P-frames are dropped (no codec to decode them).
         if (!running.get() && !isConfig) {
             if (isKey) {
                 // 旧缓存被新 IDR 覆盖：它既不会被喂也不会再被解，记丢并留一行痕迹（issue #205）。
-                if (cachedKeyFrame != null) {
+                // 代次取当前 codecGeneration：停播期通常为 0（没有活着的 codec），
+                // stop 卡死时可能是尚未配对的旧代次 —— 两种情况都会被新 codec 判为跨代。
+                if (cachedKeyFrameStore.replace(codecGeneration, data) != null) {
                     intake.onDropped(isKey = true)
                     logW("Cached KEYFRAME replaced by a newer one before start() — counted as dropped")
                 }
-                cachedKeyFrame = CachedKeyFrame(codecGeneration, data)
             } else {
                 // 停播期到达的 P 帧没有解码器可解，接收即丢（以前只记 recv，账面上凭空多一帧）。
                 intake.onDropped(isKey = false)
@@ -958,10 +962,7 @@ class VideoDecoder {
                 // CONFIG 不进账（它从未被 onReceived 记过），只结视频帧的账。
                 if (!queued.isConfig) intake.onDropped(queued.isKeyFrame)
             }
-            if (cachedKeyFrame != null) {
-                cachedKeyFrame = null
-                intake.onDropped(isKey = true)
-            }
+            if (cachedKeyFrameStore.clear()) intake.onDropped(isKey = true)
             val stopSnap = intake.snapshot()
             log("Stopping decoder: fed=${stopSnap.fed} rendered=$renderCount drops=${stopSnap.dropped} inputFails=$inputFailCount codec generation=$codecGeneration")
             resetBlackScreenState()
@@ -1013,7 +1014,7 @@ class VideoDecoder {
         logW("Recreating decoder: reason=$reason")
         stop()
         start(surface, width, height, fps)
-        // issue #207 欠账：`stop()` 已经清掉 cachedKeyFrame，新 codec 没有参考帧，不补一拍
+        // issue #207 欠账：`stop()` 已经清掉缓存 IDR，新 codec 没有参考帧，不补一拍
         // IDR 就要等下一个自然 GOP（最多 ~1.2s 黑屏）。请求只走 onNeedsSyncFrame →
         // `CarSessionCoordinator.requestSyncFrame` → `SyncRequestGate`（#75/#163 限流），
         // 视频层不自己发协议帧，也不绕过限流。

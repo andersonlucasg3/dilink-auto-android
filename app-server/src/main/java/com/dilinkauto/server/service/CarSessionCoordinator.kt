@@ -959,8 +959,8 @@ internal class CarSessionCoordinator(
      *
      * 两个触发源共用这一个入口，绝不允许绕过闸门：
      *  - 解码器参考链断裂（[VideoDecoder.onNeedsSyncFrame]）；
-     *  - Surface 重绑失败后的解码器重建（issue #198 / #207）：`stop()` 会清掉
-     *    `cachedKeyFrame`，不补一拍 IDR 就要等下一个自然 GOP，用户看到的是「重建后仍然
+     *  - Surface 重绑失败后的解码器重建（issue #198 / #207）：`stop()` 会清掉缓存的
+     *    参考 IDR，不补一拍 IDR 就要等下一个自然 GOP，用户看到的是「重建后仍然
      *    黑几秒」。该请求由 `VideoDecoder.recreateDecoder()` 内的**唯一**调用点
      *    `requestSyncAfterRebuild()` 经 `onNeedsSyncFrame` 发出，调用方不要再额外请求一次。
      */
@@ -1060,7 +1060,7 @@ internal class CarSessionCoordinator(
                     if (videoDecoder.switchSurface(surface)) {
                         carLogSend("[MirrorScreen] Decoder surface switched to SurfaceView (no restart)")
                     } else {
-                        // 回退重建：cached CONFIG 仍在，但 stop() 会清掉 cachedKeyFrame，
+                        // 回退重建：cached CONFIG 仍在，但 stop() 会清掉缓存的参考 IDR，
                         // 不补一拍 IDR 就要等下一个自然 GOP（issue #198）。
                         // issue #205：重建统一走 recreateDecoder()，旧 codec 一定先释放、
                         // generation 递增，日志里 created/released 才能配对。

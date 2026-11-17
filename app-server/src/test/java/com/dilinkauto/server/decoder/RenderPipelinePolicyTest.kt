@@ -235,7 +235,7 @@ class RenderPipelinePolicyTest {
     }
 
     /**
-     * issue #198 评审：重绑失败回退重建后 cachedKeyFrame 通常已被 stop() 清空，
+     * issue #198 评审：重绑失败回退重建后缓存的参考 IDR 通常已被 stop() 清空，
      * 必须补一拍 IDR，且要走 #75 / #163 的同一个滑动窗口闸门。
      *
      * issue #207 收口后，请求点从协调器搬进了 `VideoDecoder.recreateDecoder()`（唯一重建入口），
