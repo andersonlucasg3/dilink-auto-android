@@ -2,7 +2,7 @@ name: Build (Release)
 
 # 正式发版：日期-时间 tag（issue #224）。
 #
-# `v20261117-2247` → 当天那一轮迭代。tag 规则与 gradle.properties 的
+# `v20261117-2315` → 当天那一轮迭代。tag 规则与 gradle.properties 的
 # app.versionName 必须逐字一致，否则包里的版本号与 Release 标题对不上。
 #
 # GitHub 的 tag 过滤器不是正则：`+` 表示「前一个字符一次或多次」，
@@ -21,8 +21,8 @@ permissions:
 
 jobs:
   release:
-    # 本仓库已脱离 fork 网络，没有 self-hosted runner：走 self-hosted 会让
-    # tag 发布永远 queued（audit B-03 之后的第二次修正）。
+    # 全部 job 走 GitHub 托管 runner（ubuntu-latest）。本仓库没有自托管 runner，
+    # 写成 self-hosted 会让 tag 发布永远 queued —— 不要改回去。
     runs-on: ubuntu-latest
     # 发布仍然挂在 protected `release` environment 后面，tag 不能直接静默发版。
     environment: release

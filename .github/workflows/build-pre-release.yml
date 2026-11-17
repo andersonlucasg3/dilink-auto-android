@@ -15,7 +15,8 @@ permissions:
 
 jobs:
   pre-release:
-    # 本仓库没有 self-hosted runner，与 build-release.yml 一样统一 ubuntu-latest。
+    # 与 build-release.yml 一样统一走 GitHub 托管 runner（ubuntu-latest），
+    # 否则 tag 发布在无自托管 runner 的仓库会永远 queued。
     runs-on: ubuntu-latest
     # Audit B-07: gate publishing behind the protected `release` environment so
     # a tag push cannot auto-publish without the reviewers configured on it.
