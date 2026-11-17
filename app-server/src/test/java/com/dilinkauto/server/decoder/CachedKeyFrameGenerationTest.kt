@@ -136,18 +136,37 @@ class CachedKeyFrameGenerationTest {
     @Test
     fun `冷启动没有可用参考帧时必须走 noteGap 主动请求 IDR`() {
         val src = sourceOf(DECODER_PATH)
-        val coldStart = src.indexOf("if (!reusedCachedKeyFrame && noteGap())")
+        val coldStart = src.indexOf("if (!reusedCachedKeyFrame) {")
         assertTrue("找不到冷启动分支", coldStart >= 0)
 
-        // 冷启动只置 awaitingIdr 会让 1.5s 的 GAP 走 noteGap() 时 resync.onGap() 返回 false，
-        // 整条会话一次 IDR 请求都发不出去（评审阻塞项）。必须由冷启动自己走 noteGap()。
+        val guarded = src.indexOf("if (requestIdrOnColdStart) {", coldStart)
+        val noteGap = src.indexOf("noteGap()", guarded)
         assertTrue(
-            "冷启动必须调用 noteGap() 主动请求一次 IDR",
-            src.contains("if (!reusedCachedKeyFrame && noteGap())"),
+            "冷启动默认路径必须调用 noteGap() 主动请求一次 IDR，实际 coldStart=$coldStart guarded=$guarded noteGap=$noteGap",
+            guarded in (coldStart + 1)..(coldStart + 400) && noteGap in (guarded + 1)..(guarded + 300),
         )
         assertTrue(
             "请求必须留下可 grep 的 reason",
             src.contains("requesting IDR (reason=cold start without a usable reference frame)"),
+        )
+    }
+
+    @Test
+    fun `重建路径只保留一个 IDR 请求点`() {
+        val src = sourceOf(DECODER_PATH)
+        val recreateStart = src.indexOf("fun recreateDecoder(")
+        val recreateEnd = src.indexOf("fun requestSyncAfterRebuild(")
+        assertTrue("找不到 recreateDecoder 函数体", recreateStart in 0 until recreateEnd)
+        val recreateBody = src.substring(recreateStart, recreateEnd)
+
+        assertTrue(
+            "重建必须关掉 start() 的冷启动请求，否则 SyncRequestGate 窗口内会真的发两次 IDR",
+            recreateBody.contains("requestIdrOnColdStart = false"),
+        )
+        assertEquals(
+            "重建入口必须继续走 requestSyncAfterRebuild 这一个请求点",
+            1,
+            Regex("""requestSyncAfterRebuild\(""").findAll(recreateBody).count(),
         )
     }
 

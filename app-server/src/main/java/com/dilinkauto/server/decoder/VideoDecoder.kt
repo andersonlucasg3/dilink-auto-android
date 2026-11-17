@@ -360,8 +360,19 @@ class VideoDecoder {
      * Never call this from the main thread in production — the service routes
      * it through its decoder executor (audit S-M3). The whole body is
      * serialized against [stop] by [lifecycleLock] (audit S-07/S-08).
+     *
+     * @param requestIdrOnColdStart 冷启动没有可复用参考帧时是否在这里主动请求一次 IDR
+     *   （issue #216）。默认 `true` 覆盖「重连 / Surface 冷启动」；[recreateDecoder] 传
+     *   `false`，因为它随后会用 `requestSyncAfterRebuild()` 走 #207 的**唯一**请求点，
+     *   否则一次重建会在 `SyncRequestGate`（窗口内允许 2 次）里真的发出两次。
      */
-    fun start(surface: Surface, width: Int, height: Int, fps: Int = VideoConfig.TARGET_FPS) {
+    fun start(
+        surface: Surface,
+        width: Int,
+        height: Int,
+        fps: Int = VideoConfig.TARGET_FPS,
+        requestIdrOnColdStart: Boolean = true,
+    ) {
         synchronized(lifecycleLock) {
             if (running.getAndSet(true)) {
                 logW("start() called but already running")
@@ -512,12 +523,22 @@ class VideoDecoder {
                     // P 帧在坏参考链上只会产空帧，统一交给 awaitingIdr 路径 —— 接收入口与
                     // 喂帧循环都会拒喂 P 帧，只放行新 IDR（issue #216）。
                     //
-                    // 必须在冷启动这里就调 noteGap() 主动请求一次 IDR：如果只置 awaitingIdr，
+                    // 默认在这里就调 noteGap() 主动请求一次 IDR：如果只置 awaitingIdr，
                     // 1.5s 后 GAP 升级走的 noteGap() 会因 resync.onGap() 返回 false 而把请求
                     // 吞掉，整条会话一次 IDR 请求都不发（实车重连不走 recreateDecoder，手机
                     // 侧不会主动补帧）。请求仍经 onNeedsSyncFrame → SyncRequestGate 限流。
-                    if (!reusedCachedKeyFrame && noteGap()) {
-                        log("requesting IDR (reason=cold start without a usable reference frame)")
+                    //
+                    // 重建路径（requestIdrOnColdStart=false）只置重同步，由
+                    // `requestSyncAfterRebuild()` 统一请求（#207）：一次重建只占一个名额。
+                    if (!reusedCachedKeyFrame) {
+                        if (requestIdrOnColdStart) {
+                            if (noteGap()) {
+                                log("requesting IDR (reason=cold start without a usable reference frame)")
+                            }
+                        } else {
+                            resync.onGap()
+                            logW("Cold start without a usable reference frame — waiting for rebuild IDR request")
+                        }
                     }
 
                     // issue #55：原实现每 1000/fps 毫秒只取 1 帧，消费速率被硬限在 30fps，
@@ -1013,7 +1034,8 @@ class VideoDecoder {
     fun recreateDecoder(surface: Surface, width: Int, height: Int, fps: Int, reason: String) {
         logW("Recreating decoder: reason=$reason")
         stop()
-        start(surface, width, height, fps)
+        // 冷启动请求让位给下面的 requestSyncAfterRebuild（#207 唯一请求点）。
+        start(surface, width, height, fps, requestIdrOnColdStart = false)
         // issue #207 欠账：`stop()` 已经清掉缓存 IDR，新 codec 没有参考帧，不补一拍
         // IDR 就要等下一个自然 GOP（最多 ~1.2s 黑屏）。请求只走 onNeedsSyncFrame →
         // `CarSessionCoordinator.requestSyncFrame` → `SyncRequestGate`（#75/#163 限流），
