@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicLong
  * 只要还在推进就不抛。这条判据直接决定引擎会不会被误判成断链而整条会话重建
  * （2.5h 导航日志里的 4 次 `Write timed out` 都是整链重建的起点）。
  *
- * 用真实 loopback socket + 明确指定 64KB 收发缓冲把管道堵住，再把 deadline 缩到 100ms，
- * 避免测试真的等 10 秒。
+ * 用真实 loopback socket + 明确指定 64KB 收发缓冲把管道堵住，再把 deadline 缩到 100ms
+ * （慢读用例用 1s，见 [SLOW_DEADLINE_NS]），避免测试真的等 10 秒。
  *
  * 注意：**payload 必须远大于管道容量**。Windows loopback 的默认缓冲/窗口比 Linux 大得多，
  * 早期版本的 128KB payload 会被内核整个吞下，`write` 全程不阻塞，测试因而假失败。
@@ -73,8 +73,8 @@ class FrameCodecWriteTimeoutTest {
                     val n = p.peer.getInputStream().read(buf)
                     if (n < 0) break
                     drained.addAndGet(n.toLong())
-                    // 每次只收一小块就睡 20ms：写侧一直有进展，但总量走得很慢
-                    // （2MB / 64KB * 20ms ≈ 640ms，远大于 100ms deadline）。
+                    // 每次只收一小块就睡 PACE_MS：写侧一直有进展，但总量走得很慢
+                    // （2MB / 64KB * 40ms ≈ 1.28s，大于 SLOW_DEADLINE_NS）。
                     Thread.sleep(PACE_MS)
                 }
             } catch (_: Exception) {
@@ -83,10 +83,13 @@ class FrameCodecWriteTimeoutTest {
         }, "slow-reader").apply { isDaemon = true; start() }
         try {
             val startedAt = System.nanoTime()
-            FrameCodec.writeAll(p.ch, ByteBuffer.wrap(ByteArray(PAYLOAD_BYTES)), DEADLINE_NS)
+            FrameCodec.writeAll(p.ch, ByteBuffer.wrap(ByteArray(PAYLOAD_BYTES)), SLOW_DEADLINE_NS)
             val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
             // 总耗时超过 deadline 却成功返回 = deadline 确实被抓到进展就重置了。
-            assertTrue("总耗时 ${elapsedMs}ms 应超过 ${DEADLINE_NS / 1_000_000}ms deadline", elapsedMs >= DEADLINE_NS / 1_000_000)
+            assertTrue(
+                "总耗时 ${elapsedMs}ms 应超过 ${SLOW_DEADLINE_NS / 1_000_000}ms deadline",
+                elapsedMs >= SLOW_DEADLINE_NS / 1_000_000
+            )
             // 写侧返回只代表入了管道；等读线程把尾巴收完再断言，避免竞态。
             val waitDeadline = System.nanoTime() + 5_000_000_000L
             while (drained.get() < PAYLOAD_BYTES.toLong() && System.nanoTime() < waitDeadline) {
@@ -103,7 +106,19 @@ class FrameCodecWriteTimeoutTest {
     private companion object {
         const val PAYLOAD_BYTES = 2 * 1024 * 1024 // 2MB，远大于 64KB+64KB 的管道容量
         const val CHUNK_BYTES = 64 * 1024
-        const val PACE_MS = 20L
+        const val PACE_MS = 40L
         const val DEADLINE_NS = 100_000_000L // 100ms
+
+        /**
+         * 慢读用例的 deadline，必须显著大于单次读取间隔 [PACE_MS]。
+         *
+         * 原来两个用例共用 100ms：写侧只要遇到一次「读线程 20ms 的 sleep 被
+         * 调度拉长到 >100ms」就会被判成零进展，测试假红。实测在 Linux 容器
+         * （Gradle 8.14 + JDK 17）上 `slowButSteadyProgressDoesNotThrow` 连续
+         * 3 次全红；Windows 本机因 loopback 缓冲更大而没暴露。1s 给了 25×
+         * 的调度抖动余量，而总写入时长（≈1.28s）仍大于它，断言依旧能证明
+         * deadline 在进展时被重置。
+         */
+        const val SLOW_DEADLINE_NS = 1_000_000_000L // 1s
     }
 }
