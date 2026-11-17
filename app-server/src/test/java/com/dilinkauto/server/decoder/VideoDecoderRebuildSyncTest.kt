@@ -19,7 +19,7 @@ class VideoDecoderRebuildSyncTest {
 
     private class FakeSurface : Surface(SurfaceTexture(0))
 
-    private fun decoder(logs: MutableList<String>, gate: () -> Unit): VideoDecoder =
+    private fun decoder(logs: MutableList<String>, gate: (String) -> Unit): VideoDecoder =
         VideoDecoder().apply {
             logSink = { logs += it }
             onNeedsSyncFrame = gate
@@ -29,7 +29,7 @@ class VideoDecoderRebuildSyncTest {
     fun `重建成功后只发出一次 IDR 请求且留痕`() {
         var requests = 0
         val logs = mutableListOf<String>()
-        val d = decoder(logs) { requests++ }
+        val d = decoder(logs) { _ -> requests++ }
 
         // 生产路径里 recreateDecoder() 的**唯一**请求点。
         d.requestSyncAfterRebuild(rebuilt = true, reason = "surface rebind failed")
@@ -44,7 +44,7 @@ class VideoDecoderRebuildSyncTest {
     @Test
     fun `重建失败不请求 IDR 以免白占闸门`() {
         var requests = 0
-        val d = decoder(mutableListOf()) { requests++ }
+        val d = decoder(mutableListOf()) { _ -> requests++ }
 
         d.requestSyncAfterRebuild(rebuilt = false, reason = "surface rebind failed")
 
@@ -54,7 +54,7 @@ class VideoDecoderRebuildSyncTest {
     @Test
     fun `recreateDecoder 在 start 失败时不请求 IDR`() {
         var requests = 0
-        val d = decoder(mutableListOf()) { requests++ }
+        val d = decoder(mutableListOf()) { _ -> requests++ }
 
         // 单测环境没有 MediaCodec：start() 必然失败，running 保持 false。
         d.recreateDecoder(FakeSurface(), 1280, 720, 30, "surface rebind failed")
