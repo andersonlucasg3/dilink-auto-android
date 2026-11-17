@@ -23,7 +23,6 @@
     <string name="nav_home">Додому</string>
 
     <!-- Дзеркалювання -->
-    <string name="status_updating">Оновлення застосунку авто…</string>
     <string name="status_please_wait">Будь ласка, зачекайте</string>
 
     <!-- Орієнтація -->
@@ -33,11 +32,11 @@
     <string name="how_to_connect_title">Як підключитися</string>
 
     <!-- Connection Mode (WiFi ADB / USB ADB) -->
-    <string name="dev_mode_title">Режим прямого Wi-Fi</string>
+    <string name="dev_mode_title">Режим WiFi ADB</string>
     <string name="dev_mode_desc_on">WiFi ADB (авто підключається до телефону через Wi-Fi — USB-кабель не потрібен)</string>
     <string name="dev_mode_desc_off">USB ADB (авто підключається до телефону через USB-кабель)</string>
     <string name="wifi_adb_setup_title">Налаштування WiFi ADB</string>
-    <string name="wifi_adb_setup_desc">Щоб використовувати режим прямого Wi-Fi, спочатку увімкніть ADB через Wi-Fi на телефоні. Підключіть телефон до комп\'ютера через USB і виконайте:\n\nadb tcpip 5555\n\nЦе потрібно зробити лише один раз. Після цього авто зможе підключатися до телефону через Wi-Fi без USB-кабеля.</string>
+    <string name="wifi_adb_setup_desc">Спочатку налаштуйте бездротовий ADB на телефоні — див. додаток DiLink Auto на телефоні.</string>
 
     <!-- Manual Connect -->
     <string name="manual_connect_label">Або підключитися вручну за IP</string>
@@ -74,7 +73,7 @@
     <!-- Notifications -->
     <string name="no_notifications">Немає сповіщень</string>
     <string name="notifications_count">Сповіщення (%d)</string>
-    <string name="clear_all">Очистити Все</string>
+    <string name="clear_all">Очистити все</string>
     <string name="clear_notification">Очистити сповіщення</string>
 
     <!-- Connection Status Messages -->
@@ -86,12 +85,11 @@
     <string name="status_connecting_usb">Підключення USB… Перевірте діалог авторизації на телефоні</string>
     <string name="status_usb_failed">Помилка USB підключення — перевірте діалог авторизації на телефоні</string>
     <string name="status_usb_connected">USB підключено</string>
-    <string name="status_updating_car">Оновлення застосунку авто…</string>
     <string name="status_preparing_vd">Підготовка віртуального дисплея…</string>
     <string name="status_starting_vd">Запуск віртуального дисплея…</string>
     <string name="status_vd_failed">Помилка VD сервера</string>
     <string name="status_waiting_video">Очікування відеопотоку…</string>
-    <string name="status_updating_please_wait">Оновлення застосунку авто… Будь ласка, зачекайте</string>
     <string name="action_uninstall">Видалити</string>
     <string name="action_app_info">Відомості</string>
+    <string name="home_allowlist_empty">No apps allowed. Open the phone app and select apps in Settings > Car app allowlist.</string>
 </resources>

@@ -4,19 +4,13 @@ import java.io.Closeable
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.security.KeyFactory
 import java.security.KeyPair
-import java.security.KeyPairGenerator
-import java.security.MessageDigest
 import java.security.PrivateKey
-import java.security.PublicKey
-import java.security.Signature
-import java.security.spec.PKCS8EncodedKeySpec
-import java.security.spec.X509EncodedKeySpec
 
 /**
  * Persistent ADB connection over TCP that reuses a single socket for all commands.
@@ -24,8 +18,19 @@ import java.security.spec.X509EncodedKeySpec
  * and sends all shell commands through it.
  *
  * Shares ADB protocol constants and encoding with AdbProtocol/UsbAdbConnection.
+ * The AUTH handshake, Android public-key encoding, and fingerprint hash live in
+ * [AdbCrypto] so they cannot silently diverge from [UsbAdbConnection].
+ *
+ * Key *storage* policy is TCP-specific: keys are written as PEM so they remain
+ * readable by Dadb (which the car's dev-mode installer uses). UsbAdbConnection
+ * has its own storage rules; the two intentionally do not share that logic.
+ *
+ * `open` is a deliberate test seam: `RemoteAdbControllerTransportFailureTest`
+ * substitutes a scripted fake to pin the transport-failure contract (a `-1`
+ * from [shell]/[shellBackground] must mark the connection dead) without a
+ * live adbd. Production always uses this class directly.
  */
-class TcpAdbConnection(
+open class TcpAdbConnection(
     private val host: String,
     private val port: Int,
     private val keyDir: File
@@ -33,10 +38,17 @@ class TcpAdbConnection(
     private var socket: Socket? = null
     private var maxPayload = AdbProtocol.MAX_PAYLOAD
     private var authSignatureSent = false
+    private val streamData = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.BlockingQueue<ByteArray>>()
+    private val streamPeerIds = java.util.concurrent.ConcurrentHashMap<Int, Int>()
+    private val streamClosed = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
+    private val streamOpenLatch = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.CountDownLatch>()
+    private val writeLock = Any()
+    @Volatile private var readerRunning = false
+    private var readerThread: Thread? = null
 
     val isConnected: Boolean get() = socket?.isConnected == true && !socket!!.isClosed
 
-    fun connect(): Boolean {
+    open fun connect(): Boolean {
         try {
             val sock = Socket()
             sock.connect(InetSocketAddress(host, port), 5000)
@@ -45,18 +57,14 @@ class TcpAdbConnection(
             socket = sock
             val keyPair = getOrCreateKeyPair()
             // Send CNXN
-            sock.getOutputStream().write(AdbProtocol.encodeConnect())
+            writeRaw(AdbProtocol.encodeConnect())
             // Handle AUTH + CNXN response
             while (true) {
                 val msg = readMessage()
                 when (msg.command) {
                     AdbProtocol.A_CNXN -> {
-                        val data = msg.data
-                        if (data != null && data.size >= 8) {
-                            val peerMax = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).getInt(4)
-                            maxPayload = minOf(peerMax, AdbProtocol.MAX_PAYLOAD)
-                        }
-                        if (maxPayload < 1) maxPayload = AdbProtocol.MAX_PAYLOAD
+                        maxPayload = negotiateMaxPayload(msg.data)
+                        startReaderThread()
                         return true
                     }
                     AdbProtocol.A_AUTH -> {
@@ -74,189 +82,232 @@ class TcpAdbConnection(
         }
     }
 
-    /** Execute a shell command synchronously. Returns exit code (0 = success, -1 = error). */
-    fun shell(command: String): Int {
-        val sock = socket ?: return -1
-        val localId = nextLocalId
-        return try {
-            synchronized(sock) {
-                // OPEN shell stream
-                val openBytes = "shell:$command".toByteArray()
-                sock.getOutputStream().write(
-                    AdbProtocol.encode(AdbProtocol.A_OPEN, localId, 0, openBytes))
-                // Read response: OKAY opens stream, then WRTE for data, CLSE when done
-                var exitCode = -1
-                val output = StringBuilder()
-                while (true) {
+    private fun startReaderThread() {
+        readerRunning = true
+        readerThread = Thread({
+            try {
+                while (readerRunning && isConnected) {
                     val msg = readMessage()
-                    when (msg.command) {
-                        AdbProtocol.A_OKAY -> { /* stream opened, continue reading */ }
-                        AdbProtocol.A_WRTE -> {
-                            msg.data?.let { output.append(String(it)) }
-                        }
-                        AdbProtocol.A_CLSE -> {
-                            // CLSE payload may contain exit code
-                            exitCode = 0
-                            break
-                        }
-                        else -> break
-                    }
+                    handleIncomingMessage(msg)
                 }
-                exitCode
+            } catch (_: Exception) {
+            } finally {
+                cleanupStreams()
             }
+        }, "TcpAdb-Reader").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun handleIncomingMessage(msg: AdbMessage) {
+        val localId = msg.arg1
+        val peerRemoteId = msg.arg0
+        when (msg.command) {
+            AdbProtocol.A_OKAY -> {
+                streamPeerIds[localId] = peerRemoteId
+                streamOpenLatch[localId]?.countDown()
+            }
+            AdbProtocol.A_WRTE -> {
+                streamPeerIds[localId] = peerRemoteId
+                val queue = streamData[localId]
+                msg.data?.let { queue?.offer(it) }
+                writeRaw(AdbProtocol.encode(AdbProtocol.A_OKAY, localId, peerRemoteId, null))
+            }
+            AdbProtocol.A_CLSE -> {
+                streamClosed[localId] = true
+                streamPeerIds[localId] = peerRemoteId
+                streamOpenLatch[localId]?.countDown()
+                streamData[localId]?.offer(ByteArray(0))
+            }
+        }
+    }
+
+    /** Execute a shell command synchronously. Returns exit code (0 = stream closed, -1 = error). */
+    @JvmOverloads
+    open fun shell(command: String, outputSink: StringBuilder? = null): Int {
+        if (!isConnected) return -1
+        val localId = nextLocalId()
+        val queue = java.util.concurrent.LinkedBlockingQueue<ByteArray>()
+        val openLatch = java.util.concurrent.CountDownLatch(1)
+        streamData[localId] = queue
+        streamClosed[localId] = false
+        streamOpenLatch[localId] = openLatch
+
+        return try {
+            val openBytes = "shell:$command".toByteArray(Charsets.UTF_8)
+            writeRaw(AdbProtocol.encode(AdbProtocol.A_OPEN, localId, 0, openBytes))
+
+            if (!openLatch.await(10, java.util.concurrent.TimeUnit.SECONDS) || streamClosed[localId] == true) {
+                return -1
+            }
+
+            val deadline = System.currentTimeMillis() + 30000L
+            val output = outputSink ?: StringBuilder()
+            while (streamClosed[localId] != true && System.currentTimeMillis() < deadline) {
+                val chunk = queue.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+                if (chunk != null && chunk.isNotEmpty()) {
+                    output.append(String(chunk, Charsets.UTF_8))
+                }
+            }
+            if (streamClosed[localId] == true) 0 else -1
         } catch (e: Exception) {
             -1
+        } finally {
+            streamData.remove(localId)
+            streamPeerIds.remove(localId)
+            streamClosed.remove(localId)
+            streamOpenLatch.remove(localId)
         }
     }
 
     /** Start a long-running shell command. Keeps the stream open so the process survives.
      *  Returns the local stream ID if successful, -1 on failure. */
-    fun shellBackground(command: String): Int {
-        val sock = socket ?: return -1
-        val localId = nextLocalId
+    open fun shellBackground(command: String): Int {
+        if (!isConnected) return -1
+        val localId = nextLocalId()
+        val queue = java.util.concurrent.ArrayBlockingQueue<ByteArray>(64)
+        val openLatch = java.util.concurrent.CountDownLatch(1)
+        streamData[localId] = queue
+        streamClosed[localId] = false
+        streamOpenLatch[localId] = openLatch
+
         return try {
-            synchronized(sock) {
-                val openBytes = "shell:$command".toByteArray()
-                sock.getOutputStream().write(
-                    AdbProtocol.encode(AdbProtocol.A_OPEN, localId, 0, openBytes))
-                val msg = readMessage()
-                if (msg.command == AdbProtocol.A_OKAY) {
-                    localId
-                } else {
-                    -1
-                }
+            val openBytes = "shell:$command".toByteArray(Charsets.UTF_8)
+            writeRaw(AdbProtocol.encode(AdbProtocol.A_OPEN, localId, 0, openBytes))
+
+            if (!openLatch.await(10, java.util.concurrent.TimeUnit.SECONDS) || streamClosed[localId] == true) {
+                streamData.remove(localId)
+                streamPeerIds.remove(localId)
+                streamClosed.remove(localId)
+                streamOpenLatch.remove(localId)
+                -1
+            } else {
+                localId
             }
         } catch (e: Exception) {
+            streamData.remove(localId)
+            streamPeerIds.remove(localId)
+            streamClosed.remove(localId)
+            streamOpenLatch.remove(localId)
             -1
         }
     }
 
     /** Fire-and-forget shell command. Returns true if OPEN+OKAY succeeded. */
-    fun shellNoWait(command: String): Boolean {
+    open fun shellNoWait(command: String): Boolean {
         return shellBackground(command) >= 0
     }
 
     override fun close() {
+        readerRunning = false
         try { socket?.close() } catch (_: Exception) {}
         socket = null
+        cleanupStreams()
+        try { readerThread?.interrupt() } catch (_: Exception) {}
+        readerThread = null
     }
 
-    // ── Message I/O ──
+    private fun cleanupStreams() {
+        for (latch in streamOpenLatch.values) {
+            latch.countDown()
+        }
+        for (key in streamClosed.keys) {
+            streamClosed[key] = true
+        }
+        for (queue in streamData.values) {
+            queue.offer(ByteArray(0))
+        }
+        streamData.clear()
+        streamPeerIds.clear()
+        streamClosed.clear()
+        streamOpenLatch.clear()
+    }
+
+    // -- Message I/O --
 
     data class AdbMessage(val command: Int, val arg0: Int, val arg1: Int, val data: ByteArray?)
 
     private fun readMessage(): AdbMessage {
-        val header = ByteArray(24)
-        readFully(header)
-        val buf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
-        val command = buf.getInt()
-        val arg0 = buf.getInt()
-        val arg1 = buf.getInt()
-        val dataLen = buf.getInt()
-        // skip checksum and magic
-        val data = if (dataLen > 0) {
-            val d = ByteArray(dataLen)
-            readFully(d)
-            d
-        } else null
-        return AdbMessage(command, arg0, arg1, data)
-    }
-
-    private fun readFully(buf: ByteArray) {
-        var off = 0
         val inp = socket?.getInputStream() ?: throw IllegalStateException("Not connected")
-        while (off < buf.size) {
-            val n = inp.read(buf, off, buf.size - off)
-            if (n < 0) throw java.io.EOFException("ADB connection closed")
-            off += n
-        }
+        return readMessageFrom(inp)
     }
 
-    private var localIdCounter = 1
-    private val nextLocalId: Int get() = localIdCounter++
+    private val nextLocalId = java.util.concurrent.atomic.AtomicInteger(1)
+    private fun nextLocalId(): Int = nextLocalId.getAndIncrement()
 
-    // ── AUTH (same logic as UsbAdbConnection) ──
+    // -- AUTH (delegated to AdbCrypto; shared with UsbAdbConnection) --
 
     private fun handleAuth(type: Int, data: ByteArray, keyPair: KeyPair) {
-        if (type == AdbProtocol.AUTH_TOKEN) {
-            if (!authSignatureSent) {
-                // Sign token with stored key (SHA-1 DigestInfo + NONEwithRSA)
-                val sha1DigestInfo = byteArrayOf(
-                    0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e,
-                    0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14
-                )
-                val toSign = sha1DigestInfo + data
-                val sig = Signature.getInstance("NONEwithRSA").apply {
-                    initSign(keyPair.private)
-                    update(toSign)
-                }
-                writeRaw(AdbProtocol.encodeAuth(AdbProtocol.AUTH_SIGNATURE, sig.sign()))
-                authSignatureSent = true
-            } else {
-                // Signature rejected — send public key for user approval
-                val pubKey = encodePublicKey(keyPair.public)
-                writeRaw(AdbProtocol.encodeAuth(AdbProtocol.AUTH_RSAPUBLICKEY, pubKey))
-            }
-        }
+        // Reply sequencing (sign token first, public key on the second challenge)
+        // is shared with UsbAdbConnection via AdbCrypto.buildAuthReply.
+        val reply = AdbCrypto.buildAuthReply(type, data, keyPair, authSignatureSent) ?: return
+        writeRaw(AdbProtocol.encodeAuth(reply.authType, reply.payload))
+        authSignatureSent = true
     }
 
     private fun writeRaw(data: ByteArray) {
-        socket?.getOutputStream()?.write(data)
+        synchronized(writeLock) {
+            val sock = socket ?: return
+            val out = sock.getOutputStream()
+            out.write(data)
+            out.flush()
+        }
     }
 
-    // ── Key management (shared logic with UsbAdbConnection) ──
+    // -- Key management (Tcp-specific: PEM storage for Dadb compatibility) --
 
     companion object {
         // Use same key file name as Dadb and UsbAdbConnection for compatibility
         private const val KEY_FILE = "adbkey"
 
-        /** SHA-1 fingerprint of a DER-encoded public key */
-        fun fingerprint(der: ByteArray): String =
-            MessageDigest.getInstance("SHA-1").digest(der)
-                .joinToString("") { "%02x".format(it) }
+        /** SHA-1 fingerprint of a DER-encoded public key (delegates to AdbCrypto). */
+        fun fingerprint(der: ByteArray): String = AdbCrypto.fingerprint(der)
 
-        // ANDROID_PUBKEY constants matching UsbAdbConnection
-        private const val ANDROID_PUBKEY_MODULUS_SIZE = 256 // 2048 bits / 8
-        private const val ANDROID_PUBKEY_MODULUS_SIZE_WORDS = ANDROID_PUBKEY_MODULUS_SIZE / 4
-
-        /** Encode RSA public key in Android ADB format (ANDROID_PUBKEY).
-         *  Reference: AOSP libcrypto_utils/android_pubkey.cpp */
-        fun encodePublicKey(publicKey: PublicKey): ByteArray {
-            val rsaKey = publicKey as java.security.interfaces.RSAPublicKey
-            val n = rsaKey.modulus
-            val e = rsaKey.publicExponent
-            val r32 = java.math.BigInteger.ONE.shiftLeft(32)
-
-            // n0inv = -1/n[0] mod 2^32 (Montgomery reduction parameter)
-            val n0inv = r32.subtract(n.mod(r32).modInverse(r32)).toInt()
-
-            // rr = (2^2048)^2 mod n = 2^4096 mod n
-            val rr = java.math.BigInteger.ONE
-                .shiftLeft(ANDROID_PUBKEY_MODULUS_SIZE * 8)
-                .modPow(java.math.BigInteger.valueOf(2), n)
-
-            val modulusLE = bigIntToLEPadded(n)
-            val rrLE = bigIntToLEPadded(rr)
-
-            val struct = ByteBuffer.allocate(4 + 4 + ANDROID_PUBKEY_MODULUS_SIZE + ANDROID_PUBKEY_MODULUS_SIZE + 4)
-                .order(ByteOrder.LITTLE_ENDIAN)
-            struct.putInt(ANDROID_PUBKEY_MODULUS_SIZE_WORDS)
-            struct.putInt(n0inv)
-            struct.put(modulusLE)
-            struct.put(rrLE)
-            struct.putInt(e.toInt())
-
-            val base64 = android.util.Base64.encodeToString(struct.array(), android.util.Base64.NO_WRAP)
-            return "$base64 DiLinkAuto@car ".toByteArray()
+        /**
+         * Negotiate the max payload from a peer's CNXN banner (pure, injectable).
+         * Behavior-identical to the previously inline connect() logic, lifted so
+         * it can be unit-tested without a socket.
+         */
+        internal fun negotiateMaxPayload(cnxnData: ByteArray?): Int {
+            var m = AdbProtocol.MAX_PAYLOAD
+            if (cnxnData != null && cnxnData.size >= 8) {
+                val peerMax = ByteBuffer.wrap(cnxnData).order(ByteOrder.LITTLE_ENDIAN).getInt(4)
+                m = minOf(peerMax, AdbProtocol.MAX_PAYLOAD)
+            }
+            return if (m < 1) AdbProtocol.MAX_PAYLOAD else m
         }
 
-        private fun bigIntToLEPadded(bi: java.math.BigInteger): ByteArray {
-            val bytes = ByteArray(ANDROID_PUBKEY_MODULUS_SIZE)
-            val raw = bi.toByteArray() // big-endian, may have leading zero
-            // Skip leading zero byte if present (sign byte for unsigned big integers)
-            val src = if (raw[0] == 0.toByte()) raw.copyOfRange(1, raw.size) else raw
-            for (i in src.indices) bytes[i] = src[src.size - 1 - i] // reverse to little-endian
-            return bytes
+        /**
+         * Read + parse one ADB message from [inp] (pure over an InputStream, no
+         * socket). Fails fast on bad magic / oversized data_len (parseHeader) and
+         * on a payload CRC mismatch. Behavior-identical to the instance
+         * readMessage(), which now delegates here.
+         */
+        internal fun readMessageFrom(inp: java.io.InputStream): AdbMessage {
+            val header = readFullyFrom(inp, ByteArray(AdbProtocol.HEADER_SIZE))
+            val parsed = AdbProtocol.parseHeader(header)
+                ?: throw IOException("Malformed ADB header (bad magic or oversized data_len)")
+            val dataLen = parsed[3]
+            val dataCrc = parsed[4]
+            val data = if (dataLen > 0) {
+                val d = readFullyFrom(inp, ByteArray(dataLen))
+                if (AdbProtocol.checksum(d) != dataCrc) {
+                    throw IOException("ADB payload CRC mismatch (len=$dataLen)")
+                }
+                d
+            } else null
+            return AdbMessage(parsed[0], parsed[1], parsed[2], data)
+        }
+
+        private fun readFullyFrom(inp: java.io.InputStream, buf: ByteArray): ByteArray {
+            var off = 0
+            while (off < buf.size) {
+                val n = inp.read(buf, off, buf.size - off)
+                if (n < 0) throw java.io.EOFException("ADB connection closed")
+                off += n
+            }
+            return buf
         }
     }
 
@@ -267,10 +318,9 @@ class TcpAdbConnection(
 
         if (privFile.exists() && pubFile.exists()) {
             return try {
-                val kf = KeyFactory.getInstance("RSA")
-                val pubKey = kf.generatePublic(X509EncodedKeySpec(readKeyBytes(pubFile)))
-                val privKey = kf.generatePrivate(PKCS8EncodedKeySpec(readKeyBytes(privFile)))
-                KeyPair(pubKey, privKey)
+                // Keypair load/generate primitives live in AdbCrypto (shared with
+                // UsbAdbConnection); only the PEM/DER storage format differs here.
+                AdbCrypto.loadKeyPair(readKeyBytes(privFile), readKeyBytes(pubFile))
             } catch (e: Exception) {
                 generateAndStore(privFile, pubFile)
             }
@@ -293,10 +343,10 @@ class TcpAdbConnection(
     }
 
     private fun generateAndStore(privFile: File, pubFile: File): KeyPair {
-        val kpg = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }
-        val kp = kpg.generateKeyPair()
-        // Save in DER format (compatible with both PEM-aware and direct readers)
-        // Also save in PEM for Dadb compatibility
+        val kp = AdbCrypto.generateKeyPair()
+        // Save in PEM format (compatible with both PEM-aware and direct readers).
+        // Dadb reads PEM; the AdbCrypto auth path only ever uses the in-memory
+        // KeyPair, so the on-disk format is chosen for Dadb compatibility.
         saveKey(privFile, kp.private)
         saveKey(pubFile, kp.public)
         return kp
@@ -305,9 +355,9 @@ class TcpAdbConnection(
     private fun saveKey(file: File, key: java.security.Key) {
         val encoded = key.encoded
         val b64 = android.util.Base64.encodeToString(encoded, android.util.Base64.DEFAULT)
-        val pem = "-----BEGIN ${if (key is java.security.PrivateKey) "RSA PRIVATE" else "PUBLIC"} KEY-----\n" +
+        val pem = "-----BEGIN ${if (key is PrivateKey) "RSA PRIVATE" else "PUBLIC"} KEY-----\n" +
                 b64 +
-                "-----END ${if (key is java.security.PrivateKey) "RSA PRIVATE" else "PUBLIC"} KEY-----\n"
+                "-----END ${if (key is PrivateKey) "RSA PRIVATE" else "PUBLIC"} KEY-----\n"
         file.writeText(pem)
     }
 }

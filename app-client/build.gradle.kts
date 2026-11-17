@@ -1,6 +1,17 @@
+import java.net.URLClassLoader
+import java.io.FileOutputStream
+import java.util.zip.ZipOutputStream
+import java.util.zip.ZipEntry
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// 变体判据：本次构建是否请求了 release 变体。签名配置与内嵌车机包都用它，
+// 保证「release 客户端装 release 车机包」这一对签名关系不会分叉（issue #37）。
+val wantsReleaseBuild = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true)
 }
 
 android {
@@ -11,12 +22,32 @@ android {
         applicationId = "com.dilinkauto.client"
         minSdk = 29
         targetSdk = 34
-        versionCode = project.property("app.versionCode").toString().toInt()
-        versionName = project.property("app.versionName").toString()
+        // 版本号由根 build.gradle.kts 单点算出（issue #224）：
+        // versionName 是日期-时间，versionCode 从它派生，两个模块保证同源。
+        versionCode = rootProject.extra["appVersionCode"] as Int
+        versionName = rootProject.extra["appVersionName"] as String
+        // issue #8: 日志可读版本号。BUILD_REVISION 由根 build.gradle.kts 单点算出，
+        // app-client 与 vd-server 同源；VERSION_NAME/VERSION_CODE 已由 AGP 自动生成。
+        buildConfigField("String", "BUILD_REVISION",
+            "\"${rootProject.extra["buildRevision"]}\"")
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+        }
     }
 
     val releaseKeystorePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
     val releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+    val wantsRelease = gradle.startParameter.taskNames.any {
+        it.contains("release", ignoreCase = true)
+    }
+    // 显式放行「release 变体 + debug 签名」：只在本地想拿混淆后的安装包、又拿不到
+    // 正式 keystore 口令时使用。必须显式设 ALLOW_DEBUG_SIGNED_RELEASE=1 才生效，
+    // 默认行为仍是缺口令即失败（audit B-12），不会静默产出 unsigned 包。
+    val allowDebugSignedRelease = System.getenv("ALLOW_DEBUG_SIGNED_RELEASE") == "1"
     if (releaseKeystorePassword != null && releaseKeyPassword != null) {
         signingConfigs {
             create("release") {
@@ -26,6 +57,22 @@ android {
                 keyPassword = releaseKeyPassword
             }
         }
+    } else if (wantsRelease && !allowDebugSignedRelease) {
+        // Audit B-12: without this the release build silently produced an
+        // UNSIGNED APK (uninstallable over a properly signed build, and
+        // publishable to a release channel by accident). A release build with
+        // no signing configuration is always a mistake — fail at configuration
+        // time with the exact variables that are missing.
+        throw GradleException(
+            "Release build requested but RELEASE_KEYSTORE_PASSWORD / " +
+                "RELEASE_KEY_PASSWORD are not set. Set both (the keystore " +
+                "itself is never committed — see docs/release.md)."
+        )
+    } else {
+        logger.lifecycle(
+            "[signing] release signing env vars not set — debug builds use the default " +
+                "debug key; release builds would fail fast (audit B-12)."
+        )
     }
 
     buildTypes {
@@ -44,6 +91,12 @@ android {
     signingConfigs.findByName("release")?.let { releaseConfig ->
         buildTypes.getByName("release").signingConfig = releaseConfig
         buildTypes.getByName("debug").signingConfig = releaseConfig
+    }
+    // 没有正式 keystore、但显式放行了 debug 签名：release 变体改用 debug key 签，
+    // 否则 AGP 会产出装不上的 -unsigned.apk。
+    if (signingConfigs.findByName("release") == null && allowDebugSignedRelease && wantsRelease) {
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("debug")
+        logger.lifecycle("[signing] ALLOW_DEBUG_SIGNED_RELEASE=1 — release 变体使用 debug key 签名")
     }
 
     buildFeatures {
@@ -66,6 +119,9 @@ android {
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
         )
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -86,6 +142,9 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:aidl:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
 }
 
 // Build the VD server JAR and copy to assets before the client APK is assembled.
@@ -93,10 +152,20 @@ dependencies {
 // This task just runs d8 + jar packaging.
 tasks.register("buildVdServer") {
     dependsOn(":vd-server:bundleLibRuntimeToJarDebug")
+    // 下面 doLast 直接读 :protocol 的 debug classes.jar；只依赖 :vd-server 的 debug
+    // 任务时，release-only 构建里这个 jar 可能不在任务图里，D8 会以
+    // NoSuchFileException 失败（本地 release 构建复现，issue #37 验证时发现）。
+    dependsOn(":protocol:bundleLibRuntimeToJarDebug")
+    // :protocol-core 是纯 JVM 模块（PlatformLog 等协议基元都在这里）。Phase 0 把它
+    // 从 :protocol 拆出后，下面那份 inputs 曾漏掉它 —— 编译期正常、d8 也正常，直到
+    // app_process 启动 vd-server 时才以 NoClassDefFoundError: PlatformLog 崩掉，
+    // 且因为崩在最早一行日志之前，vd-server.log 完全空白，极难定位。
+    dependsOn(":protocol-core:jar")
 
     val vdBuildDir = file("${rootDir}/vd-server/build/tmp/vds-d8")
     val vdClassesJar = file("${rootDir}/vd-server/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
     val protocolJar = file("${rootDir}/protocol/build/intermediates/runtime_library_classes_jar/debug/classes.jar")
+    val protocolCoreJar = file("${rootDir}/protocol-core/build/libs/protocol-core.jar")
     val d8Jar = file("${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/lib/d8.jar")
     val assetsDir = file("src/main/assets")
 
@@ -115,13 +184,18 @@ tasks.register("buildVdServer") {
         // Clean stale artifacts from assets
         file("${assetsDir}/vd-server.dex").delete()
 
-        // DEX vd-server + protocol + kotlin stdlib (needed for app_process runtime)
-        exec {
-            val inputs = listOf(vdClassesJar.absolutePath, protocolJar.absolutePath) +
-                kotlinLibs.map { it.absolutePath }
-            commandLine(listOf("java", "-cp", d8Jar.absolutePath,
-                "com.android.tools.r8.D8",
-                "--output", vdBuildDir.absolutePath) + inputs)
+        // DEX vd-server + protocol + protocol-core + kotlin stdlib (needed for app_process runtime)
+        val inputs = listOf(vdClassesJar.absolutePath, protocolJar.absolutePath, protocolCoreJar.absolutePath) +
+            kotlinLibs.map { it.absolutePath }
+        val d8Args = (listOf("--output", vdBuildDir.absolutePath) + inputs).toTypedArray()
+
+        val d8ClassLoader = URLClassLoader(arrayOf(d8Jar.toURI().toURL()), javaClass.classLoader)
+        try {
+            val d8Class = d8ClassLoader.loadClass("com.android.tools.r8.D8")
+            val mainMethod = d8Class.getMethod("main", Array<String>::class.java)
+            mainMethod.invoke(null, d8Args)
+        } finally {
+            d8ClassLoader.close()
         }
 
         // Rename to vd-server.dex (delete old first — renameTo fails silently on Windows if dest exists)
@@ -135,17 +209,11 @@ tasks.register("buildVdServer") {
 
         // Create JAR (ZIP containing vd-server.dex as classes.dex)
         val jarFile = file("${vdBuildDir}/vd-server.jar")
-        val jarClassesDex = file("${vdBuildDir}/classes.dex")
         jarFile.delete()
-        jarClassesDex.delete()
-        try {
-            serverDex.copyTo(jarClassesDex, overwrite = true)
-            exec {
-                workingDir(vdBuildDir)
-                commandLine("jar", "cf", "vd-server.jar", "classes.dex")
-            }
-        } finally {
-            jarClassesDex.delete()
+        ZipOutputStream(FileOutputStream(jarFile)).use { zos ->
+            zos.putNextEntry(ZipEntry("classes.dex"))
+            serverDex.inputStream().use { it.copyTo(zos) }
+            zos.closeEntry()
         }
 
         // Copy to phone app assets only (car deploys it over USB-ADB)
@@ -157,22 +225,42 @@ tasks.register("buildVdServer") {
 }
 
 // Embed the car (server) APK in client assets so the phone can auto-install it on the car
+//
+// Audit B-05: a missing source APK used to be a println warning, so a release
+// build could silently ship a *stale* app-server.apk left over from a previous
+// run; the target is now deleted before the check and a missing source is a
+// hard build error.
+//
+// issue #37: 内嵌的车机包必须与客户端变体同签名。release 客户端内嵌
+// app-server-release.apk（正式签名），debug 客户端内嵌 app-server-debug.apk，
+// 否则手机把 debug 签名的车机包装到已装正式签名包的车上会被 PM 以
+// INSTALL_FAILED_UPDATE_INCOMPATIBLE 拒绝。
+val serverVariant = if (wantsReleaseBuild) "release" else "debug"
+val serverVariantTask = "assemble" + serverVariant.replaceFirstChar { it.uppercase() }
 tasks.register("embedServerApk") {
-    dependsOn(":app-server:assembleDebug")
-    val serverApk = file("${rootDir}/app-server/build/outputs/apk/debug/app-server-debug.apk")
+    dependsOn(":app-server:$serverVariantTask")
+    val serverApk = file("${rootDir}/app-server/build/outputs/apk/$serverVariant/app-server-$serverVariant.apk")
     val assetsDir = file("src/main/assets")
 
+    // Declared so Gradle can see what this task consumes/produces; still always
+    // runs (a stale embedded APK is worse than a re-copy).
+    inputs.file(serverApk).withPropertyName("serverApk")
+    outputs.file("${assetsDir}/app-server.apk").withPropertyName("embeddedApk")
     outputs.upToDateWhen { false }
 
     doLast {
         assetsDir.mkdirs()
         val target = file("${assetsDir}/app-server.apk")
-        if (serverApk.exists()) {
-            serverApk.copyTo(target, overwrite = true)
-            println("Server APK embedded: ${target.length()} bytes")
-        } else {
-            println("WARNING: Server APK not found at ${serverApk.absolutePath}")
+        // Delete first: a stale copy must never survive a failed embed.
+        if (target.exists()) target.delete()
+        if (!serverApk.exists()) {
+            throw GradleException(
+                "Server APK not found at ${serverApk.absolutePath} — " +
+                    "run :app-server:$serverVariantTask first. Refusing to embed a stale APK."
+            )
         }
+        serverApk.copyTo(target, overwrite = true)
+        println("Server APK embedded ($serverVariant variant): ${target.length()} bytes")
     }
 }
 

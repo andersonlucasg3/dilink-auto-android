@@ -11,7 +11,15 @@ permissions:
 
 jobs:
   build:
-    runs-on: self-hosted
+    # 纯门禁 workflow：push 与 pull_request 跑同一条 debug+test。
+    # 不再在 push 事件上跑 assembleRelease —— 发布 APK 是 tag 触发的
+    # build-release.yml / build-pre-release.yml 的职责，且 fork 上无
+    # RELEASE_* 签名 secret（actions/secrets total_count=0），assembleRelease
+    # 在 app-client/build.gradle.kts:54 会抛 GradleException，push 门禁必然红。
+    # 统一 ubuntu-latest：fork 没有 self-hosted runner（actions/runners
+    # total_count=0），push 分支走 self-hosted 会永远 queued，PR/push 都没有真门禁。
+    # Audit B-03 的 cache 投毒防护仍保留：PR 只读缓存，push 可写。
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +40,7 @@ jobs:
           export ANDROID_HOME=$HOME/android-sdk
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           if [ ! -f "$ANDROID_HOME/platforms/android-34/build.prop" ]; then
             wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/cmdline-tools.zip
             mkdir -p $ANDROID_HOME/cmdline-tools/latest
@@ -45,17 +53,16 @@ jobs:
               > /dev/null
           fi
 
-      - name: Build Release APK
+      # 门禁命令与 docs/PR_GUIDE.md「开 PR 前自查」对齐：debug 编译 + 单测。
+      # 不注入任何签名 secret —— 这条 job 不产发布产物，audit B-09/F-09 的
+      # 「secrets 不进 PR」要求在这里升级为「secrets 不进 build.yml」。
+      - name: Build and test
         run: |
           chmod +x gradlew
-          ./gradlew :app-client:assembleRelease
-        env:
-          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          ./gradlew :app-client:assembleDebug :app-client:testDebugUnitTest
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dilink-auto-client-release
-          path: app-client/build/outputs/apk/release/app-client-release.apk
+          name: dilink-auto-client-debug
+          path: app-client/build/outputs/apk/debug/app-client-*.apk

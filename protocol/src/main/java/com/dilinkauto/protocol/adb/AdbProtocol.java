@@ -83,7 +83,16 @@ public class AdbProtocol {
         return encode(A_CLSE, localId, remoteId, null);
     }
 
-    /** Parse a 24-byte ADB header. Returns null if invalid. */
+    /**
+     * Parse a 24-byte ADB header. Returns null if invalid.
+     *
+     * data_len is attacker/peer-controlled and used by every reader as a
+     * ByteArray allocation size; an unvalidated 0x7FFFFFFF made
+     * {@code ByteArray(dataLen)} throw OutOfMemoryError (an Error — not caught by
+     * the callers' {@code catch (Exception)}), and a negative value slipped past
+     * the callers' {@code > 0} guards. MAX_PAYLOAD is the protocol's own transfer
+     * limit, so anything larger is a broken or hostile peer.
+     */
     public static int[] parseHeader(byte[] header) {
         if (header.length < HEADER_SIZE) return null;
         ByteBuffer buf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
@@ -94,6 +103,7 @@ public class AdbProtocol {
         int dataCrc = buf.getInt();
         int magic = buf.getInt();
         if (magic != (command ^ 0xFFFFFFFF)) return null;
+        if (dataLen < 0 || dataLen > MAX_PAYLOAD) return null;
         return new int[]{command, arg0, arg1, dataLen, dataCrc};
     }
 

@@ -19,15 +19,19 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="false"
         android:theme="@style/Theme.DiLinkAuto">
 
-        <!-- Car launcher activity — fullscreen, immersive -->
+        <!-- Car launcher activity — fullscreen, immersive.
+             No screenOrientation lock: the car screen may be a rotatable panel.
+             configChanges lets MainActivity receive onConfigurationChanged on
+             rotation instead of being recreated, so it can re-handshake at the
+             new orientation without tearing down the bound service. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="landscape"
             android:theme="@style/Theme.DiLinkAuto.Fullscreen"
-            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
