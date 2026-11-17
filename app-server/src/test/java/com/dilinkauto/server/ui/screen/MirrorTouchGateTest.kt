@@ -43,6 +43,24 @@ class MirrorTouchGateTest {
     }
 
     @Test
+    fun `APP 按下未收到 UP 时残留会话不会吞 HOME 触摸`() {
+        val gate = MirrorTouchGate()
+        assertTrue(gate.shouldForward(MotionEvent.ACTION_DOWN, onAppScreen = true))
+        // 窗口失焦/被移除且没有 ACTION_UP：代理会调用 reset() 关闭会话。
+        gate.reset()
+        assertFalse(gate.shouldForward(MotionEvent.ACTION_DOWN, onAppScreen = false))
+    }
+
+    @Test
+    fun `HOME 按下后切到 APP，MOVE 与 UP 都不转发`() {
+        val gate = MirrorTouchGate()
+        // HOME 的空区按下不建立会话，切到 APP 后也不能补发尾段。
+        assertFalse(gate.shouldForward(MotionEvent.ACTION_DOWN, onAppScreen = false))
+        assertFalse(gate.shouldForward(MotionEvent.ACTION_MOVE, onAppScreen = true))
+        assertFalse(gate.shouldForward(MotionEvent.ACTION_UP, onAppScreen = true))
+    }
+
+    @Test
     fun `APP 页多指抬手不结束会话`() {
         val gate = MirrorTouchGate()
         assertTrue(gate.shouldForward(MotionEvent.ACTION_DOWN, onAppScreen = true))

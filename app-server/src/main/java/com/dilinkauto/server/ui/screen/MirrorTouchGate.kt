@@ -41,4 +41,14 @@ internal class MirrorTouchGate {
         }
         else -> false
     }
+
+    /**
+     * 关闭当前会话。
+     *
+     * 窗口失焦或被移除时不会再有 ACTION_UP/CANCEL 送达，必须主动复位，
+     * 否则残留的 pressed 会让下一次 APP 页按下在手机侧多出一个未配对的 DOWN。
+     */
+    fun reset() {
+        pressed = false
+    }
 }

@@ -102,6 +102,39 @@ private class MirrorContainer(
     }
 }
 
+/** 透明触摸代理：接收手势交给 [MirrorTouchGate]，并在失焦/脱离窗口时复位会话。 */
+private class MirrorTouchProxy(
+    context: Context,
+    private val gate: MirrorTouchGate,
+    private val service: CarConnectionService,
+    private val touchState: MirrorTouchState
+) : View(context) {
+
+    init {
+        setOnTouchListener { view, event ->
+            if (!gate.shouldForward(event.actionMasked, touchState.onAppScreen)) {
+                // 不接管这次手势，返回 false 不消费。HOME 页的磁贴/滚动/搜索框由
+                // Compose 命中测试优先处理，事件不会到达代理；代理只会接到这些控件
+                // 之间空白区域的按下事件，此时同样保持不消费。
+                return@setOnTouchListener false
+            }
+            forwardTouch(view, event, service)
+        }
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        // 失焦后不会再有 ACTION_UP/CANCEL 送达，主动结束会话，
+        // 否则下一次 APP 页按下会在手机侧多出一个未配对的 DOWN。
+        if (!hasWindowFocus) gate.reset()
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        gate.reset()
+    }
+}
+
 private fun createMirrorContainer(
     context: Context,
     service: CarConnectionService,
@@ -143,17 +176,7 @@ private fun createMirrorContainer(
     // issue #217：透明触摸代理，始终覆盖在 SurfaceView 之上。SurfaceView 因切页变
     // INVISIBLE 时它仍然接收 MotionEvent，因此 surface 重建期间触摸也不会断。
     val gate = MirrorTouchGate()
-    val touchProxy = View(context).apply {
-        setOnTouchListener { view, event ->
-            if (!gate.shouldForward(event.actionMasked, touchState.onAppScreen)) {
-                // 不接管这次手势，返回 false 不消费。HOME 页的磁贴/滚动/搜索框由
-                // Compose 命中测试优先处理，事件不会到达代理；代理只会接到这些控件
-                // 之间空白区域的按下事件，此时同样保持不消费。
-                return@setOnTouchListener false
-            }
-            forwardTouch(view, event, service)
-        }
-    }
+    val touchProxy = MirrorTouchProxy(context, gate, service, touchState)
 
     return MirrorContainer(context, surfaceView, touchProxy)
 }
