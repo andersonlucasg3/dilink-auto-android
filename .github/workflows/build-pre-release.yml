@@ -1,5 +1,11 @@
 name: Build (Pre-Release)
 
+# 预发布流水线：dev 形态的语义化 tag（vX.Y.Z-dev-N）。
+#
+# issue #224 把日常发版的版本号换成日期-时间（vYYYYMMDD-HHMM），那条路径走
+# build-release.yml；本条流水线只为历史/特殊情况保留旧形态，因此 tag 过滤
+# 与版本串校验都保持原样。app.versionName 现在只放日期格式，故 TAG_BASE
+# 与 FILE_BASE 的比对在日期版本上必然不等 —— 这是刻意的：日期版本不该从这里出去。
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+-dev*']
@@ -96,8 +102,15 @@ jobs:
             exit 1
           fi
 
-          VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
-
+          # issue #224：app.versionCode 已从 gradle.properties 移除，versionCode 由
+          # versionName 派生（YYMMDDHH）。日期版本直接算；非日期版本回退读旧键。
+          FILE_VERSION=$(grep 'app.versionName' gradle.properties | sed 's/.*=//')
+          if printf '%s' "$FILE_VERSION" | grep -Eq '^[0-9]{8}-[0-9]{4}$'; then
+            VERSION_CODE="${FILE_VERSION:2:6}${FILE_VERSION:9:2}"
+          else
+            VERSION_CODE=$(grep 'app.versionCode' gradle.properties | sed 's/.*=//')
+            [ -n "$VERSION_CODE" ] || { echo "ERROR: 无法确定 versionCode（issue #224）" >&2; exit 1; }
+          fi
           git fetch --tags origin 2>/dev/null || true
           PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tail -1)
           if [ -n "$PREV_TAG" ]; then

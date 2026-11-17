@@ -11,8 +11,9 @@ android {
         applicationId = "com.dilinkauto.server"
         minSdk = 26
         targetSdk = 34
-        versionCode = project.property("app.versionCode").toString().toInt()
-        versionName = project.property("app.versionName").toString()
+        // 版本号由根 build.gradle.kts 单点算出（issue #224），与 app-client 同源。
+        versionCode = rootProject.extra["appVersionCode"] as Int
+        versionName = rootProject.extra["appVersionName"] as String
 
         // 高德 Web 服务 key（天气城市反查用，issue #157）。来源优先级：
         // `-Pamap.key=` > `local.properties` 的 `amap.key` > 环境变量 `AMAP_KEY`。

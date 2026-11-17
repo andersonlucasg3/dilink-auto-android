@@ -85,7 +85,7 @@ What this means in practice:
 
 The `buildVdServer` task compiles `vd-server/` to `vd-server.dex`, packages it as `vd-server.jar`, and copies it into `app-client/src/main/assets/`. The `embedServerApk` task bundles `app-server.apk` into the client assets the same way. Only the phone APK needs to be installed manually — the car APK and VD server jar are pushed/embedded automatically.
 
-Release builds require the `RELEASE_KEYSTORE_PASSWORD` and `RELEASE_KEY_PASSWORD` environment variables to be set; if either is missing the build fails immediately instead of producing an unsigned APK. The keystore itself is never committed — it lives only in CI secrets. Current version: `1.0.3` (versionCode 62). See [./release.md](./release.md) for the full signing and release procedure.
+Release builds require the `RELEASE_KEYSTORE_PASSWORD` and `RELEASE_KEY_PASSWORD` environment variables to be set; if either is missing the build fails immediately instead of producing an unsigned APK. The keystore itself is never committed — it lives only in CI secrets. Current version: `20261117-2247` (versionCode `26111722`, derived from the date in `app.versionName`). See [./release.md](./release.md) for the full signing and release procedure.
 
 > Upgrading from a debug-signed build to the officially signed one requires uninstalling the old app first — the certificates differ, so the install fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
 

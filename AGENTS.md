@@ -22,7 +22,7 @@
 - 不提交真实域名、车牌、群号等隐私信息；提交前自查。
 - **正式签名 keystore 与口令绝不入库**：keystore 只在发布者本机与 GitHub Actions secrets，仓库里只允许出现变量名与路径模板。
 - **对外发布的包必须是正式签名**：`ALLOW_DEBUG_SIGNED_RELEASE=1` 只用于本地应急，任何 Release 资产都要用 `apksigner verify --print-certs` 校验证书指纹。
-- **发版前必须 bump `gradle.properties` 版本号**，且工作区 `git status --porcelain` 为空（否则包版本串带 `-dirty`）。
+- **发版前必须把 `gradle.properties` 的 `app.versionName` 改成当前时间**（`YYYYMMDD-HHMM`，`versionCode` 自动派生），且工作区 `git status --porcelain` 为空（否则包版本串带 `-dirty`）。
 - **已发布的 tag 不重打、不强推**；修问题用新版本号发新 tag。
 
 ## 1. 仓库结构（改代码前先定位）
@@ -90,22 +90,22 @@
 
 | 项 | 值 / 规则 |
 |---|---|
-| 版本号唯一来源 | `gradle.properties` 的 `app.versionCode` / `app.versionName` |
+| 版本号唯一来源 | `gradle.properties` 的 `app.versionName`，格式 `YYYYMMDD-HHMM`；`versionCode` 由它派生（`YYMMDDHH`），不再手填（issue #224） |
 | 正式签名证书 | `CN=DiLink Auto`，SHA-256 `84417b25a0ef960efcaa7e787c4779aa38ff1ffb265c345d95135a540e34f36a` |
 | keystore 位置 | 发布者本机 `%USERPROFILE%\.dilink-auto\dilink-auto-release.jks`；CI 走 `RELEASE_KEYSTORE_BASE64` secret 解码到 `$RUNNER_TEMP` |
 | 环境变量 | `RELEASE_KEYSTORE_PASSWORD` / `RELEASE_KEY_PASSWORD` 必需，`RELEASE_KEYSTORE_FILE` / `RELEASE_KEY_ALIAS` 可选 |
-| 触发条件 | 三段式 tag `vX.Y.Z` → `Build (Release)`；`vX.Y.Z-dev-N` → `Build (Pre-Release)` |
+| 触发条件 | 日期-时间 tag `vYYYYMMDD-HHMM` → `Build (Release)`；历史 `vX.Y.Z-dev-N` → `Build (Pre-Release)` |
 | runner | 两条发布流水线都是 `ubuntu-latest`；本仓库**没有** self-hosted runner |
 
 ### 7.2 发布步骤（PowerShell）
 
 ```powershell
-# 1. 版本号已在 main 上 bump 并合并，工作区干净
+# 1. 版本号（app.versionName）已在 main 上改成时间戳并合并，工作区干净
 git status --porcelain
-# 2. 打 tag（用 merge commit，不要用分支名）
+# 2. 打 tag（用 merge commit，不要用分支名；tag 必须与 app.versionName 逐字一致）
 git fetch origin main
-git tag v1.0.2 origin/main
-git push origin v1.0.2
+git tag v20261117-2247 origin/main
+git push origin v20261117-2247
 # 3. 盯流水线
 gh run list -R ID-VerNe/dilink-auto-android --limit 3
 # 4. 下载资产后校验签名（命令见 docs/release.md §3）

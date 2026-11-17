@@ -11,14 +11,21 @@
 
 ## 1. 版本号与 tag 规则
 
+版本号自 issue #224 起改为**日期-时间**格式，不再用 `1.0.3` 这类语义化版本号 —— 日常迭代按天甚至按小时发布，语义化版本的 `+1` 不携带信息。
+
 | 项 | 位置 / 规则 |
 |---|---|
-| 版本号唯一来源 | `gradle.properties` 的 `app.versionCode` / `app.versionName` |
-| 正式发版 tag | `vX.Y.Z`（三段式数字），触发 `Build (Release)` |
-| 预发布 tag | `vX.Y.Z-dev-N`，触发 `Build (Pre-Release)`，发布为 pre-release |
-| 构建版本串 | `BUILD_REVISION` 由 `build.gradle.kts:14-23` 用 `git rev-parse --short HEAD` + `git status --porcelain` 计算；工作区**有未跟踪文件**就会带 `-dirty` |
+| 版本号唯一来源 | `gradle.properties` 的 `app.versionName`，格式 `YYYYMMDD-HHMM`（如 `20261117-2247`） |
+| `versionCode` | **由 `app.versionName` 派生**：`20261117-2247` → `26111722`（`YYMMDDHH`）。不要再手填 |
+| 正式发版 tag | `vYYYYMMDD-HHMM`（如 `v20261117-2247`），触发 `Build (Release)` |
+| 预发布 tag | 历史形态 `vX.Y.Z-dev-N`，触发 `Build (Pre-Release)`；日期版本不走这条 |
+| 构建版本串 | `BUILD_REVISION` 由 `build.gradle.kts` 用 `git rev-parse --short HEAD` + `git status --porcelain` 计算；工作区**有未跟踪文件**就会带 `-dirty` |
 
-当前代码版本以仓库根 [README.md](../README.md) 顶部为准，历史 tag 保持只读 —— **永远不要为了修一个发布包去强推已存在的 tag**，下一次 `vX.Y.(Z+1)` 自然会带新改动。
+`versionCode` 派生规则在根 `build.gradle.kts` 单点实现，三个模块（`app-client` / `app-server` / `vd-server`）共用同一个 `rootProject.extra`，保证同一次构建里两边版本号绝不漂移。`app.versionName` 不是日期格式时（例如临时回到 `1.0.3` 形态）自动回退读 `app.versionCode`，两者都没有则构建直接失败。
+
+**同一小时内多次构建得到同一个 `versionCode`** —— `pm install -r` 与 Android 都允许同 code 覆盖安装，日常迭代不需要为此等待或手工 bump。
+
+当前代码版本以仓库根 [README.md](../README.md) 顶部为准，历史 tag 保持只读 —— **永远不要为了修一个发布包去强推已存在的 tag**，下一个时间戳自然会带新改动。
 
 已知例外：`v1.0.1` 的 Release 资产是在正式签名改造**之前**构建的（debug 签名）。它的 tag 不重打，正式签名资产从 `v1.0.2` 起。
 
@@ -106,14 +113,14 @@ $sdk = "C:\Users\VerNe\AppData\Local\Android\Sdk\build-tools\36.0.0"
 
 ## 4. 发布流程（照抄即可）
 
-1. **bump 版本号**：改 `gradle.properties` 的 `app.versionCode`（+1）与 `app.versionName`，同步文档里的版本号（`README.md`、`docs/README.md`、`docs/setup.md`、`docs/client.md`）。
+1. **改版本号**：只改 `gradle.properties` 的 `app.versionName` 为当前时间（`YYYYMMDD-HHMM`）；`versionCode` 自动派生，不要再写。同步文档里的版本号（`README.md`、`docs/README.md`、`docs/setup.md`、`docs/client.md`）。
 2. **走 PR 合并到 `main`**（AGENTS.md §3 那五步），CI `Build (Main)` 全绿。
 3. **确认 `main` 干净**：`git status --porcelain` 为空，否则包版本串会带 `-dirty`。
-4. **打 tag 并推**：
+4. **打 tag 并推**（tag 必须与 `app.versionName` 逐字一致，流水线会校验）：
    ```powershell
    git fetch origin main
-   git tag v1.0.2 <merge-commit>
-   git push origin v1.0.2
+   git tag v20261117-2247 <merge-commit>
+   git push origin v20261117-2247
    ```
 5. **盯流水线**：`gh run list -R ID-VerNe/dilink-auto-android --limit 3`，`gh run watch <id>` 到 success。
 6. **验收资产**：下载 Release 里的 `DiLinkAuto-Phone.apk` / `DiLinkAuto-Car.apk` 跑第 3 节的 `apksigner`，指纹必须一致；不一致就摘 release 并回滚。
@@ -137,6 +144,8 @@ $sdk = "C:\Users\VerNe\AppData\Local\Android\Sdk\build-tools\36.0.0"
 | 12 | `gh` 走代理失败 | 本机代理让 `gh` 请求卡住 | 调用前 `$env:NO_PROXY=""` |
 | 13 | `Leave fork network` 不可逆 | 只能在网页操作，没有 REST API。本仓库 2026-11-01 实测：脱离后 issues / PR / Release / secrets **全部保留**，只是 `parent` 与 fork 标记消失（`gh repo view --json isFork` 变 `false`、`parent` 变 `null`） | 操作不可逆，脱离前仍建议先导出备份（`gh issue list --json …` + 逐条评论）；备份不要提交进仓库 |
 | 14 | 退出 fork 前删本地 remote 不等于脱离 | `git remote remove upstream` 只影响本地；GitHub 侧 `isFork` 仍为 `true` | 以 `gh repo view <repo> --json isFork,parent` 为唯一判据 |
+| 15 | 日期格式版本号被比较逻辑塌陷 | `compareVersions` 旧实现按 `.` 切段、非数字 coerce 成 0，任意两个 `YYYYMMDD-HHMM` 版本号都判相等 → 车机自更新**永久静默跳过**，UI 还显示「已是最新版本」 | **已修复（issue #224）**：`Versioning.kt` 增加日期格式分支，按 `[YYYYMMDD, HHMM]` 两段比较；`VersioningTest` 有 7 例墓碑 |
+| 16 | 日期 tag 匹配不上发布流水线 | `build-release.yml` 原 tag 过滤是 `v[0-9]+.[0-9]+.[0-9]+`，`v20261117-2247` 不触发，push 后毫无反应 | tag 过滤已加 8+4 位数字形态（Gradle 过滤器不能用 `{8}`，必须逐位写）；另有 `Verify tag matches versionName` 步骤拦住 tag 与 `app.versionName` 不一致 |
 
 ## 6. 应急处置
 

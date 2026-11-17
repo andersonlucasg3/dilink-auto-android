@@ -64,4 +64,4 @@
 
 ## 下载
 
-不提供具体版本号(代码版本与 Release tag 不一致,以 [Releases](https://github.com/ID-VerNe/dilink-auto-android/releases/latest) 为准)。当前代码版本:`versionName = 1.0.3` / `versionCode = 62`(`gradle.properties`)。
+不提供具体版本号(代码版本与 Release tag 不一致,以 [Releases](https://github.com/ID-VerNe/dilink-auto-android/releases/latest) 为准)。当前代码版本:`app.versionName = 20261117-2247`(`versionCode` 由它派生出 `26111722`,见 [Release Guide](./release.md) §1)。
