@@ -307,21 +307,31 @@ class AudioPipelineTest {
         val diag = AudioTxDiag()
         val silence = ByteArray(4096)
         val real = ByteArray(4096).also { it[0] = 7 }
-        // 100 帧里前 3 帧全零；编码后字节数 100..199（avg = 14950 / 100）。
+        // 100 帧里前 3 帧是 pacing 补静音（read()==0），其余是真实读回的 PCM；
+        // 编码后字节数 100..199（avg = 14950 / 100）。
         repeat(100) { i ->
-            diag.onPcm(if (i < 3) silence else real, 4096)
+            if (i < 3) {
+                diag.onPaddedSilence(silence, 4096)
+            } else {
+                diag.onRead(4096)
+                diag.onRealPcm(real, 4096)
+            }
             val line = diag.onEncoded(100 + i)
             if (i < 99) {
                 assertNull("窗口未满时不许打日志（避免刷屏）", line)
             } else {
                 assertEquals(
-                    "AudioDiag tx frames=100 allZeroPcm=3 encMin=100 encAvg=149 encMax=199",
+                    "AudioDiag tx frames=100 allZeroPcm=3 encMin=100 encAvg=149 encMax=199 " +
+                        "readZeroPad=3 realZero=0 readBytes=397312",
                     line,
                 )
             }
         }
         // 累计值供 close() 收尾行使用。
         assertEquals(3L, diag.allZeroPcmTotal)
+        assertEquals(3L, diag.readZeroPadTotal)
+        assertEquals(0L, diag.realZeroTotal)
+        assertEquals(397_312L, diag.readBytesTotal)
         assertEquals(100L, diag.emittedFrames)
     }
 
@@ -332,31 +342,172 @@ class AudioPipelineTest {
         val real = ByteArray(16) { 1 }
 
         repeat(4) { i ->
-            diag.onPcm(zero, 16)
+            diag.onPaddedSilence(zero, 16)
             val line = diag.onEncoded(10)
             if (i < 3) assertNull(line) else
-                assertEquals("AudioDiag tx frames=4 allZeroPcm=4 encMin=10 encAvg=10 encMax=10", line)
+                assertEquals(
+                    "AudioDiag tx frames=4 allZeroPcm=4 encMin=10 encAvg=10 encMax=10 " +
+                        "readZeroPad=4 realZero=0 readBytes=0",
+                    line,
+                )
         }
-        // 第二个窗口：全零 PCM 归零、字节数 20..23（avg = 86 / 4 = 21）。
+        // 第二个窗口：全零 PCM 归零、字节数 20..23（avg = 86 / 4 = 21），
+        // 真实读回的字节数按本窗口重新累计。
         repeat(4) { i ->
-            diag.onPcm(real, 16)
+            diag.onRead(1024)
+            diag.onRealPcm(real, 16)
             val line = diag.onEncoded(20 + i)
             if (i < 3) assertNull(line) else
-                assertEquals("AudioDiag tx frames=4 allZeroPcm=0 encMin=20 encAvg=21 encMax=23", line)
+                assertEquals(
+                    "AudioDiag tx frames=4 allZeroPcm=0 encMin=20 encAvg=21 encMax=23 " +
+                        "readZeroPad=0 realZero=0 readBytes=4096",
+                    line,
+                )
         }
-        // 累计全零帧数跨窗口保留。
+        // 累计值跨窗口保留。
         assertEquals(4L, diag.allZeroPcmTotal)
+        assertEquals(4L, diag.readZeroPadTotal)
+        assertEquals(0L, diag.realZeroTotal)
+        assertEquals(4096L, diag.readBytesTotal)
     }
 
     @Test
     fun txDiagReportsZerosWhenTheWindowHasNoPayload() {
         val diag = AudioTxDiag(windowFrames = 2)
-        diag.onPcm(ByteArray(8), 8)
+        diag.onPaddedSilence(ByteArray(8), 8)
         assertNull(diag.onEncoded(0))
         assertEquals(
-            "AudioDiag tx frames=2 allZeroPcm=1 encMin=0 encAvg=0 encMax=0",
+            "AudioDiag tx frames=2 allZeroPcm=1 encMin=0 encAvg=0 encMax=0 " +
+                "readZeroPad=1 realZero=0 readBytes=0",
             diag.onEncoded(0),
         )
+    }
+
+    // ── issue #194（2026-11-17）：补静音 / 真实全零 / 混合 三种窗口 ──
+
+    @Test
+    fun txDiagAttributesAFullyPaddedWindowToReadZeroPad() {
+        // 实车 79.4% 窗口的形态之一：read() 一次都没读到，整窗都是 pacing 补的静音。
+        val diag = AudioTxDiag(windowFrames = 100)
+        var line: String? = null
+        repeat(100) {
+            diag.onPaddedSilence(ByteArray(4096), 4096)
+            line = diag.onEncoded(341)
+        }
+        assertEquals(
+            "AudioDiag tx frames=100 allZeroPcm=100 encMin=341 encAvg=341 encMax=341 " +
+                "readZeroPad=100 realZero=0 readBytes=0",
+            line,
+        )
+        // 收尾行同样要能区分：readBytes=0 说明这条链路上根本没读到数据。
+        assertEquals(
+            "Audio: capture stopped (frames=100, silence=100) " +
+                "allZeroPcm=100 readZeroPad=100 realZero=0 readBytes=0",
+            audioTxStoppedLine(
+                frames = 100,
+                silence = 100,
+                allZeroPcm = diag.allZeroPcmTotal,
+                readZeroPad = diag.readZeroPadTotal,
+                realZero = diag.realZeroTotal,
+                readBytes = diag.readBytesTotal,
+            ),
+        )
+    }
+
+    @Test
+    fun txDiagAttributesAFullyRealZeroWindowToRealZero() {
+        // 另一种形态：read() 有数据（readBytes > 0），但读回来整帧全 0 —— 采集被清零。
+        val diag = AudioTxDiag(windowFrames = 100)
+        var line: String? = null
+        repeat(100) {
+            diag.onRead(4096)
+            diag.onRealPcm(ByteArray(4096), 4096)
+            line = diag.onEncoded(341)
+        }
+        assertEquals(
+            "AudioDiag tx frames=100 allZeroPcm=100 encMin=341 encAvg=341 encMax=341 " +
+                "readZeroPad=0 realZero=100 readBytes=409600",
+            line,
+        )
+        assertEquals(0L, diag.readZeroPadTotal)
+        assertEquals(100L, diag.realZeroTotal)
+        assertEquals(409_600L, diag.readBytesTotal)
+    }
+
+    @Test
+    fun txDiagSplitsAMixedWindowAndKeepsAllZeroPcmInvariant() {
+        // 混合窗口（现场 `allZeroPcm=99` 那种）：87 帧补静音 + 2 帧真实全零 + 11 帧有内容；
+        // readBytes 只累计后 13 帧的 13 次 read（13 × 4096 = 53248）。
+        val diag = AudioTxDiag(windowFrames = 100)
+        val real = ByteArray(4096).also { it[0] = 9 }
+        var line: String? = null
+        repeat(100) { i ->
+            when {
+                i < 87 -> {
+                    diag.onPaddedSilence(ByteArray(4096), 4096)
+                }
+
+                i < 89 -> {
+                    diag.onRead(4096)
+                    diag.onRealPcm(ByteArray(4096), 4096)
+                }
+
+                else -> {
+                    diag.onRead(4096)
+                    diag.onRealPcm(real, 4096)
+                }
+            }
+            line = diag.onEncoded(310 + (i % 7))
+        }
+        val expected = "AudioDiag tx frames=100 allZeroPcm=89 encMin=310 encAvg=312 encMax=316 " +
+            "readZeroPad=87 realZero=2 readBytes=53248"
+        assertEquals(expected, line)
+        // allZeroPcm 保持旧口径：补静音 + 真实全零。
+        assertEquals(
+            diag.readZeroPadTotal + diag.realZeroTotal,
+            diag.allZeroPcmTotal,
+        )
+    }
+
+    @Test
+    fun txDiagKeepsTheOldFieldsPrefixSoExistingParsersDoNotBreak() {
+        // 旧脚本可能按 `AudioDiag tx frames=… allZeroPcm=…` 前缀取值：新字段只能追加在行尾。
+        val line = audioTxDiagWindowLine(
+            frames = 100,
+            allZeroPcm = 4,
+            encMin = 308,
+            encAvg = 342,
+            encMax = 422,
+            readZeroPad = 1,
+            realZero = 3,
+            readBytes = 40960,
+        )
+        assertTrue(
+            line,
+            line.startsWith("AudioDiag tx frames=100 allZeroPcm=4 encMin=308 encAvg=342 encMax=422"),
+        )
+        assertTrue(
+            line,
+            line.endsWith("readZeroPad=1 realZero=3 readBytes=40960"),
+        )
+    }
+
+    @Test
+    fun stoppedLineKeepsTheS23RegexCompatiblePrefix() {
+        // scripts/scenarios/s23-audio-stream.sh:63 的正则依赖 `(frames=…, silence=…)` 原样。
+        val line = audioTxStoppedLine(
+            frames = 3600,
+            silence = 169,
+            allZeroPcm = 200,
+            readZeroPad = 169,
+            realZero = 31,
+            readBytes = 1_474_560,
+        )
+        assertTrue(
+            line,
+            Regex("Audio: capture stopped \\(frames=[0-9]+, silence=[0-9]+\\)").containsMatchIn(line),
+        )
+        assertTrue(line, line.endsWith("readBytes=1474560"))
     }
 
     /** 记录收到的 CONFIG / FRAME，用于纯 JVM 上的降级路径断言。 */
