@@ -1,48 +1,48 @@
-# 发布与签名（Release Guide）
+# Publishing and signing (Release Guide)
 
-> 面向维护者与 Agent。本文记录 DiLink-Auto 的**正式签名**与**发版链路**，以及在这套基建落地过程中踩过的坑。
-> 配套：仓库流程见 [AGENTS.md](../AGENTS.md) §3，PR 规范见 [PR_GUIDE.md](./PR_GUIDE.md)。
+> For maintainers and agents. This document records DiLink-Auto's **official signing** and **release chain**, plus the pitfalls found while setting up this base.
+> Related: repository workflow in [AGENTS.md](../AGENTS.md) §3, PR rules in [PR_GUIDE.md](./PR_GUIDE.md).
 
-## 0. 一句话现状
+## 0. Summary in one sentence
 
-- 发布包由 `dilink-auto-release` keystore 签名（证书 `CN=DiLink-Auto`），keystore 本体**不入库**，只存在于发布者本机备份与 GitHub Actions secrets（`RELEASE_KEYSTORE_BASE64`）。
-- 发版 = 在 `main` 上把版本号 bump 并合并 → 打日期-时间 tag `vYYYYMMDD-HHMM` 推到 origin → `Build (Release)` 在 GitHub 托管 runner（`ubuntu-latest`）上构建并创建 GitHub Release。
-- 签名证书变更后，**新旧包不能互相覆盖安装**，必须卸载重装（手机端和车机端都一样）。
-- 2026-11 起本仓库（原 `andersonlucasg3/dilink-auto-android`）重新成为发布主线：fork `ID-VerNe/dilink-auto-android` 的 1.0.x 用另一把证书（`84417b25…36a`），从 fork 包切到本仓库包必须先卸载。
+- Release packages are signed with the `dilink-auto-release` keystore (certificate `CN=DiLink-Auto`); the keystore **does not enter the repository** and exists only in the publisher's machine backup and in the GitHub Actions secrets (`RELEASE_KEYSTORE_BASE64`).
+- Publishing = bump `app.versionName`/`app.versionCode` on `main`, create the semver tag `vX.Y.Z`, push to origin → `Build (Release)` compiles on a GitHub-hosted runner (`ubuntu-latest`) and creates the GitHub Release.
+- When the signing certificate changes, **new and old packages do not install on top of each other**: you must uninstall (phone and control center).
+- Packages from the fork `ID-VerNe/dilink-auto-android` (1.0.x) use **another** certificate (`84417b25…36a`); to migrate from them to this repository's packages, uninstall first.
 
-## 1. 版本号与 tag 规则
+## 1. Version and tag rules
 
-版本号自 issue #224 起改为**日期-时间**格式，不再用 `1.0.3` 这类语义化版本号 —— 日常迭代按天甚至按小时发布，语义化版本的 `+1` 不携带信息。
+The repository uses **semantic versioning** (`MAJOR.MINOR.PATCH`), as in the historical tags `v0.17.1` and `v0.19.0-dev-N`.
 
-| 项 | 位置 / 规则 |
+| Item | Location / rule |
 |---|---|
-| 版本号唯一来源 | `gradle.properties` 的 `app.versionName`，格式 `YYYYMMDD-HHMM`（如 `20261117-2315`） |
-| `versionCode` | **由 `app.versionName` 派生**：`20261117-2315` → `26111723`（`YYMMDDHH`）。不要再手填 |
-| 正式发版 tag | `vYYYYMMDD-HHMM`（如 `v20261117-2315`），触发 `Build (Release)` |
-| 预发布 tag | 历史形态 `vX.Y.Z-dev-N`，触发 `Build (Pre-Release)`；日期版本不走这条 |
-| 构建版本串 | `BUILD_REVISION` 由 `build.gradle.kts` 用 `git rev-parse --short HEAD` + `git status --porcelain` 计算；工作区**有未跟踪文件**就会带 `-dirty` |
+| Single source of the version | `gradle.properties`: `app.versionName` (`0.19.0`) and `app.versionCode` (integer, monotonic; currently `26111724`) |
+| `versionCode` | Manual, **always increasing** — `pm install -r` refuses a downgrade. Bump it together with the version. The counter continues from the highest code ever published (`26111723`, produced by the fork-era date scheme) instead of restarting from the pre-fork `60`; see pitfall 13 |
+| Release tag | `vX.Y.Z` (e.g. `v0.19.0`), triggers `Build (Release)` |
+| Pre-release tag | `vX.Y.Z-dev-N` (e.g. `v0.19.1-dev-3`), triggers `Build (Pre-Release)` |
+| Build string | `BUILD_REVISION` is computed in `build.gradle.kts` with `git rev-parse --short HEAD` + `git status --porcelain`; an **untracked file** already leaves the string with `-dirty` |
 
-`versionCode` 派生规则在根 `build.gradle.kts` 单点实现，三个模块（`app-client` / `app-server` / `vd-server`）共用同一个 `rootProject.extra`，保证同一次构建里两边版本号绝不漂移。`app.versionName` 不是日期格式时（例如临时回到 `1.0.3` 形态）自动回退读 `app.versionCode`，两者都没有则构建直接失败。
+The build validates the version format: `app.versionName` must match `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-dev[-N]` (a bare `-dev` means dev number 0), and `app.versionCode` must exist. The version is computed once at the build root and shared by `app-client` / `app-server` / `vd-server` (via `rootProject.extra`), so the three never diverge in the same build.
 
-**同一小时内多次构建得到同一个 `versionCode`** —— `pm install -r` 与 Android 都允许同 code 覆盖安装，日常迭代不需要为此等待或手工 bump。
+`app-client`'s `Versioning` still understands the old `YYYYMMDD-HHMM` format (inherited from the fork) to compare old package versions; it is **no longer** used to generate the version. See `docs/client.md`.
 
-当前代码版本以仓库根 [README.md](../README.md) 顶部为准，历史 tag 保持只读 —— **永远不要为了修一个发布包去强推已存在的 tag**，下一个时间戳自然会带新改动。
+The current code version is at the top of [README.md](../README.md). Historical tags are read-only — **never force-push an already published tag**; fix it with a new version.
 
-已知例外：`v1.0.1` 的 Release 资产是在正式签名改造**之前**构建的（debug 签名）。它的 tag 不重打，正式签名资产从 `v1.0.2` 起。
+Known exception: the `v1.0.1` asset was built **before** official signing (signed with debug). The tag is not recreated; assets with the official signature start at `v1.0.2` (from the fork). The first release of this repository with the official chain is `v0.19.0`.
 
-## 2. 正式 keystore
+## 2. Official keystore
 
-| 项 | 值 |
+| Item | Value |
 |---|---|
-| 本机路径 | `%USERPROFILE%\.dilink-auto\dilink-auto-release.jks`（**不在仓库内**；仓库历史里出现过同名旧副本，2026-11 合并时已删除） |
-| 类型 / 别名 | PKCS12 / `dilinkauto` |
-| 密钥 | RSA 2048（SHA384withRSA），有效期至 2051-04-20 |
-| 证书 DN | `CN=DiLink-Auto, OU=Dev, O=DiLink-Auto, L=Sao Paulo, ST=SP, C=BR` |
-| 证书 SHA-256 | `e91b0551d832aa08af964398f644b002f9669031e3426e47075889bb6cdfd726` |
+| Local path | `%USERPROFILE%\.dilink-auto\dilink-auto-release.jks` (**outside the repository**; an old copy with the same name still exists in the fork's git history — the 2026-11 merge removed it from the tree, but the history itself has not been rewritten) |
+| Type / alias | PKCS12 / `dilinkauto` |
+| Key | RSA 2048 (SHA384withRSA), valid until 2051-04-20 |
+| Certificate DN | `CN=DiLink-Auto, OU=Dev, O=DiLink-Auto, L=Sao Paulo, ST=SP, C=BR` |
+| Certificate SHA-256 | `e91b0551d832aa08af964398f644b002f9669031e3426e47075889bb6cdfd726` |
 
-> SHA-256 是发布校验的唯一硬标准：Release 资产对不上这个指纹，就当发版失败处理。
+> The SHA-256 is the single verification criterion: if the Release asset does not match this fingerprint, publishing failed.
 
-### 2.1 生成（换证书时才需要，生成后不可再改）
+### 2.1 Generation (only when changing the certificate; afterwards it does not change)
 
 ```powershell
 keytool -genkeypair -v `
@@ -51,39 +51,39 @@ keytool -genkeypair -v `
   -dname "CN=DiLink-Auto, OU=Dev, O=DiLink-Auto, L=Sao Paulo, ST=SP, C=BR"
 ```
 
-口令自己保管，不要写进任何提交物、issue、PR 或聊天记录。
+Store the password; do not write it in a commit, issue, PR or chat.
 
-### 2.2 本机构建时注入
+### 2.2 Injection into the local build
 
-把四个变量写进 `%USERPROFILE%\.dilink-auto\release-signing.env`（`KEY=VAL` 单行格式），然后 dot-source 注入当前 PowerShell 会话：
+Put the four variables in `%USERPROFILE%\.dilink-auto\release-signing.env` (one `KEY=VAL` per line) and load them into the PowerShell session:
 
 ```powershell
 . $env:USERPROFILE\.dilink-auto\use-signing.ps1
-$env:RELEASE_KEYSTORE_PASSWORD; $env:RELEASE_KEY_ALIAS   # 确认已注入
+$env:RELEASE_KEYSTORE_PASSWORD; $env:RELEASE_KEY_ALIAS   # confirm that they loaded
 ```
 
-变量语义（读自 `app-client/build.gradle.kts:34-92`、`app-server/build.gradle.kts:28-72`）：
+Variable semantics (read in `app-client/build.gradle.kts` and `app-server/build.gradle.kts`):
 
-| 变量 | 必需 | 说明 |
+| Variable | Mandatory | Description |
 |---|---|---|
-| `RELEASE_KEYSTORE_PASSWORD` | 是 | 缺它且没显式放行 → **配置阶段**抛 `GradleException` |
-| `RELEASE_KEY_PASSWORD` | 是 | 同上 |
-| `RELEASE_KEYSTORE_FILE` | 否 | 不设时用 `app-client/dilink-auto-release.keystore` 默认相对路径（该文件已不在仓库，CI 必须显式设置） |
-| `RELEASE_KEY_ALIAS` | 否 | 默认 `dilinkauto` |
-| `ALLOW_DEBUG_SIGNED_RELEASE=1` | 否 | 仅本地应急：显式允许 release 变体用 debug key 签名，**不要**用于任何对外发布的包 |
+| `RELEASE_KEYSTORE_PASSWORD` | yes | Without it (and without an explicit override) → `GradleException` at the **configuration phase** |
+| `RELEASE_KEY_PASSWORD` | yes | Same |
+| `RELEASE_KEYSTORE_FILE` | no | If absent, uses the default relative path `app-client/dilink-auto-release.keystore` (a file that is not in the repository; in CI it is mandatory to set it) |
+| `RELEASE_KEY_ALIAS` | no | Default `dilinkauto` |
+| `ALLOW_DEBUG_SIGNED_RELEASE=1` | no | Local emergency only: allows signing the release variant with the debug key; **do not use** on a published package |
 
 ### 2.3 GitHub Actions secrets
 
-`Build (Release)` / `Build (Pre-Release)` 都需要这四个（大小写严格）：
+`Build (Release)` and `Build (Pre-Release)` need all four (exact upper/lower case):
 
 ```
-RELEASE_KEYSTORE_BASE64      # jks 单行 base64，解码到 $RUNNER_TEMP
+RELEASE_KEYSTORE_BASE64      # jks in one-line base64, decoded into $RUNNER_TEMP
 RELEASE_KEYSTORE_PASSWORD
 RELEASE_KEY_ALIAS
 RELEASE_KEY_PASSWORD
 ```
 
-`RELEASE_KEYSTORE_BASE64` 生成方式（PowerShell）：
+How to generate `RELEASE_KEYSTORE_BASE64` (PowerShell):
 
 ```powershell
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\.dilink-auto\dilink-auto-release.jks")) |
@@ -93,14 +93,14 @@ $env:NO_PROXY=""
 gh secret set RELEASE_KEYSTORE_BASE64 -R andersonlucasg3/dilink-auto-android < "$env:USERPROFILE\.dilink-auto\keystore.b64"
 ```
 
-## 3. 本地构建与校验
+## 3. Local build and verification
 
 ```powershell
 . $env:USERPROFILE\.dilink-auto\use-signing.ps1
 .\gradlew.bat :app-server:assembleRelease :app-client:assembleRelease
 ```
 
-校验签名（**每次发版前都跑**）：
+Verify the signature (**run before every publication**):
 
 ```powershell
 $sdk = "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.0.0"
@@ -110,50 +110,48 @@ $sdk = "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.0.0"
   Select-String "certificate DN", "SHA-256"
 ```
 
-期望两行都是 `CN=DiLink-Auto, …` 与 `e91b0551…d726`。
+Both lines must show `CN=DiLink-Auto, …` and `e91b0551…d726`.
 
-## 4. 发布流程（照抄即可）
+## 4. Publishing workflow (can be followed to the letter)
 
-1. **改版本号**：只改 `gradle.properties` 的 `app.versionName` 为当前时间（`YYYYMMDD-HHMM`）；`versionCode` 自动派生，不要再写。同步文档里的版本号（`README.md`、`docs/README.md`、`docs/setup.md`、`docs/client.md`）。
-2. **走 PR 合并到 `main`**（AGENTS.md §3 那五步），CI `Build` 全绿。
-3. **确认 `main` 干净**：`git status --porcelain` 为空，否则包版本串会带 `-dirty`。
-4. **打 tag 并推**（tag 必须与 `app.versionName` 逐字一致，流水线会校验）：
+1. **Set the version**: change `app.versionName` (semver) and `app.versionCode` (monotonic) in `gradle.properties`. Sync the version references in `README.md`, `docs/README.md`, `docs/setup.md` and `docs/client.md`.
+2. **Open a PR to `main`** (the five steps of AGENTS.md §3), with the `Build` CI green.
+3. **Confirm `main` is clean**: `git status --porcelain` empty; otherwise the package version string gains `-dirty`.
+4. **Create and push the tag** (the tag must be exactly `v` + `app.versionName`; the pipeline validates):
    ```powershell
    git fetch origin main
-   git tag v20261117-2315 <merge-commit>
-   git push origin v20261117-2315
+   git tag v0.19.0 <merge-commit>
+   git push origin v0.19.0
    ```
-5. **盯流水线**：`gh run list -R andersonlucasg3/dilink-auto-android --limit 3`，`gh run watch <id>` 到 success。
-6. **验收资产**：下载 Release 里的 `DiLinkAuto-Phone.apk` / `DiLinkAuto-Car.apk` 跑第 3 节的 `apksigner`，指纹必须一致；不一致就摘 release 并回滚。
-7. **在 issue 贴证据**：run 链接 + `apksigner` 原始输出。
+5. **Follow the pipeline**: `gh run list -R andersonlucasg3/dilink-auto-android --limit 3` and `gh run watch <id>` until success.
+6. **Accept the assets**: download `DiLinkAuto-Phone.apk` / `DiLinkAuto-Car.apk` from the Release and run the `apksigner` from section 3; the fingerprint must match. If it does not match, unpublish/revert.
+7. **Paste the evidence in the issue**: run link + raw `apksigner` output.
 
-## 5. 坑清单（都是实际踩过的）
+## 5. Pitfall list (all actually encountered)
 
-| # | 坑 | 现象 / 后果 | 处理 |
+| # | Pitfall | Symptom / consequence | Handling |
 |---|---|---|---|
-| 1 | `runs-on: self-hosted` | 本仓库没有自托管 runner，tag 发布 **永远 queued**，看起来像"发了没反应" | 统一改 `ubuntu-latest`（`build.yml` / `build-release.yml` / `build-pre-release.yml` 三处） |
-| 2 | fork 默认不跑 Actions | fork 的 Actions 页没点过 "I understand my workflows… enable them" 时，push/PR **零 check**，`gh pr checks` 输出为空 | owner 在 Actions 页启用；注意 `actions/permissions.enabled=true` ≠ 已启用 |
-| 3 | 缺 keystore 就构建 release | 口令缺失时**在配置阶段**抛 `GradleException`，不是打出 unsigned 包 | CI 里 `Decode release keystore` 步骤先落盘并写 `RELEASE_KEYSTORE_FILE`；缺 secret 时该步骤直接 `exit 1` |
-| 4 | `RELEASE_*` 齐全时 debug 变体也用正式签名 | `app-client/build.gradle.kts:83-86` 会把 release signingConfig 套到 debug 变体上，**预发布流水线同样需要 keystore** | `build-pre-release.yml` 也要先解码 keystore |
-| 5 | 未跟踪文件污染版本串 | `.tmp/`（worktree 目录）未忽略时，`BUILD_REVISION` 恒为 `-dirty` | `/.tmp/` 已进 `.gitignore`；发版前仍要 `git status` 复核 |
-| 6 | 签名变更后覆盖安装 | 老包装机 → 新包 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`/签名不一致 | 首次迁移到正式签名时**先卸载旧包**；从 fork 1.0.x（另一把证书）切到本仓库包同样要卸载 |
-| 7 | 车机内嵌 APK 的变体 | 旧行为固定嵌入 `app-server-debug.apk`（audit B-05）；正式签名后手机端自更新会推 debug 签名包，与车机上已装的正式签名包冲突 | **已修复（issue #37）**：`embedServerApk` 按客户端变体选 `app-server-release.apk` / `app-server-debug.apk`；`build-release.yml` 的 `Verify embedded car APK signature` 步骤比对两份产物的证书摘要，不一致即失败 |
-| 8 | `environment: release` 没有保护规则 | environment 已创建，但**没有** required reviewers，tag 推上去会直接发版 | 想加审批闸门需要在仓库 Settings → Environments 里配置 reviewers；不要以为写了 `environment:` 就有闸门 |
-| 9 | GitHub 标签过滤器的 `+` 语义 | 分支/标签过滤器里 `+` 表示"前一个字符一次或多次"，`v[0-9]+.[0-9]+.[0-9]+` 才能匹配 `v1.0.2`；它不是正则 | 改 tag 规则时按这个语义写，别用正则直觉 |
-| 10 | 历史 tag 的资产不会自动更新 | 改了构建配置后，旧 tag 的 Release 资产仍是旧包 | 用新 tag 发新版本；**不要**删 tag 重推 |
-| 11 | PowerShell 读 `local.properties` | `sdk.dir` 值带 `C\:\\…` 转义，直接喂给 `Get-ChildItem -Directory` 会报错 | 脚本里直接用 `$env:LOCALAPPDATA\Android\Sdk` 拼路径或用 `-LiteralPath` |
-| 12 | `gh` 走代理失败 | 本机代理让 `gh` 请求卡住 | 调用前 `$env:NO_PROXY=""` |
-| 13 | `Leave fork network` 不可逆 | 只能在网页操作，没有 REST API。本仓库 2026-11-01 实测：脱离后 issues / PR / Release / secrets **全部保留**，只是 `parent` 与 fork 标记消失（`gh repo view --json isFork` 变 `false`、`parent` 变 `null`） | 操作不可逆，脱离前仍建议先导出备份（`gh issue list --json …` + 逐条评论）；备份不要提交进仓库 |
-| 14 | 退出 fork 前删本地 remote 不等于脱离 | `git remote remove upstream` 只影响本地；GitHub 侧 `isFork` 仍为 `true` | 以 `gh repo view <repo> --json isFork,parent` 为唯一判据 |
-| 15 | 日期格式版本号被比较逻辑塌陷 | `compareVersions` 旧实现按 `.` 切段、非数字 coerce 成 0，任意两个 `YYYYMMDD-HHMM` 版本号都判相等 → 车机自更新**永久静默跳过**，UI 还显示「已是最新版本」 | **已修复（issue #224）**：`Versioning.kt` 增加日期格式分支，按 `[YYYYMMDD, HHMM]` 两段比较；`VersioningTest` 有 7 例墓碑 |
-| 16 | 日期 tag 匹配不上发布流水线 | `build-release.yml` 原 tag 过滤是 `v[0-9]+.[0-9]+.[0-9]+`，`v20261117-2315` 不触发，push 后毫无反应 | tag 过滤已加 8+4 位数字形态（Gradle 过滤器不能用 `{8}`，必须逐位写）；另有 `Verify tag matches versionName` 步骤拦住 tag 与 `app.versionName` 不一致 |
+| 1 | `runs-on: self-hosted` | The repository has no self-hosted runner, so tag publishing stays **queued forever**, looking like "I published and nothing happened" | Use `ubuntu-latest` in all three workflows (`build.yml` / `build-release.yml` / `build-pre-release.yml`) |
+| 2 | Actions disabled | Without "I understand my workflows… enable them", push/PR has **no checks at all** and `gh pr checks` comes back empty | Enable on the Actions page; `actions/permissions.enabled=true` ≠ actions enabled |
+| 3 | Building a release without a keystore | Without the password, the build throws `GradleException` **at the configuration phase**, instead of generating an unsigned package | In CI, the `Decode release keystore` step writes the file and sets `RELEASE_KEYSTORE_FILE`; if the secret is missing, the step does `exit 1` |
+| 4 | Debug variant also receives the official signature | With `RELEASE_*` set, `app-client/build.gradle.kts` applies the release `signingConfig` to debug as well — **the pre-release pipeline also needs the keystore** | `build-pre-release.yml` also decodes the keystore before compiling |
+| 5 | Untracked file dirtying the version | If `.tmp/` (worktree) is not ignored, `BUILD_REVISION` stays `-dirty` forever | `/.tmp/` is already in `.gitignore`; still check `git status` before publishing |
+| 6 | Installing on top after a signature change | Old package installed → new package gives `INSTALL_FAILED_UPDATE_INCOMPATIBLE`/signature mismatch | On the first migration to the official signature, **uninstall the old one**; when leaving fork 1.0.x (another certificate), also uninstall |
+| 7 | Embedded control-center APK variant | The old behavior always embedded `app-server-debug.apk` (audit B-05); with official signing, self-update would send a debug package and conflict with the already-signed control center | **Fixed (issue #37)**: `embedServerApk` chooses `app-server-release.apk` / `app-server-debug.apk` according to the client variant; the `Verify embedded car APK signature` step of `build-release.yml` compares the digest of the two artifacts and fails if they diverge |
+| 8 | `environment: release` without a protection rule | The environment exists, but **has no** required reviewers; a pushed tag publishes directly | To have approval, configure reviewers in Settings → Environments; do not assume `environment:` creates a gate |
+| 9 | `+` semantics in the GitHub tag filter | In the filter, `+` means "the previous character one or more times"; `v[0-9]+.[0-9]+.[0-9]+` matches `v1.0.2`, but it is not regex | Write tag rules with that semantics, not with regex instinct |
+| 10 | Old tag assets do not update | After changing the build configuration, the Release of an old tag still has the old package | Publish a new version; do **not** delete and re-push the tag |
+| 11 | PowerShell reading `local.properties` | The `sdk.dir` value comes with `C\:\\…` escaping and breaks `Get-ChildItem -Directory` | Build the path with `$env:LOCALAPPDATA\Android\Sdk` or use `-LiteralPath` |
+| 12 | `gh` failing due to proxy | The local proxy makes `gh` hang | Before calling: `$env:NO_PROXY=""` |
+| 13 | `versionCode` continuity after the fork merge | Build `v20261117-2315` (date scheme, discarded) shipped `versionCode` 26111723. Restarting the semver counter at the pre-fork `60` would be a **downgrade** and `pm install -r` would refuse it | **Handled**: the semver release keeps its semantic name but the code continues at `26111724`, so `v0.19.0` installs on top of that build. Do not "tidy" the number back to a small one — the install would then require an uninstall |
+| 14 | Pre-release semver tag on the wrong pipeline | `v0.19.1-dev-3` does not trigger `Build (Release)` (the filter excludes `*dev*`), and `v0.19.0` does not trigger the pre-release one | Use the right format for the right channel; the release pipeline also rejects a tag with `-dev` |
 
-## 6. 应急处置
+## 6. Contingency
 
-| 情况 | 做法 |
+| Situation | What to do |
 |---|---|
-| tag 推错（版本号不匹配） | 删掉远端 tag 与对应 Release，重新 bump 版本号后发新 tag；**已发布过的 tag 不重打** |
-| Release 资产签名不对 | 立即把该 Release 设为 draft / 删除资产，查 `Decode release keystore` 是否用了正确的 base64，然后重跑一次发版 |
-| secrets 被清空 | `gh secret list -R andersonlucasg3/dilink-auto-android` 复核四项，缺什么补什么（见 2.3） |
-| 流水线一直 queued | 先查 `runs-on` 是否又写回 `self-hosted`；再查仓库 Actions 是否被禁用 |
-| 用户升级报签名冲突 | 让用户卸载旧版后重装；不要试图"兼容"另一个签名 |
+| Wrong tag pushed (version does not match) | Delete the remote tag and the corresponding Release and publish a new version with a bump; **an already published tag is not recreated** |
+| Wrong asset signature | Mark the Release as draft / delete the assets, check that `Decode release keystore` used the right base64 and run the publication again |
+| Secrets deleted | Check the four with `gh secret list -R andersonlucasg3/dilink-auto-android` and recreate whichever is missing (see 2.3) |
+| Pipeline always queued | Check whether `runs-on` went back to `self-hosted` and whether the repository's Actions are enabled |
+| User reports a signature conflict on update | Ask them to uninstall the old version and install again; do not try to "make compatible" another signature |

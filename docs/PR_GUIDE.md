@@ -1,155 +1,155 @@
-# 怎么开 PR（PR 操作指引）
+# How to open a PR (PR operating guide)
 
-> 本文件是仓库内所有 Agent 的 PR 操作规范，**必须遵照执行**。
-> 配套：怎么发 issue 见 [ISSUE_GUIDE.md](ISSUE_GUIDE.md)；流程总览见 [AGENTS.md](../AGENTS.md) §3。
+> This document is the PR operating standard for all Agents in the repository and **must be followed**.
+> Related: how to open an issue in [ISSUE_GUIDE.md](ISSUE_GUIDE.md); workflow overview in [AGENTS.md](../AGENTS.md) §3.
 
-## 定位：PR 是最小可审查单元
+## Definition: the PR is the smallest reviewable unit
 
-- 一 issue 一 PR：PR 是 issue 的实施载体。**合并只代表改动进了 `main`，不代表症状消失** —— 行为类 PR 用 `Refs #NN`，issue 由发现者回签后关闭。
-- 拆分原则：每个 PR 都能独立通过 CI、独立合并、独立回滚；拆不开说明边界没想清，回 issue 里补 plan。
+- One issue, one PR: the PR is the implementation vehicle for the issue. **A merge only means the change landed on `main`, it does not mean the symptom is gone** — behavior PRs use `Refs #NN` and the issue is closed after the discoverer's revalidation.
+- Splitting principle: each PR must pass CI independently, be merged independently and be reverted independently; if it cannot be split, the boundary was not thought through — go back to the issue and complete the plan.
 
-## 关闭方式：Closes 还是 Refs
+## Closure form: Closes or Refs
 
-| 关键词 | 适用 PR | 关闭时机 |
+| Keyword | Applicable PR | Closing moment |
 |---|---|---|
-| `Closes #NN` | 纯文档（`docs/`、`*.md`）、纯重构（不改外部行为） | 合并即关闭 |
-| `Refs #NN` | 行为类：`fix` / `feat` / `perf`，以及任何触及运行时代码路径的 PR | 合并只进待验收队列（`needs-live-verify`），发现者回签后才关闭 |
+| `Closes #NN` | Documentation only (`docs/`, `*.md`), refactoring only (without changing external behavior) | Closes on merge |
+| `Refs #NN` | Behavior: `fix` / `feat` / `perf`, and any PR that touches runtime code paths | The merge only enters the acceptance queue (`needs-live-verify`); it closes only after the discoverer's revalidation |
 
-判据一句话：**合并后是否还需要在真实设备上再观察一次症状才能确认有效** —— 需要就是行为类。
+Criterion in one sentence: **after the merge you still need to observe the symptom once more on a real device to confirm it works** — if you do, it is a behavior change.
 
-- 多分节 issue 的每个 PR 都用 `Refs #NN`，全部分节合并后统一回签、一次关闭。
-- 同一 PR 既改文档又改行为：按行为类走。
-- 行为类 PR 合并后由修复者给 issue 贴 `needs-live-verify`，回签通过后由回签者摘标签并关 issue。
+- Every PR for an issue with multiple subsections uses `Refs #NN`; after all subsections are merged, revalidation is done once and the issue is closed in a single go.
+- A single PR that changes both documentation and behavior: treat it as a behavior PR.
+- After merging a behavior PR, the fixer applies `needs-live-verify` to the issue; after revalidation passes, the revalidator removes the label and closes the issue.
 
-## 拆分与命名规范
+## Division and naming standard
 
-| 维度 | 标识 | 语义 |
+| Dimension | Identifier | Semantics |
 |---|---|---|
-| 分节（步骤） | `P+字母`：`PA`/`PB`/`PC`… | 把大 issue 切成有序、可独立合并的步骤；**一个分节 = 一个 PR** |
-| 优先级 | `P+数字`：`P0`/`P1`/`P2` | P0 阻断（安全/数据损坏/主链不通）、P1 常见路径缺陷、P2 边角与增强 |
+| Subsection (stage) | `P+letter`: `PA`/`PB`/`PC`… | Splits a large issue into ordered stages that can be merged independently; **one subsection = one PR** |
+| Priority | `P+number`: `P0`/`P1`/`P2` | P0 blocking (safety/data corruption/main flow inoperative), P1 defect on a common path, P2 corner case and improvement |
 
-- 先按优先级定实施顺序，同优先级内按分节字母序推进；分节编号在 issue 内全局唯一，不随优先级重置。
-- 引用格式：`#<issue>-P<字母>`，如 `#3-PA`。
-- 落点：issue 分节标题写 `### PA · <标题>（P1）`；多分节分支写 `<type>/<issue>-p<字母>-<slug>`；PR 标题与 commit 带「分节 PA」后缀。
+- First define the implementation order by priority; within the same priority, proceed in alphabetical order of the subsections; subsection numbering is unique within the issue and does not restart based on priority.
+- Reference format: `#<issue>-P<letter>`, for example `#3-PA`.
+- Where it goes: the subsection title in the issue is written as `### PA · <title>（P1）`; branches for multiple subsections are written as `<type>/<issue>-p<letter>-<slug>`; the PR title and the commit carry the suffix "subsection PA".
 
-## 分支
+## Branch
 
 ```powershell
 git worktree add .tmp/wt-<issue> -b <type>/<issue>-<slug> main
 ```
 
-- 从最新 `main` 切，**用 git worktree，不在主工作区切分支**。
-- `type` 与 issue 的类型对齐：`fix` / `feat` / `docs` / `refactor` / `chore` / `test` / `perf`。
-- worktree 用完执行 `git worktree remove .tmp/wt-<issue>`，不要留在 `.tmp/` 里发酵。
+- Create it from the latest `main`; **use git worktree, do not switch branches in the main workspace**.
+- `type` aligned with the issue type: `fix` / `feat` / `docs` / `refactor` / `chore` / `test` / `perf`.
+- After using the worktree, run `git worktree remove .tmp/wt-<issue>`; do not leave it lying around in `.tmp/`.
 
-## 标题与 commit
+## Title and commit
 
-- PR 标题：`type(scope): 摘要（issue #NN）` —— 分支、标题、commit 三处都带 issue 号。
-  - 示例：`fix(vd-server): 编码帧改为有界队列发送，网络反压不再憋停 VD（issue #3）`
-- commit message 同样带 issue 号；一个 PR 允许多个 commit，但每个 commit 要自解释，不写 `wip` / `fix`。
+- PR title: `type(scope): summary（issue #NN）` — branch, title and commit carry the issue number in all three places.
+  - Example: `fix(vd-server): encoded frames are now sent through a bounded queue; network backpressure no longer stalls the VD（issue #3）`
+- The commit message also carries the issue number; a PR may have several commits, but each commit must explain itself; do not use `wip` / `fix`.
 
-## 正文分段
+## Body sections
 
-固定结构，必填段缺一不可：
+Fixed structure; no mandatory section may be missing:
 
-| 段 | 必填 | 内容 |
+| Section | Mandatory | Content |
 |---|---|---|
-| `Closes #NN` / `Refs #NN` | 是 | 按上节二选一，放正文末尾 |
-| `## 问题` | 是 | 复述 issue 的现象 + 根因（带 `文件:行号`） |
-| `## 改动` | 是 | 按文件列改动，每个文件说清「为什么」 |
-| `## 测试` | 是 | 贴 `.\gradlew.bat` 的原始输出（成功/失败行），不写「已通过」 |
-| `## 基线验证` | 修测试/门禁类 issue 时必填 | 见下 |
-| `## 影响面` | 是 | 行为变化、兼容性、明确不动的部分 |
-| `## 验收对照` | 大 issue 拆分时必填 | 按分节逐条对照，未完成项显式列出并转新 issue |
+| `Closes #NN` / `Refs #NN` | Yes | Choose one of the two according to the previous section; put it at the end of the body |
+| `## Problem` | Yes | Reproduces the issue symptom + root cause (with `file:line`) |
+| `## Changes` | Yes | List the changes per file, explaining the "why" of each file |
+| `## Tests` | Yes | Paste the original output of `.\gradlew.bat` (task success/failure lines); do not write "passed" |
+| `## Baseline validation` | Mandatory when fixing a test/gate issue | See below |
+| `## Impact area` | Yes | Behavior change, compatibility, parts that explicitly do not change |
+| `## Acceptance review` | Mandatory when splitting a large issue | Check item by item per subsection; unfinished items must be listed explicitly and turned into a new issue |
 
-### 基线验证是硬要求
+### Baseline validation is a hard requirement
 
-修「测试/门禁误报或漏报」类 issue 时，必须证明回归真的钉住了缺陷：
+When fixing an issue of the "test/gate false positive or false negative" kind, it is mandatory to prove that the regression actually pinned the defect:
 
-- 同一检查在**未打补丁的 base**（pristine worktree）上必须红，且红的签名与 issue 症状一致；
-- 打补丁后转绿；
-- 两者输出都贴进 PR。只有「打了补丁就绿」没有「不打补丁就红」= 假绿，不予合并。
+- The same verification on the **base without the patch** (pristine worktree) must be red, and the failure signature must match the issue's symptom;
+- After the patch, it must be green;
+- Paste both outputs in the PR. Only "it went green with the patch" without "it goes red without the patch" = false green; it is not merged.
 
-## 开 PR 前自查
+## Self-check before opening the PR
 
-1. 本机跑与 CI 对齐的构建与单测，确认不是靠开发机私有状态绿出来的：
+1. Run the build and unit tests aligned with CI locally and confirm that the green does not come from private state of the development machine:
    ```powershell
    .\gradlew.bat :app-client:assembleDebug :app-client:testDebugUnitTest
    ```
-   改动涉及其他模块时，补跑对应模块单测（如 `:protocol-core:test :vd-server:test :app-server:test`）。
-2. **本机红线先跑基线**：同一检查在未打补丁 base 上复跑一遍，确认是代码问题还是环境问题 —— 环境问题不进修复，但要在 PR 里写明。
-3. 确认分支基于最新 `main`，`git fetch origin main` 后无落后。
-4. 实车/桌面端行为变更必须附现场证据：日志关键行、复现命令输出或截图路径；仅靠单测不算行为已验证。
+   If the change involves other modules, also run the unit tests of the corresponding module (e.g. `:protocol-core:test :vd-server:test :app-server:test`).
+2. **Before dealing with a local red, run the baseline**: run the same verification again on the base without the patch to confirm whether it is a code or environment problem — environment problems do not go into the fix, but must be recorded in the PR.
+3. Confirm that the branch starts from the latest `main` and that, after `git fetch origin main`, it is not behind.
+4. Behavior changes on a real vehicle/desktop app must come with field evidence: key log lines, reproduction command output or screenshot path; unit tests alone do not count as validated behavior.
 
-## 合并条件（全满足才合）
+## Merge conditions (merge only if all are met)
 
-1. **CI 全绿，且 CI 确实跑过**：用命令验证，不靠肉眼「按钮能点」：
+1. **CI fully green and CI actually executed**: validate by command, do not trust "the button is clickable" by eye:
 
    ```powershell
    gh pr checks <NN>
    ```
-   - 输出**非空**（有 check）且**全部 success**（exit 0）才合格。输出为空 = CI 没跑（见下「fork 启用前置」），**不因按钮能点就合**。
-   - 「CI 没跑」与「CI 红了」同等不合格；「本机等价门禁」不再代替 CI —— PR 正文「## 测试」段必须**同时**贴本机 `.\gradlew.bat` 原始输出与 CI run 链接，缺一即视为未验证。
-   - `.github/workflows/build.yml` 在 push 与 pull_request 上都执行 `:app-client:assembleDebug :app-client:testDebugUnitTest`，跑在 `ubuntu-latest`。
+   - It is valid only with **non-empty** output (a check exists) and **all checks successful** (exit 0). Empty output = CI did not run (see the note below); **do not merge just because the button is clickable**.
+   - "CI did not run" is as invalid as "CI red"; the "local equivalent gate" no longer replaces CI — the "## Tests" section of the PR body must paste **at the same time** the original local `.\gradlew.bat` output and the CI run link; missing either one means it is not verified.
+   - `.github/workflows/build.yml` runs `:app-client:assembleDebug :app-client:testDebugUnitTest :protocol-core:test` on both push and pull_request, on GitHub-hosted `ubuntu-latest` runners.
 
-   **fork 启用前置**：本仓库是 fork，GitHub 默认不自动运行 fork 的 workflow。首次使用前，owner 必须在仓库 Actions 页点过「I understand my workflows, go ahead and enable them」按钮，否则任何 PR/push 都零 check（`gh pr checks` 输出为空）。启用只对未来事件生效，**不回溯补跑**已合并的 PR。`actions/permissions` 显示 `enabled:true` 与「Actions 页未启用」是两个不同开关，前者为 true 不代表后者已点。
+   **If CI produces no check at all**: this repository is the original DiLink-Auto repository (not a fork node), runs all workflows on GitHub-hosted runners and has no self-hosted runner, so a workflow only fails to start if Actions itself is disabled on the repository (`gh api repos/{owner}/{repo}/actions/permissions`) or the workflow has a tag/branch filter that does not match. Diagnose in that order before assuming the code was not tested; a `runs-on: self-hosted` label would leave every job queued forever, which is why it is forbidden here.
 
-   `main` 当前未开分支保护，以上全靠自觉执行。
-2. **无冲突**：GitHub 显示可合并。有冲突不强行合——在 worktree 里 `git merge origin/main`（或 rebase）解决，重跑构建与单测后再推。
-3. 适用时有 `## 基线验证` 段。
-4. 行为类 PR 合并后不直接关 issue，走下面的对账与回签。
+   `main` and `develop` are protected by a ruleset that requires a pull request, so a direct push is rejected (`GH013`); the rules above still depend on conscious execution because the ruleset does not (yet) require an approving review.
+2. **No conflict**: GitHub shows it is mergeable. If there is a conflict, do not force the merge — resolve it in the worktree with `git merge origin/main` (or rebase), run the build and unit tests again, and only then push.
+3. When applicable, the `## Baseline validation` section exists.
+4. A behavior PR does not close the issue directly after the merge; follow the review and revalidation below.
 
-## 合并后：对账与回签
+## After the merge: review and revalidation
 
-对账是修复者自查，回签是发现者验收，两者都要做：
+Review is the fixer's self-check, revalidation is acceptance by the discoverer; both must be done:
 
-- **自述 vs 实际逐项核对（修复者）**：PR 说做了的每一条，合并后独立复核（`git status`、文件存在性、构建/单测原始输出）。
-- **欠账转新 issue**：对账发现的遗漏、误伤、未实机闭环项，逐条转新 issue 跟进；合并不算完，对账才算。
-- **行为类 issue 回签（发现者 / 全新上下文验证 agent）**：修复者合并后给 issue 贴 `needs-live-verify`；回签者按下面模板贴一条评论，结论为「症状消失」才摘标签并关闭。仍复现则摘标签、留 issue 并补证据。**回签者不能是本次 PR 的作者 Agent**。
-  - **独立性按 Agent 判定，不按 GitHub 账号判定**：本仓库的开发流程由 Agent 推进，每个 Agent 相当于一个开发者。PR 作者 Agent 与 issue 作者/回签 Agent 必须是不同 Agent；同一 GitHub 账号（如 `ID-VerNe`）可以对应不同 Agent 的不同轮次，**不构成自签**，也不要求另建 reviewer 账号。回签评论应记录 Agent/会话标识，而不是用账号相同来认定角色冲突。
-- 同根因复发时开第二代修复并互相引用，每代都留测试墓碑。
+- **Claim vs reality, item by item (fixer)**: every item the PR says it did must be rechecked independently after the merge (`git status`, file existence, original build/unit test output).
+- **Open items become a new issue**: omissions, collateral damage and items without real-device closure found in the review must be converted, one by one, into new follow-up issues; the merge does not close it, the review closes it.
+- **Revalidation of a behavior issue (discoverer / verification agent in a completely fresh context)**: the fixer applies `needs-live-verify` to the issue after the merge; the revalidator posts a comment using the template below and only with the conclusion "symptom disappeared" removes the label and closes it. If it still reproduces, remove the label, keep the issue open and add more evidence. **The revalidator cannot be the Agent who authored this PR**.
+  - **Independence is judged by Agent, not by GitHub account**: this repository's development flow is run by Agents, and each Agent is equivalent to a developer. The Agent who authored the PR and the Agent who authored the issue/revalidator must be different Agents; the same GitHub account (e.g. `ID-VerNe`) may correspond to different rounds of different Agents and **does not constitute self-approval**, nor does it require creating another reviewer account. The revalidation comment must record the Agent/session identifier, instead of using account equality to presume a role conflict.
+- In case of recurrence with the same root cause, open a second-generation fix and reference each other; each generation leaves a test tombstone.
 
-### 回签模板
+### Revalidation template
 
-贴到 issue 评论里，字段缺一不可：
+Post it in the issue comment; no field may be missing:
 
-- **环境**：`main` @ `<sha>`，本地实机 / CI，`<时间>`；涉及车机时写明车型、车机系统版本、连接方式（USB / WiFi ADB / 直连）
-- **复现命令**：优先原样复用 issue「现象」段里的那条
-- **期望输出**：修复后应看到什么
-- **实际输出**：粘贴原始输出，不要只写「正常」
-- **实机证据**：日志路径与关键行（如 `Pipeline:` 的 `tex=/cb=`、`[VideoDecoder]` 的 `drops=/inputFails=`）、连续观察时长
-- **结论**：症状消失 / 仍复现（仍复现要贴差异）
+- **Environment**: `main` @ `<sha>`, local real device / CI, `<time>`; when it involves the vehicle's control center, state the car model, the control center's system version and the connection method (USB / WiFi ADB / direct)
+- **Reproduction command**: preferably reuse exactly the one from the issue's "Symptom" section
+- **Expected output**: what should be seen after the fix
+- **Actual output**: paste the original output, do not write only "normal"
+- **Real-device evidence**: log path and key lines (e.g. `tex=/cb=` from `Pipeline:`, `drops=/inputFails=` from `[VideoDecoder]`), duration of continuous observation
+- **Conclusion**: symptom disappeared / still reproduces (if it still reproduces, paste the difference)
 
-## 模板（可直接抄）
+## Template (ready to copy)
 
 ```markdown
-## 问题
+## Problem
 
-<issue 现象复述 + 根因，带 `文件:行号`>
+<reproduction of the issue symptom + root cause, with `file:line`>
 
-## 改动
+## Changes
 
-`<文件>`
-- <改动点 + 为什么>
+`<file>`
+- <changed point + why>
 
-## 测试
+## Tests
 
 ```
-<.\gradlew.bat 的原始输出：任务成功/失败行>
+<original .\gradlew.bat output: task success/failure lines>
 ```
 
-本地同时通过：<模块单测列表>。
+Also passed locally: <list of unit tests per module>.
 
-## 影响面
+## Impact area
 
-<行为变化 / 兼容性 / 明确不动的部分>
+<behavior change / compatibility / parts that explicitly do not change>
 
-## 验收对照
+## Acceptance review
 
-- [x] <issue 验收项 1>
-- [ ] <未完成项，转 #NN>
+- [x] <acceptance item 1 from the issue>
+- [ ] <unfinished item, converted into #NN>
 
 Refs #NN
 ```
 
-行为类 PR 保持末行 `Refs #NN`，合并后按「合并后：对账与回签」等发现者回签；纯文档 / 纯重构 PR 换成 `Closes #NN`。
+A behavior PR keeps `Refs #NN` on the last line and, after the merge, follows "After the merge: review and revalidation", awaiting the discoverer's revalidation; a documentation-only / refactoring-only PR switches to `Closes #NN`.

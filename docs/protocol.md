@@ -2,18 +2,18 @@
 
 ## Overview
 
-DiLink-Auto 在手机与车机之间使用 **4 条专用 TCP 连接**（控制/数据、视频、输入、音频），手机 App 与 VD server 之间还有一条内部生命周期连接：
+DiLink-Auto uses **4 dedicated TCP connections** between the phone and the car (control/data, video, input, audio), plus one internal lifecycle connection between the phone app and the VD server:
 
 | Connection | Port | Direction | Content |
 |------------|------|-----------|---------|
 | **Control + Data** | 9637 | Bidirectional | Handshake, heartbeat, app commands, app list, car logs, media metadata |
 | **Video** | 9638 | VD server -> Car | H.264 CONFIG + FRAME only |
 | **Input** | 9639 | Car -> VD server | Touch events only |
-| **Audio** | 9640 | VD server -> Car | AAC-LC CONFIG + FRAME；双向协商后绑定，独立传输 |
+| **Audio** | 9640 | VD server -> Car | AAC-LC CONFIG + FRAME; bound after two-way negotiation, transported independently |
 | **Lifecycle** | 19647 | VD server -> Phone (localhost) | Display ready / stack empty / stop signals |
 | **ADB TCP** | 5555 | Car -> Phone (or Phone -> Car for dadb) | Persistent single-socket ADB for shell commands and car APK install |
 
-9640 刻意**不复用** 9638：`VideoFrameSender` 是单线程 + 有界队列的写侧，一个 1 MB 的 IDR 会把 341 B 的音频帧堵在队头后面。音频必须走独立连接，且音频连接失败不得拖垮整条视频会话。
+9640 deliberately does **not** reuse 9638: `VideoFrameSender` is a single-threaded writer with a bounded queue, so one 1 MB IDR would block a 341 B audio frame behind it at the head of the queue. Audio must travel on its own connection, and an audio connection failure must never drag down the whole video session.
 
 The VD server binds the video and input ports directly on `0.0.0.0:9638` and `0.0.0.0:9639`, so video frames and touch events flow directly between the VD server and the car without phone-side relaying. The phone app is not on the video or input data path. A deploy site that knows its own outbound address can pass a receiver IP in the trailing `CAR_HOST` argv slot (`VdDeployArgs.CAR_HOST_ANY` = `-` keeps the accept-any behaviour), which pins those two accepts to the peer the engine actually serves.
 
@@ -51,7 +51,7 @@ The lifecycle channel on `localhost:19647` is documented in [client.md](./client
 |----|------|------------|-----------|---------|
 | 0 | CONTROL | Control (9637) | Bidirectional | Handshake, heartbeat, app commands, VD lifecycle signals |
 | 1 | VIDEO | Video (9638) | VD server -> Car | H.264 encoded video frames |
-| 2 | AUDIO | Audio (9640) | VD server -> Car | AAC-LC CONFIG + FRAME；双向协商开启（isAudioNegotiated） |
+| 2 | AUDIO | Audio (9640) | VD server -> Car | AAC-LC CONFIG + FRAME; enabled by two-way negotiation (isAudioNegotiated) |
 | 3 | DATA | Control (9637) | Bidirectional | App list, app info data, car logs, media metadata, log toggle |
 | 4 | INPUT | Input (9639) | Car -> VD server | Touch events (batched MOVE for multi-touch) |
 
@@ -68,7 +68,7 @@ The DATA channel multiplexes on the same TCP socket as CONTROL. VIDEO, INPUT and
 | deviceName           | UTF-8  |
 | screenWidth          | int32  |  car display width in pixels (after nav bar)
 | screenHeight         | int32  |  car display height in pixels
-| supportedFeatures    | int32  |  **接收端**想要的能力位掩码；默认仅 FEATURE_VIDEO
+| supportedFeatures    | int32  |  capability bitmask the **receiver** wants; FEATURE_VIDEO only by default
 | displayMode          | byte   |  0=MIRROR, 1=VIRTUAL (default)
 | screenDpi            | int32  |  car display density (e.g. 160)
 | appVersionCode       | int32  |  car app version code (informational)
@@ -77,15 +77,15 @@ The DATA channel multiplexes on the same TCP socket as CONTROL. VIDEO, INPUT and
 | appVersionName       | UTF-8  |  car app version name
 | dpiOverride          | int32  |  trailing field, default 0
 | bitrate              | int32  |  trailing field, target bitrate in bps, default 0
-| vdAreaTier           | int32  |  trailing field, VD 合成面积档位（0=AUTO / 1=COMPAT_2560），default 0
+| vdAreaTier           | int32  |  trailing field, VD composition area tier (0=AUTO / 1=COMPAT_2560), default 0
 +----------------------+--------+
 ```
 
 All three trailing fields are appended after `appVersionName` and decode as `0` when absent, so older peers interoperate: a missing `dpiOverride` means auto-calibrate, a missing `bitrate` means the 4 Mbps default, a missing `vdAreaTier` means the default area tier ([VdAreaTier.AUTO]).
 
-`vdAreaTier` (issue #153 PB) 是**会话级**档位：车机在握手时下发 `0` 或 `1`，手机在本次建 VD 时把它交给 `VdDimensions.compute` 决定 anti-crop 放大上限（默认档 `max(carW*1.6, 1600)`、兼容档 2560）。它**不是**运行期尺寸同步消息，切档靠下次连接 / 旋转重握手，不在会话中 `resize`。老手机忽略尾部 4B；老车机不带该字段时手机解出 `0` = 默认档。注意车机 ADB 部署路径（`VdServerDeployer`）本来就用 car-native 视口建 VD、不消费 `HandshakeResponse.vdWidth/vdHeight`，因此档位对它是 no-op；真正消费方是 Shizuku 路径与桌面端 `AdbDeploy`。
+`vdAreaTier` (issue #153 PB) is a **session-level** tier: the car sends `0` or `1` in the handshake and the phone hands it to `VdDimensions.compute` when it builds the VD for that session, which decides the anti-crop upscale cap (default tier `max(carW*1.6, 1600)`, compatibility tier 2560). It is **not** a runtime size-sync message: switching tiers requires the next connection / a rotation re-handshake, there is no in-session `resize`. Older phones ignore the trailing 4 bytes; when an older car does not send the field the phone decodes `0` = default tier. Note that the car's ADB deploy path (`VdServerDeployer`) already builds the VD from the car-native viewport and does not consume `HandshakeResponse.vdWidth/vdHeight`, so the tier is a no-op for it; the real consumers are the Shizuku path and the desktop `AdbDeploy`.
 
-`supportedFeatures` 默认只置 `FEATURE_VIDEO`。`FEATURE_AUDIO` 必须由 `HandshakeRequest.builder().supportedFeatures(...)` 显式开启，含义是「接收端想播且能解码音频」，与手机能不能采集无关。S1 之前默认值是 `FEATURE_VIDEO or FEATURE_AUDIO`，导致两个构造点（车机 `buildHandshakeRequest`、桌面端 `HandshakeFactory.build`）都在假广告一个根本没实现的音频通道（issue #67）。手机自身的能力由 `HandshakeResponse` 的尾字段 `supportedFeatures` 回传；protocol-core 的 `isAudioNegotiated(request, response)` 是唯一判据，要求 `accepted == true` **且**两侧都置了 `FEATURE_AUDIO`，之后才允许 bind 9640。接收端音频开关的置灰依据必须是手机的 response，绝不能用接收端自己的 `SDK_INT`：Android 11（SDK 30）的采集下限约束的是手机，不是车机（`app-server` 的 `minSdk` 为 26）。
+`supportedFeatures` only sets `FEATURE_VIDEO` by default. `FEATURE_AUDIO` must be enabled explicitly through `HandshakeRequest.builder().supportedFeatures(...)`; it means "the receiver wants to play and can decode audio" and has nothing to do with whether the phone can capture. Before S1 the default was `FEATURE_VIDEO or FEATURE_AUDIO`, so both construction sites (the car's `buildHandshakeRequest`, the desktop's `HandshakeFactory.build`) were falsely advertising an audio channel that was not implemented at all (issue #67). The phone's own capabilities come back in the `supportedFeatures` trailing field of `HandshakeResponse`; `isAudioNegotiated(request, response)` in protocol-core is the single criterion, requiring `accepted == true` **and** `FEATURE_AUDIO` set on both sides before 9640 may be bound. The receiver's audio switch must be greyed out based on the phone's response, never on the receiver's own `SDK_INT`: the Android 11 (SDK 30) capture floor constrains the phone, not the car (`app-server` has `minSdk` 26).
 
 `dpiOverride` is a trailing field. `0` means auto-calibrate via `VideoConfig.calculateOptimalDpi` (the portrait-app-safe cap). A non-zero value in `[120, 480]` bypasses the cap and is used verbatim, fixing "UI too small" for landscape apps at the cost of squeezing portrait-only apps. The decoder's remaining-bytes guard reads `0` when the field is absent, so older car peers that do not send it decode as auto. The car coerces input through `VdDeployArgs.coerceDpiOverride` so the phone and car agree on what counts as a valid override.
 
@@ -109,7 +109,7 @@ All three trailing fields are appended after `appVersionName` and decode as `0` 
 | vdDpi                | int32  |  DPI the VD will use (auto or override)
 | vdWidth              | int32  |  trailing field, recommended VD width, 0 = not provided
 | vdHeight             | int32  |  trailing field, recommended VD height, 0 = not provided
-| supportedFeatures    | int32  |  尾字段，**手机侧**采集能力位掩码，0 = 不支持音频
+| supportedFeatures    | int32  |  trailing field, **phone-side** capture capability bitmask, 0 = no audio support
 +----------------------+--------+
 ```
 
@@ -117,7 +117,7 @@ All three trailing fields are appended after `appVersionName` and decode as `0` 
 
 `0` means an older phone did not send the field. Deploy sites with no shell access to the phone — the desktop ADB path — MUST use these dims for the VirtualDisplay when they are `> 0`; the desktop's own viewport is the *encoder* size, not the VD size. The phone-side metrics must come from real physical display metrics (`WindowManager.maximumWindowMetrics` / `Display.getRealMetrics`), never `resources.displayMetrics`, which reports compat-scaled values in screen-compat mode.
 
-`supportedFeatures`（S1）是音频能力交换里**手机 / 采集侧**的那一半，追加在 `vdHeight` 之后，与 request 里的同名字段语义不同：request 说的是接收端想用什么，这里说的是手机能提供什么。老手机不带末尾这 4 字节时解码为 `0`，这是安全的回退方向 —— `isAudioNegotiated` 返回 false，没人会去连一个从未监听的端口。手机只有在自身 SDK 与采集探针允许 `REMOTE_SUBMIX` 时才在这里置 `FEATURE_AUDIO`。
+`supportedFeatures` (S1) is the **phone / capture side** half of the audio capability exchange, appended after `vdHeight`; it has a different meaning from the same-named field in the request: the request says what the receiver wants to use, this says what the phone can provide. When an older phone does not send the trailing 4 bytes it decodes as `0`, which is the safe fallback direction — `isAudioNegotiated` returns false and nobody tries to connect to a port that was never listened on. The phone only sets `FEATURE_AUDIO` here when its own SDK and capture probe allow `REMOTE_SUBMIX`.
 
 ### HEARTBEAT (0x03) / HEARTBEAT_ACK (0x04) -- Control connection only
 
@@ -203,45 +203,45 @@ H.264 NAL units representing a video frame.
 
 **Black-screen detection**: `BlackScreenDetector` lives in `:protocol-core` and is shared by the car decoder and the Windows `VideoDecodePipeline` — both ends face the same encoder failure (TCP alive, receiver parked on the last frame), so the policy has one definition. An encoder producing nothing emits very small I-frames, so a streak of keyframes below `keyframeMaxBytes` (2 KB) means the stream is black. Reaction is deliberately asymmetric: `alertStreak` (3) tiny keyframes only set a log flag, and `onSustainedBlackScreen` fires once the streak lasts `BLACK_SCREEN_SUSTAIN_MS` (3 s default; the receivers override it) — app/VD warm-up bursts are normal, and escalating on those is the reconnect storm that leaked VirtualDisplays. The monotonic clock is injected (`clock`), so protocol-core stays Android-free, and the escalation is latched to once per session until `reset()`.
 
-## 音频通道 Audio Channel (0x02)
+## Audio Channel (0x02)
 
-音频镜像协议在 1.0.3 实现完整闭环（Refs #67, #70, #72, #73, #79, #84）。包含 S1 载荷契约、S2 采集编码管线与静音补帧、S3 端口绑定与接收端播放、S4 双向能力协商与开关持久化、以及 S23 端到端测试与防假绿静音帧统计。载荷编解码由 `AudioPayload` 承载，纯 JVM，不依赖 Android 直接单测。
+The audio mirroring protocol reached a complete loop in 1.0.3 (Refs #67, #70, #72, #73, #79, #84): S1 payload contract, S2 capture/encode pipeline and silence padding, S3 port binding and receiver playback, S4 two-way capability negotiation and switch persistence, and S23 end-to-end tests plus anti-false-green silence-frame statistics. The payload codec lives in `AudioPayload`, pure JVM, so it is unit-tested without Android.
 
-### 阶段演化与技术规范
+### Stage evolution and technical rules
 
-- **S1 载荷契约与帧格式**：定义 `AudioPayload` 编解码格式，独立端口 `9640`（`AUDIO_PORT`），包含 `CONFIG (0x01)` 与 `FRAME (0x02)`。
-- **S2 编码与静音补帧**：VD server 端通过 `REMOTE_SUBMIX` 录音源采集，由 `AudioPipeline` + `AudioEncoderSelector` 编码为 AAC-LC（48000Hz, 双声道立体声, 128kbps）。48kHz AAC-LC 每帧 1024 采样 = **21.333 ms / 46.875 fps**（`AudioSpec.kt`, `AudioPacing.kt`）。采集静音期持续按 46.875 fps 节拍注入合成静音帧，杜绝接收端抖动缓冲下溢与排队延迟膨胀。
-- **S3 独立 TCP 连接与播放**：VD Server 启动 `PortAcceptor` 绑定 9640 端口（通过 `CAR_HOST` 进行对端 IP 锁定），使用 `AsyncSocketSender` 异步写入。车机端 `CarSessionCoordinator` 连接 9640，交付 `AudioPlayer`（内部维护 150ms 抖动缓冲，支持 60~200ms 配置），由 `AudioTrack` 自由跑播放。
-- **S4 双向能力协商**：握手双方必须在 `supportedFeatures` 均置位 `FEATURE_AUDIO`（`isAudioNegotiated` 判定）。客户端提供音频开关并持久化在本地配置；车机端根据手机响应动态置灰或启用音频开关。
-- **S23 端到端场景与防假绿**：落地 S23 音频镜像 e2e 场景；车机端 `AudioPlayer` 周期日志埋点静音帧统计（`silenceFrames`/`totalFrames`），杜绝全静音帧被误判为功能正常的假绿情况（issue #84）。
+- **S1 payload contract and frame format**: defines the `AudioPayload` encode/decode format on its own port `9640` (`AUDIO_PORT`), with `CONFIG (0x01)` and `FRAME (0x02)`.
+- **S2 encoding and silence padding**: the VD server captures from the `REMOTE_SUBMIX` audio source and encodes with `AudioPipeline` + `AudioEncoderSelector` to AAC-LC (48000 Hz, stereo, 128 kbps). At 48 kHz an AAC-LC frame is 1024 samples = **21.333 ms / 46.875 fps** (`AudioSpec.kt`, `AudioPacing.kt`). While the capture source is silent, synthetic silence frames keep being injected on the 46.875 fps beat, preventing jitter-buffer underrun and queue-latency growth on the receiver.
+- **S3 dedicated TCP connection and playback**: the VD server starts a `PortAcceptor` bound to 9640 (peer IP pinned through `CAR_HOST`) and writes asynchronously with `AsyncSocketSender`. On the car, `CarSessionCoordinator` connects to 9640 and hands the socket to `AudioPlayer` (a 150 ms jitter buffer, configurable 60-200 ms), and `AudioTrack` then plays freely.
+- **S4 two-way capability negotiation**: both sides of the handshake must set `FEATURE_AUDIO` in `supportedFeatures` (decided by `isAudioNegotiated`). The client exposes an audio switch persisted in local config; the car greys out or enables its audio switch based on the phone's response.
+- **S23 end-to-end scenario and anti-false-green**: the S23 audio-mirroring e2e scenario landed; the car's `AudioPlayer` periodically logs silence-frame statistics (`silenceFrames`/`totalFrames`) so an all-silent stream can never be mistaken for a healthy one (issue #84).
 
 ### CONFIG (0x01) -- VD server -> Car
 
-在任何 FRAME 之前发一次。大端布局：
+Sent once before any FRAME. Big-endian layout:
 
 ```
 +----------------------+--------+
-| codec                | byte   |  1 = AAC-LC（`AudioPayload.CODEC_AAC_LC`）
+| codec                | byte   |  1 = AAC-LC (`AudioPayload.CODEC_AAC_LC`)
 | sampleRate           | int32  |  48000
-| channelCount         | byte   |  2（立体声）
+| channelCount         | byte   |  2 (stereo)
 | bitrate              | int32  |  128000
-| csdLen               | byte   |  csd-0 长度（实测 2）
-| csd                  | bytes  |  MediaCodec 的 `csd-0`
+| csdLen               | byte   |  csd-0 length (measured: 2)
+| csd                  | bytes  |  MediaCodec's `csd-0`
 +----------------------+--------+
 ```
 
-`csd-0` 必须**带外**发送：裸 AAC 访问单元不带 ADTS 头，没有它解码器无法初始化。两侧都会拒绝 `csdLen` 与剩余字节数不符、未知 codec、非正的采样率 / 声道数、负的 bitrate，以及超过 `FrameCodec.MAX_PAYLOAD_SIZE` 的载荷。
+`csd-0` must be sent **out of band**: a raw AAC access unit carries no ADTS header, and without it the decoder cannot initialise. Both sides reject a `csdLen` that disagrees with the remaining byte count, an unknown codec, a non-positive sample rate / channel count, a negative bitrate, and any payload above `FrameCodec.MAX_PAYLOAD_SIZE`.
 
 ### FRAME (0x02) -- VD server -> Car
 
 ```
 +----------------------+--------+
-| ptsMs                | uint32 |  毫秒时间戳，无符号；到 2^32 回绕
-| aacFrame             | bytes  |  一帧裸 AAC-LC 访问单元（约 341 B）
+| ptsMs                | uint32 |  timestamp in milliseconds, unsigned; wraps at 2^32
+| aacFrame             | bytes  |  one raw AAC-LC access unit (~341 B)
 +----------------------+--------+
 ```
 
-48 kHz 的 AAC-LC 每帧 1024 samples = **21.333 ms / 46.875 帧每秒**（不是 20 ms / 50 fps）。`ptsMs` 只用于日志与欠载统计，本方案不做精确 A/V 同步；接收端使用抖动缓冲（默认 150 ms，可配 60~200 ms）自由跑播放。空载荷会被拒绝。采集静音期生产者仍按 46.875 fps 补发编码后的静音帧；若按 20 ms 节拍补帧，队列会膨胀约 300 ms 延迟（issue #13 真机稳定性实验结论）。
+At 48 kHz an AAC-LC frame of 1024 samples = **21.333 ms / 46.875 frames per second** (not 20 ms / 50 fps). `ptsMs` is only used for logging and underrun statistics — this design does not do precise A/V sync; the receiver runs playback freely against a jitter buffer (150 ms default, configurable 60-200 ms). An empty payload is rejected. While the capture source is silent the producer still pads encoded silence frames on the 46.875 fps beat; padding on a 20 ms beat would grow the queue by roughly 300 ms of latency (conclusion of the issue #13 on-device stability experiment).
 
 ## Data Channel (0x03)
 
@@ -315,21 +315,21 @@ UTF-8 text line. Car routes all logs (including VideoDecoder and UsbAdbConnectio
 
 ### PHONE_STATUS (0x21) -- Phone -> Car
 
-手机电量与充电状态（issue #151）。定长 3 字节：
+Phone battery and charging state (issue #151). Fixed 3-byte layout:
 
 ```
 +----------------------+--------+
-| level                | uint8  |  0-100（手机已按 EXTRA_LEVEL/EXTRA_SCALE 换算）
-| flags                | uint8  |  bit0 = 充电中；其余位保留，接收端忽略
-| temperature          | int8   |  摄氏度；-128 = 手机未上报
+| level                | uint8  |  0-100 (already converted by the phone from EXTRA_LEVEL/EXTRA_SCALE)
+| flags                | uint8  |  bit0 = charging; other bits reserved, ignored by the receiver
+| temperature          | int8   |  degrees Celsius; -128 = the phone did not report it
 +----------------------+--------+
 ```
 
-- 发送时机：手机端在**握手完成且控制连接可用**后，按 `BatteryReportGate` 节流上行 —— 首次采样必发、充电位翻转或 ≥2% 变化立即发、1% 变化需距上次 ≥5s、电量不变时 60s 兜底一次。未连接/未握手不发，发送失败只记日志并保留状态以便下一轮重试（issue #41 的教训）。
-- 载荷长度必须恰好 3 字节：短于或长于 3 字节都抛 `ProtocolDecodeException`（定长状态向量多出字节说明组帧错位，不能静默按前 3 字节解析）。`level > 100` 同样判错。
-- 车机端只用于信息栏 chip：`86%` / `86%+`（充电中）/ `—`（未收到或已断开）。文本由 `protocol-core` 的 `BatteryFormat` 生成，受横屏左栏 76dp 定宽约束，不加图标。
+- Send timing: after **handshake complete and the control connection usable**, the phone throttles reports through `BatteryReportGate` — the first sample always goes out, a charging-bit flip or a ≥2% change sends immediately, a 1% change must be ≥5s after the last report, and an unchanged level falls back to one report every 60s. Nothing is sent while disconnected/unhandshaked; a failed send only logs and keeps the state for the next retry (lesson from issue #41).
+- The payload length must be exactly 3 bytes: shorter or longer both raise `ProtocolDecodeException` (extra bytes in a fixed-size status vector mean frame misalignment and must not be silently parsed as the first 3). `level > 100` is rejected the same way.
+- The car only uses it for the info-bar chip: `86%` / `86%+` (charging) / `—` (not received or disconnected). The text comes from `BatteryFormat` in `protocol-core` and lives within the landscape left column's fixed 76dp width, with no icon.
 
-**向后兼容**：车机端 `CarSessionCoordinator.handleDataFrame` 的 `when` 没有 else 分支，老版本收到 `0x21` 会直接忽略，不会误当作别的消息执行；手机端只在握手完成（`handshakeReceived`）后才发送，且未知类型不会影响老会话的其他帧。
+**Backward compatibility**: the `when` in the car's `CarSessionCoordinator.handleDataFrame` has no else branch, so an older version receiving `0x21` ignores it outright and never mistakes it for another message; the phone only sends after the handshake completes (`handshakeReceived`), and unknown types never affect other frames of an older session.
 
 ### Decoding contract (all payloads)
 
@@ -441,9 +441,9 @@ All VD server lifecycle commands are defined in `VdDeploy.kt` (protocol module) 
 | `probeCommand` | Liveness probe (output form): `if pgrep -f [P]ipelineServer >/dev/null 2>&1; then echo Y; else echo N; fi` — prints `Y` if alive, `N` if gone. **`pgrep -f`, not `pkill -0`** (2026-10-10): toybox 0.8.11-android rejects `pkill -0` with `bad -L '0'` (always rc=1 → probe always reported GONE, silently disabling the exit wait). `pgrep` and `pkill` share toybox's option table, so any device where the kill path works has a working probe |
 | `probeExitCodeCommand` | Liveness probe (exit code form): `if pgrep -f [P]ipelineServer >/dev/null 2>&1; then exit 0; else exit 1; fi` — exit 0 = alive, exit 1 = gone. For callers that only see exit status (car's ADB `shell()` path, desktop's `AdbDeployer.probe()`). Also `pgrep` for the same reason as above |
 
-**Stopping the engine (2026-10-10, measured on MI 9) — per-session sentinel since issue #180.** SIGTERM does **not** run the JVM shutdown hook on Android: ART's `app_process` treats a bare SIGTERM as an immediate, uncatchable terminate. MI 9 实测 `kill -TERM` → process gone within 1s, `PipelineServer.cleanup()` zero-executed (no recovery step in vd-server.log). `cleanup()` therefore only runs on the engine's **normal exit paths** (main-thread `run()` finally: socket loss, bind timeouts, watchdog). The stop protocol is a **file sentinel**, named per session (`stop-request-<token>`, token generated at deploy time and handed over in argv slot 11) so a previous session's late teardown can never land on the next engine — a fixed filename, and equally a pid *content* check, loses that race because the stop side reads the device at stop time, when the pid/token already belongs to the new engine. Engines launched **without** a token (old client / old scripts / e2e) fall back to the fixed `stop-request` with content-addressed pid and an mtime-vs-session-start rule. A **token** engine still accepts the fixed `stop-request`, but only when its content equals its own pid: the car ADB deploy path starts the engine on the car, so the phone never learns the token and its teardown can only write the fixed name (the command copies `vd-server.pid`). Empty/unparseable content is ignored there — an old client's late empty sentinel carries a fresh mtime, so honouring it would bring issue #180 back. The engine's watchdog consumes its sentinel and exits gracefully; only if that times out (`VdDeploySequence.GRACEFUL_EXIT_TIMEOUT_MS`, **12s**) does the caller force-kill. Startup cleanup deletes stale legacy sentinels (and, in token mode, other sessions' sentinel files) so a leftover request can never kill a fresh instance; a sentinel at *this* session's own path is kept (it can only come from the client that owns the token, i.e. a real stop during the init window). Engines publish `vd-server.pid` + `vd-server.session` atomically and remove them on cleanup only when they still carry their own value.
+**Stopping the engine (2026-10-10, measured on MI 9) — per-session sentinel since issue #180.** SIGTERM does **not** run the JVM shutdown hook on Android: ART's `app_process` treats a bare SIGTERM as an immediate, uncatchable terminate. MI 9 measurement: `kill -TERM` → process gone within 1s, `PipelineServer.cleanup()` executed zero times (no recovery step in vd-server.log). `cleanup()` therefore only runs on the engine's **normal exit paths** (main-thread `run()` finally: socket loss, bind timeouts, watchdog). The stop protocol is a **file sentinel**, named per session (`stop-request-<token>`, token generated at deploy time and handed over in argv slot 11) so a previous session's late teardown can never land on the next engine — a fixed filename, and equally a pid *content* check, loses that race because the stop side reads the device at stop time, when the pid/token already belongs to the new engine. Engines launched **without** a token (old client / old scripts / e2e) fall back to the fixed `stop-request` with content-addressed pid and an mtime-vs-session-start rule. A **token** engine still accepts the fixed `stop-request`, but only when its content equals its own pid: the car ADB deploy path starts the engine on the car, so the phone never learns the token and its teardown can only write the fixed name (the command copies `vd-server.pid`). Empty/unparseable content is ignored there — an old client's late empty sentinel carries a fresh mtime, so honouring it would bring issue #180 back. The engine's watchdog consumes its sentinel and exits gracefully; only if that times out (`VdDeploySequence.GRACEFUL_EXIT_TIMEOUT_MS`, **12s**) does the caller force-kill. Startup cleanup deletes stale legacy sentinels (and, in token mode, other sessions' sentinel files) so a leftover request can never kill a fresh instance; a sentinel at *this* session's own path is kept (it can only come from the client that owns the token, i.e. a real stop during the init window). Engines publish `vd-server.pid` + `vd-server.session` atomically and remove them on cleanup only when they still carry their own value.
 
-**Exit latency is ~6.1–6.3s, not 2–4s (2026-10-10, two independent measurements).** The earlier "cleanup takes 2–4s" estimate only covered the shell commands *inside* `cleanup()`; it missed the pipeline thread's bounded join, encoder/VD release, and the wait on the phone-side `ConnectionService` teardown grabbing the same display/rotation locks. Desktop-side probe log (`探针 ALIVE @+189ms` → `探针 GONE @+6123ms`) and an independent device-side poller (sentinel → pid gone ≈ 6.3s) agree. With the then-6s budget the wait missed by **130 ms on every reconnect**, so a `-9` was always issued right as `cleanup()` was finishing — truncating the tail of it (the `screen_off_timeout` restore). Both budgets are now 12s (≈2× the measured value).
+**Exit latency is ~6.1–6.3s, not 2–4s (2026-10-10, two independent measurements).** The earlier "cleanup takes 2–4s" estimate only covered the shell commands *inside* `cleanup()`; it missed the pipeline thread's bounded join, encoder/VD release, and the wait on the phone-side `ConnectionService` teardown grabbing the same display/rotation locks. Desktop-side probe log (`探针 ALIVE @+189ms` → `探针 GONE @+6123ms`, i.e. "probe ALIVE" then "probe GONE") and an independent device-side poller (sentinel → pid gone ≈ 6.3s) agree. With the then-6s budget the wait missed by **130 ms on every reconnect**, so a `-9` was always issued right as `cleanup()` was finishing — truncating the tail of it (the `screen_off_timeout` restore). Both budgets are now 12s (≈2× the measured value).
 
 **Process pattern (`[P]ipelineServer`) — what it does and does not protect (2026-10-10, MI 9).** A plain `PipelineServer` pattern is unusable: the command text lands in the invoking wrapper shell's own cmdline (`sh -c "... pgrep -f PipelineServer ..."`), so the lookup matches *itself* and every later command on that line is silently skipped. The bracket form is a **regex** that matches the engine's `com.dilinkauto.vdserver.PipelineServer` but not the literal `[P]ipelineServer` text in that wrapper. Measured limits:
 
@@ -457,7 +457,7 @@ All VD server lifecycle commands are defined in `VdDeploy.kt` (protocol module) 
 | Slot | Source / clamping |
 |------|-------------------|
 | `W H` | VirtualDisplay dims. Phone-side: `VdDimensions.resolve` (car viewport, even-aligned, anti-crop scaled to the phone's physical long edge). Car-side: native car viewport |
-| `DPI` | 单一来源（issue #202）：`VdDpiResolver` 依次取 用户 override（协议区间 120..480 **且不超过 `VideoConfig.maxSafeDpi`**）> 自动标定（`calculateOptimalDpi`）> 默认回落。越界/超上限不夹边界，回落自动值并打 W 日志 |
+| `DPI` | Single source (issue #202): `VdDpiResolver` takes, in order, the user override (protocol range 120..480 **and not above `VideoConfig.maxSafeDpi`**) > auto-calibration (`calculateOptimalDpi`) > default fallback. Out-of-range / above-cap values are not clamped to the boundary: it falls back to the auto value and logs a W |
 | `PHONE_HOST` | Host the VD server reverse-connects to on `LIFECYCLE_PORT` |
 | `EW EH` | Encoder dims, proportionally scaled to fit 1920x1080, then floored to even |
 | `FPS` | Target frame rate; all pipeline timeouts derive from it |
@@ -465,7 +465,7 @@ All VD server lifecycle commands are defined in `VdDeploy.kt` (protocol module) 
 | `CAR_HOST` | Trailing, optional. Dotted-quad IPv4 or hostname; blank or malformed degrades to `-` (= accept any peer) rather than failing the deploy. Pins the engine's 9638/9639 accepts to the receiver it serves |
 | `ALLOWED` | issue #21: comma-joined package names (`[A-Za-z0-9._]{1,255}`) the user allows onto the car screen; `-` / empty / all-invalid = no allowlist filtering (car/desktop ADB deploys cannot read the phone prefs). Bounds `RecentsParser.pickQuickSwitchTarget` so a private app is never pulled into the VD |
 | `SESSION` | issue #180: the session token generated at deploy time (`[A-Za-z0-9_-]{1,64}`, 32 hex chars from a UUID), also used to name this session's stop sentinel. `-` / invalid = legacy engine, listening on the fixed `stop-request` with pid content addressing + mtime fallback |
-| `DPI_SOURCE` | issue #202: DPI 来源令牌（`auto` / `user-240` / `fallback-480-234`，`[A-Za-z0-9._-]{1,48}`），引擎只把它打进 `Starting:` 行；`-` / 缺省 = 旧部署端未上报（日志记 `unknown`） |
+| `DPI_SOURCE` | issue #202: DPI source token (`auto` / `user-240` / `fallback-480-234`, `[A-Za-z0-9._-]{1,48}`); the engine only prints it in the `Starting:` line. `-` / absent = an old deploy site did not report it (logged as `unknown`) |
 
 ### Launch command line
 
@@ -544,7 +544,7 @@ AUTH_SIGNATURE = 2
 AUTH_RSAPUBLICKEY = 3
 ```
 
-能力位掩码（`HandshakeRequest.supportedFeatures` = 接收端想用什么；`HandshakeResponse` 尾字段同名字段 = 手机能采集什么）：
+Capability bitmask (`HandshakeRequest.supportedFeatures` = what the receiver wants to use; the same-named trailing field in `HandshakeResponse` = what the phone can capture):
 
 ```
 FEATURE_VIDEO          = 0x01
