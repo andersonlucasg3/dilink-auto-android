@@ -1,131 +1,131 @@
-# 怎么发 Issue（Issue 操作指引）
+# How to open an issue (issue operating guide)
 
-> 本文件是仓库内所有 Agent 的 issue 操作规范，**必须遵照执行**。
-> 配套：怎么开 PR 见 [PR_GUIDE.md](PR_GUIDE.md)；流程总览见 [AGENTS.md](../AGENTS.md) §3。
+> This document is the issue operating standard for all Agents in the repository and **must be followed**.
+> Related: how to open a PR in [PR_GUIDE.md](PR_GUIDE.md); workflow overview in [AGENTS.md](../AGENTS.md) §3.
 
-## 定位：issue 是最小可派活单元
+## Definition: the issue is the smallest delegable unit
 
-- 一个 issue = 一件可以独立派给一个 subagent、独立验收、独立关闭的事。
-- **只开 issue 不动手修**：巡检、实车测试、代码审查中遇到的问题（不分大小）先提 issue；修不修、谁修、什么时候修，由 issue 的讨论决定。
-- 不开 issue 就动手 = 无据可查。任何「我觉得这里有问题」都必须先变成带证据的 issue。
+- One issue = one thing that can be delegated independently to a subagent, validated independently and closed independently.
+- **Only open the issue, do not make the fix**: problems found in inspection, real-vehicle testing and code review (no matter the size) must first become an issue; whether it will be fixed, by whom and when is decided in the issue discussion.
+- Acting without opening an issue = work without a trace. Any "I think there is a problem here" must first become an issue with evidence.
 
-## 什么时候开
+## When to open one
 
-| 场景 | 标题类型 | 标签 |
+| Scenario | Title type | Label |
 |---|---|---|
-| 功能坏了、行为不符合预期 | `bug` | `bug` |
-| 测试/构建/门禁自身有缺陷（误报、漏报、环境依赖） | `bug` 或 `fix` | `bug` |
-| 新功能/新能力需求 | `feat` | `enhancement` |
-| 重构（不改外部行为） | `refactor` | 视内容定 |
-| 性能优化 | `perf` | `enhancement` |
-| 文档新增/修订 | `docs` | `documentation` |
-| 协作规范/流程约定 | `[规范]` | `documentation` |
-| 调研/可行性报告 | `[存档]` | `documentation` |
-| 缺口总账、落地汇总 | `[追踪]` / `[记录]` | `documentation` |
+| Broken feature, behavior outside expectations | `bug` | `bug` |
+| Defect in the test/build/gate itself (false positive, false negative, environment dependency) | `bug` or `fix` | `bug` |
+| Need for a new feature / new capability | `feat` | `enhancement` |
+| Refactoring (without changing external behavior) | `refactor` | depends on the content |
+| Performance optimization | `perf` | `enhancement` |
+| Documentation inclusion/review | `docs` | `documentation` |
+| Collaboration standard / process convention | `[规范]` ("standard") | `documentation` |
+| Research / feasibility report | `[存档]` ("archive") | `documentation` |
+| General gap tracking, delivery summary | `[追踪]` ("tracking") / `[记录]` ("record") | `documentation` |
 
-新开 issue 一律带类型前缀，不用「有个问题」「看看这个」这类标题。
+Every new issue carries a type prefix; do not use titles like "there is a problem" or "look at this".
 
-## 标题规范
+## Title format
 
 ```
-type(scope): 一句话摘要
+type(scope): one-line summary
 ```
 
-- 摘要说清「什么坏了 / 要什么」，扫列表即可读懂项目状态。
-- `scope` 标注子系统：`vd-server` / `app-server` / `app-client` / `app-desktop` / `protocol` / `ci` / `测试` / `文档` 等，可省略。
-- 同根因的后续修复互相引用编号，并在标题里说明是第几代（如 `…（#3 第二例）`）。
-- 示例：
-  - `bug(vd-server): 实车「先流畅 → 渐进卡顿 → 卡死 → 断联重启」：编码帧同步阻塞写 socket，反压憋停 VD 后以 5s 写超时终止会话`
-  - `bug(app-server): 黑屏自愈在 3 秒静止画面上误触发 re-handshake，会话被反复重建`
-  - `[规范] 仓库改动统一走 issue → plan → worktree → PR → 回签`
+- The summary must make clear "what broke / what is wanted", so that reading the list makes the state of the project understandable.
+- `scope` indicates the subsystem: `vd-server` / `app-server` / `app-client` / `app-desktop` / `protocol` / `ci` / `tests` / `documentation` etc., and may be omitted.
+- Later fixes with the same root cause reference each other's number and state in the title which generation it is (e.g. `… (#3 second case)`).
+- Examples:
+  - `bug(vd-server): real vehicle "smooth → progressive stutter → freeze → disconnect and restart": blocking synchronous write of the encoded frame to the socket; backpressure to the VD and the 5s write timeout terminate the session`
+  - `bug(app-server): black-screen auto-correction wrongly triggers a re-handshake on a 3-second static image and the session is rebuilt repeatedly`
+  - `[规范] Repository changes always follow issue → plan → worktree → PR → revalidation`
 
-## 正文四要素（缺一不可）
+## The four body elements (none may be missing)
 
-### 1. 现象
+### 1. Symptom
 
-行为类 issue 的现象段必须交付**一条可直接粘贴进 PowerShell 的复现命令**，外加期望输出、实际输出与触发条件：
+The symptom section of a behavior issue must provide **a reproduction command that can be pasted directly into PowerShell**, plus the expected output, the actual output and the trigger condition:
 
-| 字段 | 要求 |
+| Field | Requirement |
 |---|---|
-| 复现命令 | 一条能整段粘贴执行的命令（含 `.\gradlew.bat`、`adb`、`.vnev` 等必要前缀）；跨多步的先归并成单行或一个可整段粘贴的代码块 |
-| 期望输出 | 正常时应当看到什么（原文或关键行） |
-| 实际输出 | 现在看到什么，贴**原文**（含退出码、错误文案、日志行） |
-| 触发条件 / 频率 | 什么设备/环境/条件下触发；偶发给出「出现次数 / 总次数」，必现直接写必现 |
+| Reproduction command | A command that can be pasted and executed in full (with the necessary prefixes such as `.\gradlew.bat`, `adb`, `.vnev`); if it involves several steps, first consolidate it into a single line or a code block that can be pasted in full |
+| Expected output | What should be seen under normal conditions (original text or key lines) |
+| Actual output | What is seen now; paste the **original text** (including exit code, error message and log lines) |
+| Trigger condition / frequency | On which device/environment/condition it occurs; if intermittent, state "occurrences / total"; if always reproducible, write that it is always reproducible |
 
-- 非行为类 issue（纯文档、纯重构、纯规范）在现象段写 `复现命令：无（不涉及运行时行为）`。
-- 反例：「有时候会卡」「感觉不太对」——无法复现的一律先贴 `needs-repro`。
+- Issues that are not about behavior (documentation only, refactoring only, policy only) write in the symptom section `Reproduction command: none (does not involve runtime behavior)`.
+- Counterexamples: "sometimes it hangs", "does not look right" — anything not reproducible must first receive `needs-repro`.
 
-### 2. 证据链
+### 2. Evidence chain
 
-- 每条判断都要有 `文件:行号` 或可复现命令；日志要给路径与关键行。
-- 实车/桌面端问题优先引用现场日志原文，并说明日志来自哪个构建（debug/release、诊断开关是否打开）。
-- **无证据不修复**（AGENTS.md §2）：没有证据的 finding 视为虚构。
+- Every claim needs a `file:line` or a reproducible command; for logs, provide the path and the key lines.
+- Real-vehicle / desktop app problems should preferably quote the original text of the field log and state which build the log came from (debug/release, whether the diagnostic switch was on).
+- **No evidence, no fix** (AGENTS.md §2): a finding without evidence is considered fictitious.
 
-### 3. 影响面
+### 3. Impact area
 
-- 谁受影响（哪个模块/哪条链路/哪类设备）、什么条件下触发、严重度用 **P+数字**：P0 阻断 / P1 常见 / P2 边角。
-- 修复顺序按优先级在 issue 里定，不在实施时定。
-- 一件事装不下的大 issue：先定**分节（P+字母）**再派活 —— 一个分节 = 一个可独立合并的 PR，命名见 [PR_GUIDE.md](PR_GUIDE.md)「拆分与命名规范」。
+- Who is affected (which module/which flow/which device type), under what condition it triggers, and severity with **P+number**: P0 blocking / P1 common / P2 corner case.
+- The fix order is defined by priority in the issue, not in the implementation.
+- A large issue that does not fit into one thing: first define the **subsections (P+letter)** and then delegate — one subsection = one PR that can be merged independently; the naming is in [PR_GUIDE.md](PR_GUIDE.md) "Division and naming standard".
 
-### 4. 修复候选 + 回归建议
+### 4. Fix candidates + regression suggestion
 
-- 给出建议方向（可以是多个候选，不要求完美方案），并明确**用什么测试/检查钉住复发**。
-- 每个被修的缺陷都应留下「墓碑」：单测、注释或文档里写明防哪个 issue 复发。
+- State the suggested direction (there may be several candidates; a perfect solution is not required) and make clear **with which test/verification recurrence will be pinned**.
+- Every fixed defect must leave a "tombstone": in the unit test, the comment or the document, write which issue it prevents from recurring.
 
-## 复现命令与 `needs-repro`
+## Reproduction command and `needs-repro`
 
-发 issue 时给不出可粘贴的复现命令，就贴 `needs-repro`，不要硬写「有时候会」：
+If, when opening the issue, it is not possible to provide a pasteable reproduction command, apply `needs-repro`; do not write "it sometimes happens":
 
-- **发现者**：补上一行命令与期望/实际输出后摘标签；确实补不出来，就在 issue 里说清为什么不可复现（时序、实车环境、权限），由维护者判断是否降级为观察项。
-- **修复者**：写 plan 时必须先回填一行验收基线 —— `用 issue 的复现命令复现：成功 / 失败（贴原始输出）`。复现失败说明 issue 描述与现状不符，退回发现者补充，不进实施；复现成功才摘 `needs-repro` 开始改。
-- **回签**：合并后用同一条命令再跑一次，见「关闭：行为类靠回签」。
+- **Discoverer**: add the command line and the expected/actual outputs and then remove the label; if it is truly impossible to include one, explain in the issue why it is not reproducible (timing, real-vehicle environment, permissions) and let the maintainer decide whether to downgrade it to an observation item.
+- **Fixer**: when writing the plan, it is mandatory to first fill in an acceptance baseline line — `Reproduction with the issue command: success / failure (paste the original output)`. A failed reproduction indicates that the issue description does not match the current state: return it to the discoverer for more information and do not start implementation; only after reproducing successfully remove `needs-repro` and start changing.
+- **Revalidation**: after the merge, run the same command again; see "Closure: behavior issues depend on revalidation".
 
-## 关闭：行为类靠回签，不靠合并
+## Closure: behavior issues depend on revalidation, not on the merge
 
-- 纯文档 / 纯重构 PR 可以 `Closes #NN`，合并即关闭。
-- 行为类 PR（`fix` / `feat` / `perf`，以及任何改运行时代码的 PR）正文用 `Refs #NN`；合并后 issue 保持打开并贴 `needs-live-verify`，等回签。
-- **回签**由发现者（或全新上下文的验证 agent）执行，按 [PR_GUIDE.md](PR_GUIDE.md)「合并后：对账与回签」模板贴环境、复现命令、实际输出与实车证据；结论为「症状消失」才摘标签并关闭。仍复现则摘标签、留 issue 并补证据。
-- 修复者不能给自己回签。
+- Documentation-only / refactoring-only PRs may use `Closes #NN`, and close on merge.
+- Behavior PRs (`fix` / `feat` / `perf` and any PR that changes runtime code) use `Refs #NN` in the body; after the merge, the issue stays open and receives `needs-live-verify`, awaiting revalidation.
+- **Revalidation** is performed by the discoverer (or by a verification agent in a completely fresh context), following the template in [PR_GUIDE.md](PR_GUIDE.md) "After the merge: review and revalidation", reporting the environment, the reproduction command, the actual output and real-vehicle evidence; only with the conclusion "symptom disappeared" is the label removed and the issue closed. If it still reproduces, remove the label, keep the issue open and add more evidence.
+- The fixer cannot revalidate their own work.
 
-## 记录三件套（用 issue 做项目记忆）
+## The record trio (use issues as the project's memory)
 
-| 类型 | 用途 |
+| Type | Use |
 |---|---|
-| `[记录]` | 合并态快照：某阶段落地汇总 + 实车验证结果，作为后续 issue 的现状基准 |
-| `[存档]` | 可行性/调研报告：结论与风险清单，被后续 issue 引用为源头 |
-| `[追踪]` | 缺口总账：逐项列「已做 / 未做 / 评估后建议不做并终结」，防止同一缺口被反复重开 |
+| `[记录]` ("record") | Post-merge state snapshot: summary of what was delivered in a stage + real-vehicle verification result, serving as a baseline of the current state for subsequent issues |
+| `[存档]` ("archive") | Feasibility/research report: conclusions and risk list, cited by subsequent issues as the origin |
+| `[追踪]` ("tracking") | General gap register: item by item, list "done / not done / evaluated and recommended not to do, closed", preventing the same gap from being reopened repeatedly |
 
-实车验证结果不写进 issue 长文：用 docs PR 回填仓库文档，issue 里只留结论与链接。
+Real-vehicle verification results do not go into the long issue text: fill in the repository documentation via a docs PR and leave only the conclusion and the link in the issue.
 
-## 反模式
+## Anti-patterns
 
-- 一个 issue 塞多件事 —— 无法独立关闭，按分节拆开。
-- 只有结论没有证据 —— 退回补充。
-- 把 issue 当聊天记录或进度播报 —— 过程写 PR 评论，结论写 issue。
-- 修完直接推主干 —— 必须走 PR。
-- 行为类 issue 用 `Closes` 合并即关 —— 症状没被复现命令验过，关闭只是修复者的自述。
-- 现象只写「有时候会失败」、没有可粘贴的命令 —— 先贴 `needs-repro`。
+- Putting several things into one issue — it cannot be closed independently; split by subsections.
+- Conclusion only, no evidence — return it for more information.
+- Treating the issue as a chat history or progress bulletin — the process goes in PR comments, the conclusion goes in the issue.
+- Pushing directly to main after fixing — going through a PR is mandatory.
+- A behavior issue closed on merge with `Closes` — the symptom was not verified by the reproduction command; the closure is only the fixer's claim.
+- A symptom described only as "sometimes fails", without a pasteable command — apply `needs-repro` first.
 
-## 模板（可直接抄）
+## Template (ready to copy)
 
 ```markdown
-## 现象
+## Symptom
 
-- 复现命令：`<一条可直接粘贴进 PowerShell 的命令>`
-- 期望输出：<正常时应看到什么>
-- 实际输出：<现在看到什么，贴原文>
-- 触发条件 / 频率：<设备 / 环境 / 条件 / 偶发或必现；非行为类写「无（不涉及运行时行为）」>
+- Reproduction command: `<a command that can be pasted directly into PowerShell>`
+- Expected output: <what should be seen under normal conditions>
+- Actual output: <what is seen now; paste the original text>
+- Trigger condition / frequency: <device / environment / condition / intermittent or always reproducible; if not a behavior issue, write "none (does not involve runtime behavior)">
 
-## 证据链
+## Evidence chain
 
-- `<文件>:<行号>`：<该处代码/配置说明了什么>
-- 日志：<路径> 关键行 <...>
+- `<file>:<line>`: <what that code/configuration demonstrates>
+- Log: <path> key lines <...>
 
-## 影响面
+## Impact area
 
-<谁受影响、什么条件、严重度 P0/P1/P2>
+<who is affected, under what condition, severity P0/P1/P2>
 
-## 修复候选
+## Fix candidates
 
-<建议方向；用什么测试/检查钉住复发；明确不做的部分>
+<suggested direction; with which test/verification to pin recurrence; what explicitly will not be done>
 ```

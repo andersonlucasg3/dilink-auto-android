@@ -1,162 +1,162 @@
-# 双手机真机 E2E：场景矩阵与探索策略设计
+# Dual-phone real-device E2E: scenario matrix and exploration strategy design
 
-> 状态：**已落地并进入真机验证**（2026-10-17）。P0 全绿（S01~S04）；P1 已跑到 S16（S09~S16 修复后复验中）；P2 进行中。**§1 角色表按 2026-10-16 实测修正（与初版假设相反）**。
-> 配套：`scripts/e2e-dual-device.sh`（主编排）+ `scripts/lib/{devices,ops,asserts}.sh` + `scripts/scenarios/s01-s22` + `scripts/lib/explore.py`；runbook `docs/e2e-dual-device-runbook.md`（红线/排查 §5/§6）；桌面端范式来源 `scripts/e2e-reconnect-cleanup.sh`。
+> Status: **landed and in real-device verification** (2026-10-17). P0 all green (S01~S04); P1 has run through S16 (S09~S16 being re-verified after fixes); P2 in progress. **The §1 role table was corrected per the 2026-10-16 measurements (the opposite of the initial assumption)**.
+> Companion pieces: `scripts/e2e-dual-device.sh` (main orchestration) + `scripts/lib/{devices,ops,asserts}.sh` + `scripts/scenarios/s01-s22` + `scripts/lib/explore.py`; runbook `docs/e2e-dual-device-runbook.md` (red lines/troubleshooting §5/§6); desktop-side paradigm source `scripts/e2e-reconnect-cleanup.sh`.
 
-## 1. 拓扑与角色
+## 1. Topology and roles
 
-引擎（vd-server）**恒跑在发送端（手机角色）本机**；接收端（车机角色）经 adb 连发送端 5555 部署/拉起引擎，从发送端 **9638** 拉 H.264 视频、往 **9639** 回注触摸，**9637** 为控制口（`protocol-core/.../Ports.kt` 实证）。
+The engine (vd-server) **always runs on the sender machine itself (phone role)**; the receiver (car role) connects over adb to the sender's 5555 to deploy/start the engine, pulls H.264 video from the sender's **9638**, injects touch back to **9639**, and **9637** is the control port (verified in `protocol-core/.../Ports.kt`).
 
-| 角色 | 设备（2026-10-16 实测） | APK | 职责 |
+| Role | Device (measured 2026-10-16) | APK | Responsibility |
 |---|---|---|---|
-| 发送端（phone，B） | **MEIZU 20 Inf**（无线 `192.168.3.206:5555`；PIN 经 `DILINK_TEST_PIN_PHONE` 注入，**禁落仓库**） | `com.dilinkauto.client` | 9637 监听；本机跑引擎（VD + GlPipeline + 编码）；无线 adb（**无 USB transport**） |
-| 接收端（car，A） | **MI 9**（USB `9e779dea`；PIN 经 `DILINK_TEST_PIN_CAR` 注入） | `com.dilinkauto.server` | adb host 连 B:5555 部署引擎；拉 B:9638 解码上屏；触摸 → B:9639 |
-| 编排者 | PC | — | adb 装 APK、解锁、`input` 驱动两端 UI、screencap、logcat、pgrep 轮询、断言 |
+| Sender (phone, B) | **MEIZU 20 Inf** (wireless `192.168.3.206:5555`; PIN injected via `DILINK_TEST_PIN_PHONE`, **must never be committed to the repo**) | `com.dilinkauto.client` | Listens on 9637; runs the engine locally (VD + GlPipeline + encoding); wireless adb (**no USB transport**) |
+| Receiver (car, A) | **MI 9** (USB `9e779dea`; PIN injected via `DILINK_TEST_PIN_CAR`) | `com.dilinkauto.server` | adb host connects to B:5555 to deploy the engine; pulls B:9638 and decodes it to screen; touch → B:9639 |
+| Orchestrator | PC | — | adb installs APKs, unlocks, drives both UIs with `input`, screencap, logcat, pgrep polling, assertions |
 
-> 初版假设（MI 9 作发送端）与实测相反——实际按上表运行；`--phone`/`--car` 均必填，禁自动挑选设备。
-> 两端同一 WiFi（无 AP 隔离）；B 的无线 adb 授权对话框首次出现，PC 侧 `input tap` 自动点，授权后持久。
-> **无线拓扑后果**：B 的 WiFi 一断，PC→B 的 adb 即断（offline）→「断网类 op」必须先在 B 预置 nohup 自恢复任务（见 ops.sh `op_wifi_off`/`op_airplane` 注释；`svc wifi` 在 MEIZU Android 15 不生效，须 `cmd wifi`）。
+> The initial assumption (MI 9 as sender) is the opposite of the measurements — the run actually follows the table above; `--phone`/`--car` are both mandatory and automatic device selection is forbidden.
+> Both ends on the same WiFi (no AP isolation); B's wireless adb authorization dialog appears the first time and is clicked automatically by the PC side with `input tap`; the authorization persists afterwards.
+> **Wireless-topology consequence**: as soon as B's WiFi drops, the PC→B adb link drops too (offline) → "network-cutting ops" must first pre-stage a nohup self-recovery job on B (see the `op_wifi_off`/`op_airplane` comments in ops.sh; `svc wifi` does not take effect on MEIZU Android 15 — `cmd wifi` is required).
 
-## 2. 测试策略分层
+## 2. Test strategy layers
 
-穷举所有 edge case 不可能，组合覆盖可以。三层递进，共用 §5 的同一套不变量：
+Exhaustively enumerating every edge case is impossible; combinatorial coverage is not. Three progressive layers, sharing the same invariant set from §5:
 
-| 层 | 形态 | 用途 | 载体 |
+| Layer | Form | Purpose | Carrier |
 |---|---|---|---|
-| L1 | 确定性场景矩阵 | 固化已知回归面，每场景可独立重跑 | `scripts/scenarios/*.sh` |
-| L2 | 模型驱动（状态机遍历） | 从每个状态出发跑短操作序列全排列，专抓竞态 | `scripts/lib/explore.py` |
-| L3 | 随机模糊 + 故障注入 | 夜间无人值守长跑，撞未知 edge case | `explore.py --fuzz` |
+| L1 | Deterministic scenario matrix | Freeze the known regression surface; every scenario can be re-run independently | `scripts/scenarios/*.sh` |
+| L2 | Model-driven (state-machine traversal) | From every state, run all permutations of short operation sequences, specifically hunting races | `scripts/lib/explore.py` |
+| L3 | Random fuzzing + fault injection | Unattended overnight long runs to hit unknown edge cases | `explore.py --fuzz` |
 
-L3 任何不变量破坏 → 冻结现场 → 把操作序列回放固化为新的 L1 场景（bug 修复的回归用例）。
+Any invariant violation in L3 → freeze the scene → replay the operation sequence and solidify it as a new L1 scenario (the regression case for the bug fix).
 
-## 3. 会话状态机模型（L2 骨架）
+## 3. Session state machine model (L2 skeleton)
 
-### 3.1 状态枚举（代码实证）
+### 3.1 State enumerations (verified in code)
 
-- 车机侧 `CarConnectionService.State`：`IDLE → CONNECTING → CONNECTED → STREAMING`（CONNECTING 内两条并行轨：adb 部署轨 + 控制/生命周期轨；首帧视频到达 → STREAMING）
-- 手机侧 `ConnectionService.State`：`IDLE → WAITING → CONNECTED → STREAMING`（WAITING = 9637 监听中）
+- Car side `CarConnectionService.State`: `IDLE → CONNECTING → CONNECTED → STREAMING` (inside CONNECTING there are two parallel tracks: the adb deployment track + the control/lifecycle track; the first video frame arriving → STREAMING)
+- Phone side `ConnectionService.State`: `IDLE → WAITING → CONNECTED → STREAMING` (WAITING = listening on 9637)
 
-### 3.2 复合状态（模型实际跟踪的向量）
+### 3.2 Composite state (the vector the model actually tracks)
 
-`(car_state, phone_state, engine, vd, sentinel)`，其中 engine/vd ∈ {absent, present}，sentinel ∈ {off, on}。合法收敛态：
+`(car_state, phone_state, engine, vd, sentinel)`, where engine/vd ∈ {absent, present} and sentinel ∈ {off, on}. Legal converged states:
 
-| 复合态 | 含义 |
+| Composite state | Meaning |
 |---|---|
-| (IDLE, IDLE, absent, absent, off) | 中立态（每轮 setup/restore 目标） |
-| (STREAMING, STREAMING, present, present, on) | 健康会话 |
-| (CONNECTING, WAITING, *, *, *) | 部署/握手中（允许的中间态，有超时预算） |
-| (IDLE, WAITING, absent, absent, off) | 会话结束收敛（收尾断言目标） |
+| (IDLE, IDLE, absent, absent, off) | Neutral state (target of every round's setup/restore) |
+| (STREAMING, STREAMING, present, present, on) | Healthy session |
+| (CONNECTING, WAITING, *, *, *) | Deploying/handshaking (allowed intermediate state, with a timeout budget) |
+| (IDLE, WAITING, absent, absent, off) | Session-end convergence (target of the teardown assertion) |
 
-### 3.3 操作集 O
+### 3.3 Operation set O
 
-每个 op = 确定性命令序列，执行后有 settle 窗口（默认 15s，收尾类 30s）：
+Each op = a deterministic command sequence; after execution there is a settle window (15s by default, 30s for teardown-type ops):
 
-| op | 执行侧 | 命令概要 |
+| op | Executing side | Command summary |
 |---|---|---|
-| `connect` | A | UI 输入 B 的 IP → 连接（uiautomator 定位按钮 + `input tap/text`） |
-| `disconnect` | A | UI 断开 |
-| `rotate` | B | `settings put system user_rotation` + 触发重摆（横竖互切） |
+| `connect` | A | Enter B's IP in the UI → connect (uiautomator locates the button + `input tap/text`) |
+| `disconnect` | A | Disconnect in the UI |
+| `rotate` | B | `settings put system user_rotation` + trigger a re-layout (toggle landscape/portrait) |
 | `wifi_off` / `wifi_on` | B | `svc wifi disable/enable` |
-| `airplane` | B | `settings put global airplane_mode_on` + 广播 |
+| `airplane` | B | `settings put global airplane_mode_on` + broadcast |
 | `kill_engine` | B | `pgrep -f "[P]ipelineServer"` → `kill -9` |
 | `kill_client` | B | `am force-stop com.dilinkauto.client` |
 | `kill_server` | A | `am force-stop com.dilinkauto.server` |
-| `reinstall` | B | PC 侧 `adb install -r app-client-debug.apk` |
+| `reinstall` | B | PC side `adb install -r app-client-debug.apk` |
 | `screen_off` / `screen_on` | B | `cmd display power-off 0` / `power-reset 0` |
-| `switch_app` | A/B | 经 app UI 在 VD 上启动另一个 app |
-| `ime_open` | A | 在 VD 上点开一个输入框（键盘完整性场景） |
-| `usb_pull` | PC | 拔 B 的 USB（物理动作，留人工开关） |
-| `adb_revoke` | B | 设置里撤销 USB 调试授权 |
+| `switch_app` | A/B | Launch another app on the VD through the app UI |
+| `ime_open` | A | Tap open an input field on the VD (keyboard integrity scenario) |
+| `usb_pull` | PC | Unplug B's USB (physical action, left as a manual switch) |
+| `adb_revoke` | B | Revoke USB debugging authorization in settings |
 
-### 3.4 遍历规则
+### 3.4 Traversal rules
 
-- 每状态只保留**有意义 op 子集**（如 IDLE 态只跑 `connect`/`reinstall`/`adb_revoke`），剪掉无意义组合。
-- depth-2 全排列（每状态 25~64 序列）；depth-3 按 10% 抽样。
-- 每轮：`setup(中立态) → op1 → settle+中间断言 → op2 → settle → 全套不变量 → restore(中立态)`。
-- 单轮预算 ≤ 90s；整轮跑完保存序列日志，供失败回放。
-- 中止条件：连续 3 轮在同一 op 失败 → 暂停并上报；任一端掉线 → abort 全轮。
+- Each state keeps only a **subset of meaningful ops** (e.g. in IDLE only `connect`/`reinstall`/`adb_revoke` run), pruning meaningless combinations.
+- depth-2 full permutations (25~64 sequences per state); depth-3 sampled at 10%.
+- Each round: `setup(neutral state) → op1 → settle + intermediate assertions → op2 → settle → full invariant set → restore(neutral state)`.
+- Per-round budget ≤ 90s; sequence logs are saved after each full round for failure replay.
+- Abort conditions: 3 consecutive rounds failing on the same op → pause and report; either end going offline → abort the whole round.
 
-## 4. L1 场景库
+## 4. L1 scenario library
 
-标准结构：`setup → ops → asserts → restore`（restore 与 setup 相同，保证场景间无残留）。
+Standard structure: `setup → ops → asserts → restore` (restore is identical to setup, guaranteeing no residue between scenarios).
 
-### P0 最小闭环（未全绿前不跑其他场景）
+### P0 minimum closed loop (no other scenarios run until this is fully green)
 
-| ID | 场景 | 操作序列 | 断言 |
+| ID | Scenario | Operation sequence | Assertions |
 |---|---|---|---|
-| S01 | 基线建流 | connect（`reach_streaming` 内置 `wait_stream_settled`：等建流后 ~40s 黑屏误报风暴静默——VD 空 home 合法黑屏被 BlackScreenDetector 误报，2 次重建后自愈，2026-10-17 try2 实证） | 双端 STREAMING；B 的 `dumpsys display` 有 DiLinkAutoVD 且 real 尺寸 = 握手 vdWidth/vdHeight；**A 屏（解码渲染面）screencap 非纯黑为主判据**，VD 截屏非纯黑为辅助观测（VD 空 launcher 恒黑属正常，2026-10-16 v5 实证）；vd-server.log 有 `Video on :9638` |
-| S02 | 触摸回传 | S01 + **先点应用磁贴进镜像面**（dump A UI → 顶部网格区第 1 个磁贴 → tap → 等 A logcat `CarShell: launchApp clicked` 证据；CarShell 初始在 HOME 应用网格，镜像面只在点开 app 后可见，Home 态下 SurfaceView INVISIBLE 不接收触摸——2026-10-17 try2 根因；该前置为**软处理**，失败不直接判败）+ A 上 tap 三个点（25/50/75% × 55%，坐标现算） | **B 的 client.log 出现 A 端 `Touch #N action=` 中继行**（CarTouchSender 前 5 次触摸经 9637 中继；2026-10-16 实证旧判据 `InputManager/inject` 恒过已废）+ 无 `Touch DROP`；流不被打断（双端仍 STREAMING）；A 屏非纯黑 |
-| S03 | 优雅收尾 | S01 + disconnect | 引擎优雅退出（6.1~6.3s 内）无「强制 kill」；screen_off_timeout 恢复基线；9637 释放；`pgrep` 引擎归零 |
-| S04 | 旋转重握手 | S01 + rotate | 旧 VD teardown → 新握手 → 重回 STREAMING；新 VD 尺寸正确 |
+| S01 | Baseline stream setup | connect (`reach_streaming` has a built-in `wait_stream_settled`: wait ~40s after stream setup for the false black-screen report storm to go silent — a legitimately black empty VD home screen is misreported by BlackScreenDetector, self-healing after 2 rebuilds, verified 2026-10-17 try2) | Both ends STREAMING; B's `dumpsys display` contains DiLinkAutoVD and the real size = the handshake vdWidth/vdHeight; **A's screen (decode/render surface) not being pure black in a screencap is the primary criterion**, a non-pure-black VD screenshot is auxiliary observation (an empty VD launcher is constantly black by nature, verified 2026-10-16 v5); vd-server.log contains `Video on :9638` |
+| S02 | Touch feedback | S01 + **first tap an app tile to enter the mirror surface** (dump the A UI → first tile in the top grid area → tap → wait for evidence `CarShell: launchApp clicked` in A's logcat; CarShell starts on the HOME app grid, the mirror surface is only visible after an app is opened, and in Home state the SurfaceView is INVISIBLE and does not receive touch — the 2026-10-17 try2 root cause; this precondition is **handled softly**, failing it does not directly fail the scenario) + tap three points on A (25/50/75% × 55%, coordinates computed on the fly) | **A-side `Touch #N action=` relay lines appear in B's client.log** (the first 5 touches from CarTouchSender are relayed via 9637; the old criterion `InputManager/inject`, which always passed, was proven obsolete on 2026-10-16) + no `Touch DROP`; the stream is not interrupted (both ends still STREAMING); A's screen is not pure black |
+| S03 | Graceful teardown | S01 + disconnect | The engine exits gracefully (within 6.1~6.3s) with no "forced kill"; screen_off_timeout restored to baseline; 9637 released; `pgrep` shows zero engines |
+| S04 | Rotation re-handshake | S01 + rotate | Old VD teardown → new handshake → back to STREAMING; new VD size correct |
 
-### P1 核心回归
+### P1 core regressions
 
-| ID | 场景 | 操作序列 | 断言 |
+| ID | Scenario | Operation sequence | Assertions |
 |---|---|---|---|
-| S05 | WiFi 断 5s | S01 + wifi_off + sleep5 + wifi_on | 自动重连回 STREAMING，无强制 kill。**无线拓扑适配**（2026-10-17）：断前在 B 预置 nohup 自恢复（8s/25s），断言预算放宽至 150s，恢复后先 `wait_stream_settled` 再断言 |
-| S06 | 飞行模式 | S01 + airplane ×2 | 恢复后重连或按设计停留在可重连态。同 S05 无线适配（探路窗 150s + 风暴静默） |
-| S07 | 拔发送端 USB | S01 + usb_pull | 会话继续 STREAMING（A↔B 走 WiFi，与 PC 无关） |
-| S08 | 接收端连点重连 | S01 + disconnect + connect 快速 ×2 | 不双开引擎、不抢 9637、最终收敛 STREAMING。**重连原语 = 重启 A 的 app**（手动连接 UI 不可达；force-stop + monkey 触发启动路径自动连接，2026-10-17 微验证）。重连产生新风暴 → 断言前必须 `wait_stream_settled`（150s） |
-| S09 | 会话中杀 client | S01 + kill_client | 收尾清理全过（同 S03 断言集） |
-| S10 | 会话中杀 server | S01 + kill_server | B 侧状态回落 WAITING/IDLE；引擎退出；无残留 |
-| S11 | 杀引擎进程 | S01 + kill_engine | 按设计检测到并恢复或干净降级；不出现静默挂死 |
-| S12 | 重装发送端 APK | S01 + reinstall | START_STICKY ~18s 重启后可重新建流 |
-| S13 | 锁屏/亮屏 | S01 + screen_off + screen_on | 按设计暂停/恢复；无 tex=0 静止（黑屏回归信号）。**判据 = A 屏（解码渲染面）非纯黑**——B 物理屏会话中被引擎熄掉恒黑不能判（2026-10-17 实证）；记账必须走 ok/bad（禁 `\|\| rc=1` 裸写法） |
-| S14 | IME 完整性 | S01 + ime_open | VD ≥ 1368 时键盘行完整；退出后 IME 恢复。**导航栏 Home 真机 content-desc = 中文「主页」**（英文 "Home" 只在 mock fixture）——双语定位 |
-| S15 | VD 上切 app | S01 + switch_app | 目标 app 上屏，无 ANR。磁贴解析 = `_grid_tile_bounds`（真机 dump 单行 XML + 父节点 text 空串，旧按行 grep 恒败）；解析失败按比例坐标兜底（x≈16%+24%×(n-1)，y≈11%） |
-| S16 | 最近任务 | S01 + 开最近任务 UI | RecentsParser 路径正常，目标 app 上前台。**产品缺口**：A 的 UI 无 Recents 入口（源码实证）——命中时判画面变化，未命中走兜底路径跳过画面判据（条件化，不算失败） |
+| S05 | WiFi down for 5s | S01 + wifi_off + sleep5 + wifi_on | Automatically reconnects back to STREAMING, no forced kill. **Wireless topology adaptation** (2026-10-17): before cutting, pre-stage a nohup self-recovery job on B (8s/25s), relax the assertion budget to 150s, and after recovery run `wait_stream_settled` before asserting |
+| S06 | Airplane mode | S01 + airplane ×2 | Reconnects after recovery, or stays in a re-connectable state by design. Same wireless adaptation as S05 (150s probe window + storm silence) |
+| S07 | Unplug sender USB | S01 + usb_pull | The session keeps STREAMING (A↔B goes over WiFi, independent of the PC) |
+| S08 | Receiver rapid re-connect | S01 + disconnect + connect quickly ×2 | No duplicate engine, no fight over 9637, finally converges to STREAMING. **The reconnect primitive = restarting A's app** (the manual-connect UI is unreachable; force-stop + monkey triggers the launch path's automatic connect, micro-verified 2026-10-17). Reconnecting produces a new storm → `wait_stream_settled` (150s) is mandatory before asserting |
+| S09 | Kill client mid-session | S01 + kill_client | Teardown cleanup fully passes (same assertion set as S03) |
+| S10 | Kill server mid-session | S01 + kill_server | B-side state falls back to WAITING/IDLE; the engine exits; no residue |
+| S11 | Kill engine process | S01 + kill_engine | Detected and recovered, or cleanly degraded, per design; no silent hang |
+| S12 | Reinstall sender APK | S01 + reinstall | After the START_STICKY restart (~18s) a stream can be established again |
+| S13 | Screen off/on | S01 + screen_off + screen_on | Pause/resume per design; no `tex=0` static state (black-screen regression signal). **Criterion = A's screen (decode/render surface) is not pure black** — B's physical screen is turned off by the engine during the session and is constantly black, so it cannot be used (verified 2026-10-17); accounting must go through ok/bad (bare `\|\| rc=1` is forbidden) |
+| S14 | IME integrity | S01 + ime_open | With VD ≥ 1368 the keyboard rows are complete; after exit the IME is restored. **On real devices the navigation bar Home content-desc is the Chinese 「主页」** (English "Home" only in the mock fixture) — bilingual location |
+| S15 | Switch apps on the VD | S01 + switch_app | The target app goes on screen, no ANR. Tile parsing = `_grid_tile_bounds` (the real-device dump is single-line XML + the parent node's text is an empty string, so the old per-line grep always failed); on parse failure fall back to proportional coordinates (x≈16%+24%×(n-1), y≈11%) |
+| S16 | Recents | S01 + open the recents UI | The RecentsParser path works and the target app goes to the foreground. **Product gap**: A's UI has no Recents entry (verified in source) — on a hit, assert the picture changed; on a miss, take the fallback path and skip the picture criterion (conditional, not counted as a failure) |
 
-### P2 扩展（P1 全绿后）
+### P2 extensions (after P1 is fully green)
 
-| ID | 场景 | 说明 |
+| ID | Scenario | Notes |
 |---|---|---|
-| S17 | 帧率/码率切换 | 若手机端 UI 暴露该设置；否则挪到桌面端 E2E。**实测（2026-10-17）**：会话中双端 UI 均无入口（该设置只在 A 启动屏 `CarLaunchScreen.kt` 暴露，会话中被 CarShell 流媒 UI 取代）→ SKIPPED(env)，未执行产品断言 |
-| S18 | 来电/通知 | 需真机 SIM 或 `adb` 模拟，ROM 差异大，标注可跳过 |
-| S19 | 20 轮会话循环 | 引擎 RSS/句柄无单调增长（首跑定阈值，宁缺勿假绿）；vd-server.log 无异常堆栈；末轮干净收尾。**2026-10-17 修正**：每轮重连原语 = `reconnect` op（重启 A 的 app——Eject 后 userDisconnected 持久化不自动重连 + 手动框不可达，首跑实证）。**第六轮暴露 2 处产品缺陷并修复**：① `screen_off_timeout` 被 kill 路径丢失恢复（原值落盘 `TimeoutSnapshotFile` + `effectiveSnapshot` 修正）；② 断连 Broken pipe 打完整堆栈（`isPeerDisconnect` 判定后不打） |
-| S20 | 双端同时重连竞态 | A、B 在 2s 内同时触发重连：`kill_client &`（B 拆）+ `reconnect &`（A 重启重连）并发，wait 后补 B 侧恢复（monkey 拉起 client 进 WAITING——force-stop 后不自启，原场景缺的一半）；断言前 `wait_stream_settled` 防重连风暴误判 |
-| S21 | 9637 被抢占 | 会话外用其他进程占 9637 → 建流应按设计失败并给出明确状态（**@expect: fail**——判向翻转，主操作应该失败）。**第六轮修正 ×2**：① `op_occupy_9637` 改 `nc -Lp`（`-l` 单连接即退 → A 首次连接耗掉占用者 → 首跑 UNEXPECTED-PASS 根因；`-L` 持续监听，真机冒烟两次连接后仍 LISTENING）；② 主操作改 `reconnect` 原语（批次 C 实证：9637 被占时 A 的失败尝试不产生 client.log 状态行 → `car_state=UNKNOWN` → 原 `op_connect` 走手动 UI 兜底而 ManualConnectBox 真机不可达 → 误判「ops 失败」FAIL；`reconnect` rc 恒 0 语义纯净，失败判向交由断言层的「未收敛」判定） |
-| S22 | 撤销调试授权 | adb_revoke 后重连 → 按设计引导重新授权，不静默失败 |
-| S23 | 音频镜像（含熄屏后持续出帧） | S01 + screen_off + sleep10 + screen_on。五条音频判据：① vd 帧计数 >0 且窗口内增长 + 速率下限（非严格线性）② 播放端 decoded>0 / starved==0 / underrun 不增长 ③ 静音补帧计数 >0（降观测项）④ 熄屏 10s 内帧仍增长（R7）⑤ 音频降级时视频轨存活。**覆盖面**：兜传输/解码链路断裂与「帧完全不出」；**不兜源侧静音**（漏 startRecording，需人工听觉回签）。Refs #13/#79 |
-| S25 | VD 连续切换 4 次（4~5 个应用） | S01 + `switch_app` ×4（磁贴 1~4：bilibili/小红书/番茄/百度地图；初始应用可能已在其中之一）。判据：① `[Window]` ≥4 行，末条 `n≥4`、顶层 `visReq=true`、旧应用 `visReq=false` ≥3；② 4 个被切换包名都在 `[Window]` 出现；③ 所有 `[Pipeline]` 统计行 `swapFails=0 sendDrops=0 glErr=0`（`q` 允许瞬时 1）且无 `tex=0`，末条 `tex` > 首条；④ 无 `[BLACK] decode still alive`。**不覆盖** #55/#58 的真实长视频/1 小时导航。Refs #15/#106 |
+| S17 | Frame rate/bitrate switching | If the phone-side UI exposes the setting; otherwise move it to the desktop E2E. **Measured (2026-10-17)**: neither end's UI has an entry during a session (the setting is only exposed on A's launch screen `CarLaunchScreen.kt`, and mid-session it is replaced by the CarShell streaming UI) → SKIPPED(env), no product assertions executed |
+| S18 | Incoming call/notification | Needs a physical SIM or `adb` simulation, with large ROM variance; marked as skippable |
+| S19 | 20-round session loop | Engine RSS/handles show no monotonic growth (threshold set on the first run; better missing than a false green); vd-server.log has no abnormal stacks; the last round tears down cleanly. **2026-10-17 correction**: the per-round reconnect primitive = the `reconnect` op (restart A's app — after Eject, userDisconnected is persisted and does not auto-reconnect, and the manual box is unreachable, verified on the first run). **The sixth round exposed 2 product defects, both fixed**: ① `screen_off_timeout` lost its restore on the kill path (original value persisted to `TimeoutSnapshotFile` + corrected by `effectiveSnapshot`); ② disconnect Broken pipe logged a full stack (after the `isPeerDisconnect` check it is no longer logged) |
+| S20 | Simultaneous reconnect race on both ends | A and B trigger reconnection within 2s: `kill_client &` (B tears down) + `reconnect &` (A restarts and reconnects) concurrently, then after wait, add B-side recovery (monkey launches the client into WAITING — it does not auto-start after force-stop, the missing half of the original scenario); `wait_stream_settled` before asserting to prevent false judgments from the reconnect storm |
+| S21 | 9637 occupied | Outside a session, another process occupies 9637 → stream setup should fail by design and report a clear state (**@expect: fail** — the direction is flipped: the main operation should fail). **Sixth-round corrections ×2**: ① `op_occupy_9637` changed to `nc -Lp` (`-l` exits after a single connection → A's first connection consumed the occupier → the root cause of the first run's UNEXPECTED-PASS; `-L` keeps listening, and on a real device it was still LISTENING after two smoke-test connections); ② the main operation changed to the `reconnect` primitive (batch C evidence: when 9637 is occupied, A's failed attempt produces no client.log status line → `car_state=UNKNOWN` → the original `op_connect` fell back to the manual UI, and ManualConnectBox is unreachable on real devices → misfired as an "ops failed" FAIL; `reconnect` always returns rc 0 with clean semantics, leaving the failure direction to the assertion layer's "not converged" judgment) |
+| S22 | Revoke debugging authorization | Reconnect after adb_revoke → re-authorization is prompted per design, no silent failure |
+| S23 | Audio mirroring (including continued frame output after screen-off) | S01 + screen_off + sleep10 + screen_on. Five audio criteria: ① vd frame count >0 and growing within the window + a rate floor (not strictly linear) ② playback side decoded>0 / starved==0 / underrun not growing ③ silence padding frame count >0 (downgraded to an observation item) ④ frames still growing within 10s of screen-off (R7) ⑤ the video track survives when audio is degraded. **Coverage**: catches transport/decode-chain breakage and "no frames at all"; **does not catch source-side silence** (missing startRecording, requires manual listening sign-off). Refs #13/#79 |
+| S25 | 4 consecutive VD switches (4~5 apps) | S01 + `switch_app` ×4 (tiles 1~4: bilibili/Xiaohongshu/Fanqie/Baidu Maps; the initial app may already be one of them). Criteria: ① `[Window]` ≥4 lines, last line `n≥4`, top layer `visReq=true`, old apps `visReq=false` ≥3; ② all 4 switched package names appear in `[Window]`; ③ all `[Pipeline]` stat lines have `swapFails=0 sendDrops=0 glErr=0` (`q` may momentarily be 1) and no `tex=0`, with the last `tex` > the first; ④ no `[BLACK] decode still alive`. **Does not cover** the real long-video/1-hour-navigation cases of #55/#58. Refs #15/#106 |
 
-## 5. 不变量监控规格（每轮必查）
+## 5. Invariant monitoring spec (checked every round)
 
-| 不变量 | 采集命令 | 通过判据 |
+| Invariant | Collection command | Pass criterion |
 |---|---|---|
-| 引擎进程 | B: `pgrep -f "[P]ipelineServer"` | 收尾后为空；会话中恰 1 个 |
-| 9637 监听 | B: `ss -ltn \| grep :9637` | 会话中有；收尾后无 |
-| 视频流存活 | vd-server.log 帧计数 / `Video on :9638` | 会话中持续增长 |
-| VD 点亮 | B: `dumpsys display`（DiLinkAutoVD real）+ A 屏 screencap | real 尺寸 = 握手下发值；**A 屏（解码渲染面）像素方差 > 0**（主判据）。VD 直截需 SF DisplayId 大数（`dumpsys SurfaceFlinger` 的 `Virtual Display <id>` 段；logical id 报 Status:-2），且空 launcher 恒黑——仅作辅助观测 |
-| 黑屏回归 | vd-server.log GlPipeline 帧日志 | 无 `tex=0` 或小值静止 |
-| ANR / 崩溃 | 双端 logcat scan `ANR in\|FATAL EXCEPTION\|Force Closed` | 0 命中 |
-| 屏幕超时哨兵 | B: `settings get system screen_off_timeout` | 会话中 2147483647；收尾后恢复基线（300000） |
-| 优雅退出 | vd-server.log 退出耗时 + 「强制 kill」字样 | 12s 预算内收敛；「强制 kill」出现即回归 |
-| 会话状态一致 | A 的 UI 状态 vs B 的 FileLog 状态 | 收敛到同一复合态（§3.2） |
+| Engine process | B: `pgrep -f "[P]ipelineServer"` | Empty after teardown; exactly 1 during a session |
+| 9637 listening | B: `ss -ltn \| grep :9637` | Present during a session; absent after teardown |
+| Video stream alive | vd-server.log frame count / `Video on :9638` | Continuously growing during a session |
+| VD lit up | B: `dumpsys display` (DiLinkAutoVD real) + A-screen screencap | real size = the value sent in the handshake; **A screen (decode/render surface) pixel variance > 0** (primary criterion). Capturing the VD directly requires the large SF DisplayId (the `Virtual Display <id>` section of `dumpsys SurfaceFlinger`; passing the logical id reports Status:-2), and an empty launcher is constantly black — auxiliary observation only |
+| Black-screen regression | vd-server.log GlPipeline frame log | No `tex=0` or stalling at a small value |
+| ANR / crash | Both ends' logcat scan `ANR in\|FATAL EXCEPTION\|Force Closed` | 0 hits |
+| Screen timeout sentinel | B: `settings get system screen_off_timeout` | 2147483647 during a session; baseline restored (300000) after teardown |
+| Graceful exit | vd-server.log exit duration + the "forced kill" string | Converges within the 12s budget; any occurrence of "forced kill" is a regression |
+| Session state consistency | A's UI state vs B's FileLog state | Converges to the same composite state (§3.2) |
 
-> 注意：断言串以双端**实测日志面**为准。`引擎已优雅退出`/`探针 GONE @+` 等串目前只在桌面端 desktop.log 出现过；A（app-server）与 B（FileLog）的等价串必须在 P0.5 摸出来后固化，不得照搬桌面端字符串。
+> Note: assertion strings are based on the **measured log surface** of both ends. Strings such as `引擎已优雅退出`/`探针 GONE @+` have so far only appeared in the desktop-side desktop.log; the equivalent strings for A (app-server) and B (FileLog) must be discovered in P0.5 and then frozen — desktop-side strings must not be copied over.
 
-## 6. L3 故障注入目录
+## 6. L3 fault injection catalog
 
-`kill -9` 随机进程（引擎/client/server）、`svc wifi`、飞行模式、`screen_off/on` 随机插入、会话中 `reinstall`。权重：常规 op 70% / 故障 op 30%。每 5 op 跑轻量不变量（引擎/端口/流存活），每 20 op 跑全套。物理 USB 拔插无法纯软件化，留人工开关。
+`kill -9` on a random process (engine/client/server), `svc wifi`, airplane mode, random `screen_off/on` insertion, `reinstall` mid-session. Weighting: normal ops 70% / fault ops 30%. Every 5 ops run lightweight invariants (engine/port/stream alive), every 20 ops run the full set. Physical USB plug/unplug cannot be fully software-driven and is left as a manual switch.
 
-## 7. 基础设施缺口与落地顺序
+## 7. Infrastructure gaps and landing order
 
-| 阶段 | 内容 | 产出 |
+| Phase | Content | Output |
 |---|---|---|
-| P0 | 修 `e2e-reconnect-cleanup.sh:109-113` serial 自动挑选（双机插入会挑错设备，PIN 会输错机器）；提交 `devices.sh`；补 `screencap_car` | 可用的双设备底座 |
-| P0.5 | 日志面勘察：B 的 FileLog 路径与关键行、A 的 logcat tag、A 的连接 UI 控件定位（uiautomator） | 断言串清单 |
-| P1 | `scripts/lib/asserts.sh`（不变量库）+ `scripts/e2e-dual-device.sh` 主编排 + S01~S04 | 双机最小闭环跑通 |
-| P2 | 补齐 S05~S16，每场景独立可重跑 | 核心回归网 |
-| P3 | `scripts/lib/explore.py`：L2 状态机遍历 | 竞态猎手 |
-| P4 | L3 fuzz + 夜间长稳 + triage 固化回路 | 无人值守 |
+| P0 | Fix the automatic serial selection in `e2e-reconnect-cleanup.sh:109-113` (with two devices plugged in it picks the wrong one, so the PIN is entered on the wrong machine); commit `devices.sh`; add `screencap_car` | A usable two-device foundation |
+| P0.5 | Log-surface survey: B's FileLog path and key lines, A's logcat tags, A's connect-UI widget locations (uiautomator) | Assertion string list |
+| P1 | `scripts/lib/asserts.sh` (invariant library) + `scripts/e2e-dual-device.sh` main orchestration + S01~S04 | Two-device minimum closed loop passing |
+| P2 | Complete S05~S16, each scenario independently re-runnable | Core regression net |
+| P3 | `scripts/lib/explore.py`: L2 state-machine traversal | Race hunter |
+| P4 | L3 fuzz + overnight long-run stability + triage solidification loop | Unattended |
 
-目录规划：`scripts/lib/asserts.sh`、`scripts/scenarios/*.sh`（每场景一文件，source asserts.sh）、`scripts/lib/explore.py`（python 编排 bash 场景，管序列/预算/现场冻结）。
+Directory plan: `scripts/lib/asserts.sh`, `scripts/scenarios/*.sh` (one file per scenario, sourcing asserts.sh), `scripts/lib/explore.py` (python orchestrating the bash scenarios, managing sequences/budgets/scene freezing).
 
-## 8. 风险与 ROM 差异
+## 8. Risks and ROM differences
 
-- **解锁**：MIUI 直输 PIN 成；Flyme 需上滑 + tap 聚焦（devices.sh 已双路径）。`input text` 失败静默 → 必须硬断言 `isKeyguardShowing=false`；禁重试循环（failsafe 5 次锁 30 min）。
-- **VD 点亮因机型而异**：实测 **MEIZU 20 Inf 作发送端（B）**，VD lighting 已随 S01 全绿实证（2026-10-16）；MI 9 作发送端未验证，若启用需先单独验证。
-- **Android 15 BAL**：MEIZU 20 Inf 上后台拉 Activity 路径受限（已知观察：`PhoneDisplayRestorer` Layer 2 无效）——涉及"后台拉起"的场景在 A 为 Android 15 时按已知限制调整预期，不算新 bug。
-- **A 的 UI 驱动**依赖 uiautomator dump 找连接按钮，ROM 差异需在 P0.5 校准坐标/控件 id。
-- **本机 fork/exec ~1s**：所有轮询按真实经过时间（SECONDS）设预算，禁「迭代次数 × sleep」。
-- **跑时电脑鼠标空闲**仅约束桌面端 E2E；双机方案全走 `adb shell input`，可无人值守——这是它相对桌面 E2E 的核心运维优势。
+- **Unlocking**: on MIUI a direct PIN entry works; Flyme needs a swipe-up + tap to focus (devices.sh already has both paths). `input text` failures are silent → a hard assertion on `isKeyguardShowing=false` is mandatory; no retry loops (failsafe: 5 failures lock for 30 min).
+- **VD lighting varies by model**: measured with the **MEIZU 20 Inf as sender (B)**; VD lighting was proven by S01 going fully green (2026-10-16); MI 9 as sender is unverified and must be validated separately before being enabled.
+- **Android 15 BAL**: on the MEIZU 20 Inf the background-activity-launch path is restricted (known observation: `PhoneDisplayRestorer` Layer 2 has no effect) — scenarios involving "background launch" should adjust expectations to the known limitations when A runs Android 15; this does not count as a new bug.
+- **A's UI driving** relies on a uiautomator dump to find the connect button; ROM differences require calibrating coordinates/widget ids in P0.5.
+- **Local fork/exec ~1s**: all polling budgets are based on real elapsed time (`SECONDS`); "iteration count × sleep" is forbidden.
+- **An idle PC mouse during the run** only constrains the desktop E2E; the dual-device approach goes entirely through `adb shell input` and can run unattended — that is its core operational advantage over the desktop E2E.

@@ -1,58 +1,58 @@
-# 功能：接收服务端"模式"按钮（车机反向控制 / 代理转发）+ VD→投屏自动降级
+# Feature: receiver "mode" button (car-side reverse control / proxy relay) + automatic VD→screencast degradation
 
-状态：**设计 + 可测核心已落地**；上层 UI/协议/采集接线与真机验证列为待办（见 §5）。
+Status: **design + testable core landed**; the upper-layer UI/protocol/capture wiring and real-device verification are listed as TODO (see §5).
 
-## 1. 需求（用户原述归纳）
-在"接收服务端"的接收页加一个 **"模式"** 按钮，在两形态间切换：
-1. **模拟车机·反向控制手机**：把对端投到本端、本端反控对端，"让我当车机"——走 **vd-server 模式**。
-2. **接收服务端作"代理服务端"**：接收端充当中继，把"手机投屏"**转发**到另一端（一键车机投到手机）。
+## 1. Requirements (summarized from the user's original description)
+Add a **"mode"** button to the receiving page of the "receiver server" that switches between two forms:
+1. **Emulate the car head unit · reverse-control the phone**: mirror the peer onto this end and have this end reverse-control the peer, "let me act as the car head unit" — goes through **vd-server mode**.
+2. **The receiver acts as a "proxy server"**: the receiving end acts as a relay and **forwards** the "phone screencast" to the other end (one tap to cast the car head unit to the phone).
 
-细则：VD 模式可用，但**很多手机品牌点不亮 VirtualDisplay 画面**，需在采集侧**自动降级**到投屏模式：`投影模式 → 息屏投屏 → 主屏投屏`。
+Details: VD mode is usable, but **many phone brands cannot get the VirtualDisplay picture to light up**, so the capture side must **automatically degrade** to screencast mode: `projection mode → screen-off screencast → main-screen screencast`.
 
-## 2. 代码勘察结论（现状）
-- 现有管线是**单向**：`手机采集 → 编码 H.264 → 接收端(车机 app-server / 桌面 app-desktop) 解码+回注触摸`。
-- 已具备：vd-server 采集（`vd-server/VirtualDisplayCreator`+`PipelineServer`）、手机侧 `VirtualDisplayClient`、车机 `CarConnectionService`、桌面 `DesktopConnectionService`、ADB/Shizuku 部署。
-- **不存在**：代理/中继转发、反向控制、`MediaProjection` 投屏采集、设备品牌 VD 兼容名单。这些是本功能要新增的。
+## 2. Code survey conclusions (current state)
+- The existing pipeline is **one-directional**: `phone capture → H.264 encode → receiver (car app-server / desktop app-desktop) decode + touch re-injection`.
+- Already available: vd-server capture (`vd-server/VirtualDisplayCreator`+`PipelineServer`), phone-side `VirtualDisplayClient`, car-side `CarConnectionService`, desktop `DesktopConnectionService`, ADB/Shizuku deployment.
+- **Not present**: proxy/relay forwarding, reverse control, `MediaProjection` screencast capture, device-brand VD compatibility allowlist. These are what this feature must add.
 
-## 3. 设计
-### 3.1 面向用户的两种"模式"（接收端态）
+## 3. Design
+### 3.1 The two user-facing "modes" (receiver-side state)
 ```
 enum class ReceiverMode {
-    REVERSE_CONTROL,   // 模拟车机·反向控制对端（vd-server 模式）
-    PROXY_RELAY,       // 本端作代理服务端，转发对端投屏
+    REVERSE_CONTROL,   // emulate the car head unit · reverse-control the peer (vd-server mode)
+    PROXY_RELAY,       // this end acts as a proxy server, forwarding the peer's screencast
 }
 ```
-- **REVERSE_CONTROL**：本端触发对端（或被本端代管）启动 vd-server；对端 VD 画面编码后发给本端；本端回注触摸 = 反向控制对端。
-- **PROXY_RELAY**：本端作为中继，把一端（源）的 video/input/lifecycle 流原样转发给另一端（目的）。源→本端→目的，本端只转发不解码（低延迟中继）。
+- **REVERSE_CONTROL**: this end triggers the peer (or a peer managed by this end) to start vd-server; the peer's VD picture is encoded and sent to this end; this end re-injects touch = reverse control of the peer.
+- **PROXY_RELAY**: this end acts as a relay and forwards one end's (source) video/input/lifecycle streams as-is to the other end (destination). Source → this end → destination; this end only forwards and does not decode (low-latency relay).
 
-### 3.2 采集侧降级阶梯（本回合已实现，平台无关）
-`protocol-core/ScreenMode.kt` + `CaptureModePolicy`：
-- 首选 VD（`VIRTUAL_DISPLAY`）；设备点不亮 VD 时 `preferred(vdLightingSupported=false)=PROJECTION_SCREEN_OFF`。
-- 运行时失败逐级降级：`VIRTUAL_DISPLAY → PROJECTION_SCREEN_OFF(息屏投屏) → PROJECTION_MAIN(主屏投屏) → (无)`。
-- `ladder()` 供 UI 展示"将依次尝试"。
-- 单测 `CaptureModePolicyTest`（6 例）已锁定契约。
+### 3.2 Capture-side degradation ladder (implemented this round, platform-independent)
+`protocol-core/ScreenMode.kt` + `CaptureModePolicy`:
+- VD preferred (`VIRTUAL_DISPLAY`); when the device cannot light up VD, `preferred(vdLightingSupported=false)=PROJECTION_SCREEN_OFF`.
+- Runtime failures degrade step by step: `VIRTUAL_DISPLAY → PROJECTION_SCREEN_OFF(screen-off screencast) → PROJECTION_MAIN(main-screen screencast) → (none)`.
+- `ladder()` is for the UI to show "what will be tried in order".
+- The unit test `CaptureModePolicyTest` (6 cases) already locks the contract.
 
-## 4. 精确接线落点（待办，按模块）
-| 模块 | 文件/类 | 改动 |
+## 4. Exact wiring points (TODO, by module)
+| Module | File/class | Change |
 |---|---|---|
-| `protocol-core` | 新增 `ReceiverMode`、降级结果帧 `DataMsg.SET_CAPTURE_MODE`/`ack` | 让两端就"当前采集模式"达成一致（握手或 control 帧） |
-| `app-client`（手机：VD/投屏源） | `service/ConnectionService`、`display/VirtualDisplayClient`、`service/PhoneDisplayRestorer` | 依据 `CaptureModePolicy` 选择 vd-server 采集或新增 `MediaProjection` 采集路径；VD 首帧超时→`fallbackFrom` |
-| `vd-server`（对端运行） | `PipelineServer`/`VirtualDisplayCreator` | 暴露"VD 是否点亮/首帧是否产出"信号，失败时上报以触发降级 |
-| `app-server` / `app-desktop`（接收端） | `CarLaunchScreen`（车机接收页）/ `DesktopWindow`（桌面接收页） | 加**"模式"按钮** + `ReceiverMode` 状态；PROXY_RELAY 走新中继通道 |
-| 设备兼容 | 新增 `VdBrandBlacklist`（或 Build.MODEL 规则）喂给 `preferred()` | 命中品牌/机型直接跳过 VD |
+| `protocol-core` | New `ReceiverMode`, degradation result frame `DataMsg.SET_CAPTURE_MODE`/`ack` | Let both ends agree on the "current capture mode" (handshake or control frame) |
+| `app-client` (phone: VD/screencast source) | `service/ConnectionService`, `display/VirtualDisplayClient`, `service/PhoneDisplayRestorer` | Choose vd-server capture or a newly added `MediaProjection` capture path based on `CaptureModePolicy`; VD first-frame timeout → `fallbackFrom` |
+| `vd-server` (running on the peer) | `PipelineServer`/`VirtualDisplayCreator` | Expose signals for "whether VD lit up / whether a first frame was produced", and report on failure to trigger degradation |
+| `app-server` / `app-desktop` (receiver) | `CarLaunchScreen` (car receive page) / `DesktopWindow` (desktop receive page) | Add the **"mode" button** + `ReceiverMode` state; PROXY_RELAY uses the new relay channel |
+| Device compatibility | New `VdBrandBlacklist` (or Build.MODEL rules) fed into `preferred()` | Skip VD directly on a matching brand/model |
 
-## 5. 本回合已交付 vs 待办
-**已交付（本机验证通过）**
-- `protocol-core`：`ScreenMode` + `CaptureModePolicy`（VD 优先 + 息屏→主屏降级阶梯）+ `CaptureModePolicyTest`(6)。
-- 全仓测试覆盖补齐：18 个新测试文件 / 139 用例全绿（见 `docs/IMPLEMENTATION_REPORT_TESTING.md`）。同报告 §5 另记录了后续的"为可测性重构"seam（ADB 帧/加解密、`Connection` 心跳可注入、`AssetSource`、`CarInstaller`、重连退避/图标预算纯函数，约 +44 用例，合计 183，全部行为不变）。
+## 5. Delivered this round vs TODO
+**Delivered (verified on the local machine)**
+- `protocol-core`: `ScreenMode` + `CaptureModePolicy` (VD preferred + screen-off→main-screen degradation ladder) + `CaptureModePolicyTest`(6).
+- Repo-wide test coverage completion: 18 new test files / 139 cases all green (see `docs/IMPLEMENTATION_REPORT_TESTING.md`). §5 of the same report also records the later "refactoring for testability" seams (ADB frames/crypto, injectable `Connection` heartbeat, `AssetSource`, `CarInstaller`, reconnect backoff/icon budget pure functions, roughly +44 cases, 183 in total, all behavior unchanged).
 
-**待办（需一次 brainstorm 敲定 UX + 真机验证，不建议盲改主连线）**
-1. 明确"接收服务端"到底是哪一端（`app-desktop` 是纯 JVM 无法 VD/screencast；VD/投屏降级须落在 Android 接收端）与两模式的 UX 文案/入口。
-2. `MediaProjection` 采集通道（息屏投屏/主屏投屏）新增实现 + 前台服务权限。
-3. PROXY_RELAY 的转发协议（不解码中继）与两端会话协商。
-4. VD "是否点亮"判据 + 各品牌降级验证（需真机矩阵）。
-5. "模式"按钮 UI + `ReceiverMode` 状态机接入现有 `CarLaunchScreen` / `DesktopWindow` 而不破坏现有连接/部署主线。
+**TODO (needs one brainstorm to settle the UX + real-device verification; blindly changing the main connection path is not recommended)**
+1. Settle which end the "receiver server" actually is (`app-desktop` is pure JVM and cannot do VD/screencast; the VD/screencast degradation must live on the Android receiving end) and the UX copy/entry points for the two modes.
+2. New `MediaProjection` capture channel (screen-off screencast/main-screen screencast) implementation + foreground service permission.
+3. The PROXY_RELAY forwarding protocol (relaying without decoding) and session negotiation between both ends.
+4. The criterion for "whether VD lit up" + per-brand degradation verification (needs a real-device matrix).
+5. The "mode" button UI + `ReceiverMode` state machine wired into the existing `CarLaunchScreen` / `DesktopWindow` without breaking the existing connection/deployment main line.
 
-## 6. 风险备注
-- 代理转发与反向控制都会改动现有连接/部署主线，缺真机验证下盲改风险高；建议按 §4 分模块、以 `CaptureModePolicy` 这类纯策略为锚点、逐块接入并配回归测试。
-- 设备品牌 VD 兼容名单需真机矩阵校准，先用 `preferred(vdLightingSupported=false)` 的显式开关兜底。
+## 6. Risk notes
+- Both proxy forwarding and reverse control touch the existing connection/deployment main line; making blind changes without real-device verification is high risk. Recommended: follow §4 module by module, anchor on pure policies such as `CaptureModePolicy`, wire in block by block, and pair each block with regression tests.
+- The device-brand VD compatibility allowlist needs calibration on a real-device matrix; for now, use the explicit switch `preferred(vdLightingSupported=false)` as a stopgap.
