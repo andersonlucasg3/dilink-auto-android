@@ -11,7 +11,7 @@ android {
         applicationId = "com.dilinkauto.server"
         minSdk = 26
         targetSdk = 34
-        // 版本号由根 build.gradle.kts 单点算出（issue #224），与 app-client 同源。
+        // 版本号由根 build.gradle.kts 单点算出，与 app-client 同源。
         versionCode = rootProject.extra["appVersionCode"] as Int
         versionName = rootProject.extra["appVersionName"] as String
 
