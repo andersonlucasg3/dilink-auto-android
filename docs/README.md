@@ -1,67 +1,82 @@
-# DiLink-Auto 文档
+# DiLink-Auto Documentation
 
-本目录是 DiLink-Auto 的开发者文档入口。面向用户的中文介绍请看仓库根目录的 [README.md](../README.md)。
+Entry point for the developer documentation. The user-facing introduction is the [README](../README.md) at the repository root.
 
-本 fork 面向中国手机 ROM + BYD DiLink 车机使用场景,并在 **比亚迪 秦PLUS DM-i 2023款 冠军版 55KM 领先型**(DiLink 4.0 低配,骁龙 439 / Android 9 / 1280x800)上做了针对性性能调优。语言分工:核心六篇(Setup / Architecture / Protocol / Client / Server / Progress)是英文,测试实施报告与功能提案是中文;本页与根目录中文 README 一为开发者视角、一为用户视角,互补而不重复。
+This repository is the original DiLink-Auto repository; in November 2026 it merged back the fork that kept the project alive, and it targets **Chinese phone ROMs + BYD DiLink head units**, tuned for the **entry-level DiLink 4.0** (Snapdragon 439 / Android 9 / 1280x800) on a BYD Qin PLUS DM-i 2023 Champion 55KM Leading.
 
-**仓库改动流程(issue → plan 追评 → worktree → PR → 对账/回签)是强制规范**,总览见根目录 [AGENTS.md](../AGENTS.md),操作细节见下表的 Issue Guide 与 PR Guide。
+**Languages:** canonical documentation is kept in **English**, with translations under `docs/<language>/`. README translations exist for pt-BR, zh-CN, fr, ru, be, kk, uk and uz; the deep-dive guides are currently complete in English and pt-BR.
 
-## 文档索引
+**The repository change process (issue → plan comment → worktree → PR → reconciliation/review) is mandatory**; the overview is in the root [AGENTS.md](../AGENTS.md), and the operational detail is in the Issue Guide and PR Guide below.
 
-| 文档 | 读者 | 内容 |
-|------|------|------|
-| [Setup Guide](./setup.md) | 用户 | 安装步骤、权限引导、故障排查、DiLink 4.0 低配车机注意事项 |
-| [Architecture](./architecture.md) | 开发者 | 模块设计、直连 VD 架构、连接流程、设计决策 |
-| [Protocol Specification](./protocol.md) | 开发者 | 线格式、消息类型(`VD_PORTS_BOUND`、`dpiOverride`)、端口分配 |
-| [Client (Phone) App](./client.md) | 开发者 | ConnectionService 编排器、VD 部署、车机自更新、应用允许列表 |
-| [Server (Car) App](./server.md) | 开发者 | 状态机、SurfaceView 解码器、三键导航栏、DPI 覆盖 |
-| [Progress Tracker](./progress.md) | 贡献者 | 功能状态、里程碑、fork 后的技术演进 |
-| [测试覆盖补齐实施报告](./IMPLEMENTATION_REPORT_TESTING.md) | 贡献者 | 全 6 模块测试补齐与 seam 批次(24 个新文件 / 183 用例)、锁定的跨模块不变量、可测性 seam 落地记录、未修隐患清单 |
-| [功能提案:双模接收端](./FEATURE_DUAL_MODE_RECEIVER.md) | 开发者 | 接收端「模式」按钮提案(车机反向控制 / 代理转发);设计 + 可测核心已落地,上层接线与真机验证待办 |
-| [Issue Guide](./ISSUE_GUIDE.md) | 贡献者 / Agent | 立单规范:标题 `type(scope)`、正文四要素、可粘贴的复现命令、`needs-repro` 与回签关闭 |
-| [PR Guide](./PR_GUIDE.md) | 贡献者 / Agent | 开 PR 规范:`Closes` / `Refs`、worktree 分支与命名、正文分段、基线验证、合并条件、对账与回签 |
-| [Release Guide](./release.md) | 维护者 / Agent | 正式签名 keystore 与 secrets、版本号与 tag 规则、发布步骤、`apksigner` 校验、**踩坑总账**与应急处置 |
+### Translation coverage
 
-> Windows 接收端(`app-desktop/`)暂未单独成文档:模块说明、链路与打包命令见根目录 [README.md](../README.md) 的「Windows 接收端」一节,链路与设计决策见 [architecture.md](./architecture.md)。
+| Language | README | Deep-dive guides | Process guides |
+|---|---|---|---|
+| English (canonical) | `README.md` | all | all |
+| Português (BR) | [pt-BR](./pt-BR/README.md) | setup, architecture, client, server, protocol, progress | issue, PR, release |
+| 简体中文 | [zh-CN](./zh-CN/README.md) | testing report, dual-mode proposal, both E2E documents | issue, PR, release |
+| Français · Русский · Беларуская · Қазақша · Українська · Oʻzbekcha | `README.md` only | — | — |
 
-## 与 upstream 的差异
+The **GitHub Pages site** ([`index.html`](./index.html), assets in [`css/`](./css/style.css) and [`js/`](./js/i18n.js)) is the same documentation served with a language switcher and live Release badges; it is generated from static files, so it must be updated by hand when the facts below change.
 
-本 fork 相对 [andersonlucasg3/dilink-auto-android](https://github.com/andersonlucasg3/dilink-auto-android) 的主要技术路线(详见各文档):
+## Documentation index
 
-- **直连 VD 架构**:VD Server 直接绑定 9638(视频)/9639(输入)/9640(音频)端口与接收端对话,手机端不做视频/触摸/音频中继。
-- **音频镜像完整闭环**:9640 独立 TCP 连接、AAC-LC 48kHz 立体声(128kbps)、46.875 fps 恒定静音补帧与统计、车机端 AudioPlayer 150ms 抖动缓冲、双向能力位(`FEATURE_AUDIO`)协商与防假绿契约闭环。
-- **接收端可替换**:同一份协议跑在车机(`app-server`)或 Windows(`app-desktop`);纯 JVM 的部分抽到 `protocol-core`,三端共用。
-- **DiLink 4.0 低配车机适配**:编码尺寸 cap 1920x1080、码率 4Mbps、20fps、TextureView → SurfaceView、线程优先级、图标缓存清理等九项优化。
-- **API 28 车机兼容**:移除 API 29+ 的硬件解码器 picker,minSdk 提到 26。
-- **导航栏重设计**:精简为 Eject / Home / Back 三键;通知转发、最近任务栏、时钟、网络信息全部移除。
-- **应用允许列表 + 应用置顶**:手机端选择推送到车机的应用,车机端长按置顶。
-- **车机端启动 DPI 覆盖**:解决 1280x800 默认 DPI 偏小。
-- **持续黑屏自愈**:判据在 `protocol-core`(`BlackScreenDetector`),车机端重握手、桌面端自动重连(有次数上限)。
-- **全模块单元测试**:6 个模块均有 `src/test`(此前 `vd-server` / `protocol` 为零覆盖),JUnit4 + kotlinx-coroutines-test,**611 个 `@Test` 用例 / 86 个测试文件**(Android 模块按 debug+release 双变体合计执行 862 个,2026-10-10 全绿);其中 2026-10 的补齐与 seam 批次新增 24 个文件、183 个用例,后续实机回归轮再增 4 个(`ShellSyncPointTest` / `StopRequestTest` / `EncoderCandidateOrderTest` / `RecentsParserTest`);清单与锁定的跨模块不变量见 [IMPLEMENTATION_REPORT_TESTING.md](./IMPLEMENTATION_REPORT_TESTING.md)。
-- **安全加固**:协议不再无条件信任对端(畸形帧不再杀进程、payload 上限 128MB → 16MB)、VD 通道鉴权、`VdDeploy` shell 引用、桌面端部署入参校验、release keystore 移出仓库。
-- **简体中文**:client 和 server 都加了 `values-zh-rCN` / `values-zh`。
+| Document | Audience | Content |
+|----------|----------|---------|
+| [Setup Guide](./setup.md) | User | Installation steps, permission onboarding, troubleshooting, entry-level DiLink 4.0 notes |
+| [Architecture](./architecture.md) | Developer | Module design, direct VD architecture, connection flow, design decisions |
+| [Protocol Specification](./protocol.md) | Developer | Wire format, message types (`VD_PORTS_BOUND`, `dpiOverride`), port allocation |
+| [Client (Phone) App](./client.md) | Developer | ConnectionService orchestration, VD deployment, car app self-update, app allowlist |
+| [Server (Car) App](./server.md) | Developer | State machine, SurfaceView decoder, three-button nav bar, DPI override |
+| [Progress Tracker](./progress.md) | Contributor | Feature status, milestones, evolution after the fork |
+| [Test coverage implementation report](./IMPLEMENTATION_REPORT_TESTING.md) | Contributor | Test coverage across all 6 modules, locked cross-module invariants, implemented testability seams, open risks |
+| [Feature proposal: dual-mode receiver](./FEATURE_DUAL_MODE_RECEIVER.md) | Developer | Receiver "mode" button (car reverse control / proxy forwarding); design and testable core done, wiring and live verification pending |
+| [Issue Guide](./ISSUE_GUIDE.md) | Contributor / Agent | Issue norms: `type(scope)` title, four required elements, pasteable reproduction command, `needs-repro` and sign-off |
+| [PR Guide](./PR_GUIDE.md) | Contributor / Agent | PR norms: `Closes` / `Refs`, worktree branches and naming, sections, baseline verification, merge conditions, reconciliation and sign-off |
+| [Release Guide](./release.md) | Maintainer / Agent | Official signing keystore and secrets, version and tag rules, publishing steps, `apksigner` verification, pitfalls and emergency procedures |
+| [Two-phone E2E runbook](./e2e-dual-device-runbook.md) | Contributor | Real-device two-phone end-to-end runbook |
+| [Two-phone E2E scenarios](./e2e-scenarios.md) | Contributor | Scenario matrix and exploration strategy for the two-phone end-to-end suite |
 
-## 已移除的功能(相对 upstream)
+> The Windows receiver (`app-desktop/`) has no dedicated document yet: module notes, transport and packaging commands are in the "Windows receiver" section of the root [README](../README.md), and the transport and design decisions are in [architecture.md](./architecture.md).
 
-- 通知转发(手机通知 → 车机屏):导航栏通知按钮、通知列表、`NotificationService`、`FOCUSED_APP` / `APP_SHORTCUTS` / `NOTIFICATION_*` 协议消息全部删除。
-- 最近任务栏、时钟、网络信息。
+## Differences from the pre-merge upstream
 
-## 未实现
+The main technical direction of this repository relative to the last upstream state (see each document for details):
 
-- 媒体控制、导航小部件。（音频流镜像已在 1.0.3 实现闭环）
+- **Direct VD architecture:** the VD server binds 9638 (video), 9639 (input) and 9640 (audio) and talks to the receiver directly; the phone relays nothing.
+- **Complete audio mirroring loop:** dedicated 9640 TCP connection, AAC-LC 48 kHz stereo at 128 kbps, constant silence padding at 46.875 fps with statistics, 150 ms jitter buffer on the car, two-way `FEATURE_AUDIO` capability negotiation and an anti-false-green contract.
+- **Replaceable receiver:** the same protocol runs on the car (`app-server`) or on Windows (`app-desktop`); the pure-JVM part lives in `protocol-core` and is shared by all three.
+- **Entry-level DiLink 4.0 tuning:** encode size capped at 1920x1080, 4 Mbps, 20 fps, TextureView → SurfaceView, thread priorities, icon cache cleanup, and more.
+- **API 28 head-unit compatibility:** the API 29+ hardware-decoder picker was removed and `minSdk` raised to 26.
+- **Nav bar redesign:** Eject / Home / Back; notification forwarding, recents bar, clock and network info were removed.
+- **App allowlist and app pinning:** the phone chooses which apps reach the car; the car long-presses to pin.
+- **Car-side startup DPI override:** fixes the too-small default DPI on 1280x800.
+- **Sustained black-screen self-healing:** the detector lives in `protocol-core` (`BlackScreenDetector`); the car re-handshakes and the desktop reconnects (with a retry cap).
+- **Unit tests in every module:** all 6 modules have a `src/test` source set (previously `vd-server` and `protocol` had zero coverage), JUnit4 + kotlinx-coroutines-test, 1,200+ `@Test` cases across 100+ test files; the inventory and locked invariants are in [IMPLEMENTATION_REPORT_TESTING.md](./IMPLEMENTATION_REPORT_TESTING.md).
+- **Security hardening:** the protocol no longer trusts peers unconditionally (malformed frames no longer kill the process, payload cap 128 MB → 16 MB), VD channel authorization, `VdDeploy` shell quoting, desktop deploy argument validation, release keystore moved out of the repository.
+- **Simplified Chinese UI:** `values-zh-rCN` / `values-zh` for both client and server.
 
-## 已知隐患(测试/审计发现,尚未修复)
+## Features removed relative to the pre-merge upstream
 
-以下条目都已用**特征化测试固定现状**(改动属产品决策,未擅自修改),源码与报告一致:
+- Notification forwarding (phone notifications → car screen): nav-bar notification button, notification list, `NotificationService`, and the `FOCUSED_APP` / `APP_SHORTCUTS` / `NOTIFICATION_*` protocol messages are all gone.
+- Recents bar, clock, network info.
 
-| 编号 | 位置 | 现象 |
-|------|------|------|
-| C-5 | `app-client` `Versioning` / `CarAppInstaller` | 车机未安装时 `readInstalledVersion` 返回 `"0"`;若内嵌 `versionName` 也是 `0` / `0.0` / `0.0.0` 形式,比较结果判为"已最新",**跳过本应进行的首装**。当前 `1.0.0` 不触发 |
-| C-6 | `app-client` `InstallStatus.parse` | 状态串由 `context.getString` 本地化产出,分类却只按英文子串;中文等非英文 locale 全部落入 `IDLE`(无进度、无错误),且 `"not reachable"` / `"Invalid IP"` 也不归类为 ERROR。建议改走结构化状态枚举 |
-| S-02 | `vd-server` `CarCommandRouter.dispatch` | `LAUNCH_APP` / `APP_UNINSTALL` 的 decode 未加保护(包名已有 `shellQuote` + 解码器形状校验),恶意包名仍能让读帧线程抛异常;`APP_INFO` 分支有 try/catch |
-| B-05 | `app-client` `embedServerApk`(`app-client/build.gradle.kts:223-249`) | 曾固定内嵌 `app-server-debug.apk`。引入正式签名后会出现车机自更新签名不匹配;**已修复(issue #37)**:按客户端变体内嵌 release / debug 车机包,`build-release.yml` 另有证书摘要比对门禁 |
-| — | 解码器重启竞争 | 偶发花屏,下一个关键帧(~1s)恢复,见根 README「已知限制」 |
+## Not implemented
 
-## 下载
+- Media controls, navigation widgets. (Audio streaming mirroring is complete since 1.0.3.)
 
-代码版本与 Release tag 一一对应,以 [Releases](https://github.com/andersonlucasg3/dilink-auto-android/releases/latest) 为准。当前代码版本:`app.versionName = 20261117-2315`(`versionCode` 由它派生出 `26111723`,见 [Release Guide](./release.md) §1)。
+## Known risks (found by tests/audits, not fixed)
+
+Each item is pinned by a characterization test (changing them is a product decision), and code and report agree:
+
+| ID | Location | Symptom |
+|----|----------|---------|
+| C-5 | `app-client` `Versioning` / `CarAppInstaller` | `readInstalledVersion` returns `"0"` when the car app is not installed; if the embedded `versionName` is also `0` / `0.0` / `0.0.0`, the comparison says "already up to date" and **skips the first install**. The current `0.19.0` does not trigger it |
+| C-6 | `app-client` `InstallStatus.parse` | The status string is localized via `context.getString`, but classification matches English substrings; Chinese and other non-English locales all fall into `IDLE` (no progress, no error), and `"not reachable"` / `"Invalid IP"` are not classified as ERROR. A structured status enum is the suggested fix |
+| S-02 | `vd-server` `CarCommandRouter.dispatch` | `LAUNCH_APP` / `APP_UNINSTALL` decode has no guard (package names go through `shellQuote` plus a decoder shape check), so a malicious package name can still make the read thread throw; the `APP_INFO` branch has a try/catch |
+| B-05 | `app-client` `embedServerApk` (`app-client/build.gradle.kts`) | It used to embed `app-server-debug.apk` unconditionally, which breaks car self-update signature matching once official signing is used. **Fixed (issue #37):** the embedded car package follows the client variant (release/debug), and `build-release.yml` has a certificate digest comparison gate |
+| — | Decoder restart race | Occasional visual glitches, recovered by the next keyframe (~1 s); see "Known limitations" in the root README |
+
+## Download
+
+Code versions map one-to-one to Release tags; see [Releases](https://github.com/andersonlucasg3/dilink-auto-android/releases/latest). Current code version: `app.versionName = 0.19.0` (`versionCode 26111724`, see [Release Guide](./release.md) §1).

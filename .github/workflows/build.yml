@@ -11,12 +11,13 @@ permissions:
 
 jobs:
   build:
-    # 纯门禁 workflow：push 与 pull_request 跑同一条 debug 编译 + 单测。
-    # 统一走 GitHub 托管 runner（ubuntu-latest）：本仓库没有 self-hosted
-    # runner，写成 self-hosted 会让分支/tag 的 job 永远 queued（见 issue #70
-    # 之前的 "发了没反应"）。发布 APK 是 tag 触发的 build-release.yml /
-    # build-pre-release.yml 的职责，这里不跑 assembleRelease，也不注入任何
-    # 签名 secret。Audit B-03 的 cache 投毒防护仍保留：PR 只读缓存，push 可写。
+    # Pure gate workflow: push and pull_request run the same debug build + unit tests.
+    # Everything runs on GitHub-hosted runners (ubuntu-latest): this repository has no
+    # self-hosted runner, so `self-hosted` would leave branch/tag jobs queued forever
+    # (the "pushed, nothing happened" failure before the CI fix). Publishing APKs is the
+    # job of the tag-triggered build-release.yml / build-pre-release.yml; this workflow
+    # does not run assembleRelease and injects no signing secrets. The audit B-03 cache
+    # poisoning protection stays: PRs get a read-only cache, pushes may write.
     runs-on: ubuntu-latest
 
     steps:
@@ -51,11 +52,12 @@ jobs:
               > /dev/null
           fi
 
-      # 门禁命令与 docs/PR_GUIDE.md「开 PR 前自查」对齐：debug 编译 + 单测。
-      # 不注入任何签名 secret —— 这条 job 不产发布产物，audit B-09/F-09 的
-      # 「secrets 不进 PR」要求在这里升级为「secrets 不进 build.yml」。
-      # :protocol-core:test 必须进 CI：FrameCodecWriteTimeoutTest 是 #70 的
-      # 回归用例，之前只在人肉单测里跑，Linux 上的假红没人发现。
+      # The gate matches docs/PR_GUIDE.md "self-check before opening a PR": debug build + unit tests.
+      # No signing secret is injected — this job produces no release artifact, which upgrades the
+      # audit B-09/F-09 "no secrets in PRs" rule to "no secrets in build.yml".
+      # :protocol-core:test must stay in CI: FrameCodecWriteTimeoutTest is the #70 regression
+      # case, and it used to run only in manual local test runs, so its false red on Linux went
+      # unnoticed.
       - name: Build and test
         run: |
           chmod +x gradlew

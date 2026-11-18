@@ -1,18 +1,15 @@
 name: Build (Release)
 
-# 正式发版：日期-时间 tag（issue #224）。
+# 正式发版：语义化版本 tag（vX.Y.Z），沿用本仓库既有编号体系。
 #
-# `v20261117-2315` → 当天那一轮迭代。tag 规则与 gradle.properties 的
+# `v0.19.0` → 一次正式发布。tag 规则与 gradle.properties 的
 # app.versionName 必须逐字一致，否则包里的版本号与 Release 标题对不上。
 #
-# GitHub 的 tag 过滤器不是正则：`+` 表示「前一个字符一次或多次」，
-# `{8}` 这类量词不生效，必须把每一位写出来（见 docs/release.md §5 坑 9）。
-# 历史三段式 tag（v1.0.2 / v1.0.3）保留在过滤里，那些 tag 已经发过，
-# 这里只是让它们在新规则下也不会误触发（`!*dev*` 同样保留）。
+# GitHub 的 tag 过滤器不是正则：`+` 表示「前一个字符一次或多次」。
+# `!*dev*` 排除预发布 tag（预发布走 build-pre-release.yml）。
 on:
   push:
     tags:
-      - 'v[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9]'
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - '!*dev*'
 
@@ -96,23 +93,26 @@ jobs:
             exit 1
           fi
 
-      # issue #224：tag 与包内版本号必须逐字一致，否则 Release 标题写的版本
-      # 和用户装上的版本对不上，现场取证会被误导。
-      # 日期-时间 tag 走这里；历史三段式 tag 不做该校验（那些 tag 已发布）。
+      # tag 与包内版本号必须逐字一致，否则 Release 标题写的版本和用户装上的
+      # 版本对不上，现场取证会被误导。正式流水线只接受无 -dev 后缀的语义化 tag。
       - name: Verify tag matches versionName
         env:
           TAG: ${{ github.ref_name }}
         run: |
           VERSION_NAME="${TAG#v}"
-          if printf '%s' "$VERSION_NAME" | grep -Eq '^[0-9]{8}-[0-9]{4}$'; then
-            FILE_VERSION=$(grep '^app.versionName' gradle.properties | sed 's/.*=//' | tr -d '\r')
-            echo "tag=$VERSION_NAME gradle.properties=$FILE_VERSION"
-            if [ "$VERSION_NAME" != "$FILE_VERSION" ]; then
-              echo "ERROR: tag($VERSION_NAME) 与 gradle.properties 的 app.versionName($FILE_VERSION) 不一致（issue #224）" >&2
-              exit 1
-            fi
-          else
-            echo "非日期-时间 tag（$VERSION_NAME），跳过版本串一致性校验"
+          if printf '%s' "$VERSION_NAME" | grep -Eq -- '-dev'; then
+            echo "ERROR: 正式发布不接受预发布 tag（$VERSION_NAME），请走 Build (Pre-Release)" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$VERSION_NAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: tag（$VERSION_NAME）不是语义化版本 vX.Y.Z" >&2
+            exit 1
+          fi
+          FILE_VERSION=$(grep '^app.versionName' gradle.properties | sed 's/.*=//' | tr -d '\r')
+          echo "tag=$VERSION_NAME gradle.properties=$FILE_VERSION"
+          if [ "$VERSION_NAME" != "$FILE_VERSION" ]; then
+            echo "ERROR: tag($VERSION_NAME) 与 gradle.properties 的 app.versionName($FILE_VERSION) 不一致" >&2
+            exit 1
           fi
 
       - name: Rename APKs

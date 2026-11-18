@@ -1,13 +1,16 @@
 name: Sync Main → Develop
 
-# git-flow 回灌：main 上发版/热修后，把 main 回灌到 develop，避免两条线长期分叉。
+# git-flow back-merge: after a release or hotfix on main, bring main back into develop so the
+# two lines do not diverge for long.
 #
-# 注意：本仓库的 ruleset（Default protected branches，id 15567815）对 main 与
-# develop 都启用了 `pull_request` 规则，**禁止直推**。所以这里不能 `git push
-# origin develop`（会被 GH013 拒绝，issue #76），改为自动开一个 main→develop 的
-# 回灌 PR，PR 上照常跑 `Build` 门禁，合并后完成回灌。
+# Note: this repository's ruleset (Default protected branches, id 15567815) enables the
+# `pull_request` rule on both main and develop, so **direct pushes are forbidden**. That is why
+# this workflow cannot `git push origin develop` (rejected with GH013, issue #76) and instead
+# opens a main→develop back-merge PR automatically; the PR runs the normal `Build` gate and the
+# back-merge finishes when it is merged.
 #
-# 幂等：develop 已包含 main 时直接退出；已有 open 的回灌 PR 时不重复开。
+# Idempotent: exits immediately when develop already contains main, and does not open a second
+# PR while a back-merge PR is already open.
 on:
   push:
     branches: [main]
@@ -32,19 +35,19 @@ jobs:
           git fetch origin main develop
 
           if git merge-base --is-ancestor origin/main origin/develop; then
-            echo "develop 已包含 main，无需回灌"
+            echo "develop already contains main, no back-merge needed"
             exit 0
           fi
 
           existing=$(gh pr list --base develop --head main --state open \
             --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            echo "已有 open 的回灌 PR #$existing，跳过"
+            echo "back-merge PR #$existing is already open, skipping"
             exit 0
           fi
 
           gh pr create \
             --base develop \
             --head main \
-            --title "chore: 回灌 main 到 develop（$(date -u +%Y-%m-%d)）" \
-            --body "main 有新提交（$(git rev-parse --short origin/main)），自动回灌到 develop，保持 git-flow 两条线同步。由 .github/workflows/sync-main-to-develop.yml 自动创建。"
+            --title "chore: back-merge main into develop ($(date -u +%Y-%m-%d))" \
+            --body "main has new commits ($(git rev-parse --short origin/main)); back-merging them into develop automatically to keep the two git-flow lines in sync. Created by .github/workflows/sync-main-to-develop.yml."
